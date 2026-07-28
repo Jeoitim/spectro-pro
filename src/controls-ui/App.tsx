@@ -1,6 +1,6 @@
 import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 
-import { PitchAlgorithm } from '../analysis';
+import { AnalysisOptions, PitchAlgorithm } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { RenderParameters } from '../spectrogram-render';
 
@@ -38,10 +38,24 @@ export interface AppCallbacks {
     onExport: () => void;
     onModeChange: (mode: SpectrogramMode) => void;
     onPitchAlgorithmChange: (algorithm: PitchAlgorithm) => void;
+    onAnalysisChange: (parameters: Partial<AnalysisOptions>) => void;
+    onLayerDisplayChange: (parameters: Partial<LayerDisplayOptions>) => void;
     onDisplayChange: (parameters: Partial<RenderParameters>) => void;
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onNavigate: (amount: number) => void;
+}
+
+export interface LayerDisplayOptions {
+    pitchFloorHz: number;
+    pitchCeilingHz: number;
+    pitchLineWidth: number;
+    formantsToDisplay: number;
+    formantDynamicRangeDb: number;
+    formantDotSize: number;
+    intensityFloorDbSpl: number;
+    intensityCeilingDbSpl: number;
+    intensityLineWidth: number;
 }
 
 const EMPTY_SNAPSHOT: LiveSnapshot = {
@@ -86,6 +100,8 @@ export default function App({
     onExport,
     onModeChange,
     onPitchAlgorithmChange,
+    onAnalysisChange,
+    onLayerDisplayChange,
     onDisplayChange,
     onOverlayChange,
     onInspect,
@@ -96,6 +112,9 @@ export default function App({
     const [statusMessage, setStatusMessage] = useState('选择麦克风或音频文件开始');
     const [mode, setMode] = useState<SpectrogramMode>('broadband');
     const [pitchAlgorithm, setPitchAlgorithm] = useState<PitchAlgorithm>('yin');
+    const [settingsTab, setSettingsTab] = useState<
+        'spectrogram' | 'pitch' | 'formants' | 'intensity'
+    >('spectrogram');
     const [snapshot, setSnapshot] = useState<LiveSnapshot>(EMPTY_SNAPSHOT);
     const [cursor, setCursor] = useState<CursorSnapshot | null>(null);
     const [pitchVisible, setPitchVisible] = useState(true);
@@ -110,6 +129,22 @@ export default function App({
     const [maxFrequency, setMaxFrequency] = useState(5500);
     const [scale, setScale] = useState<'linear' | 'mel'>('linear');
     const [gradientName, setGradientName] = useState('Aurora');
+    const [pitchFloor, setPitchFloor] = useState(75);
+    const [pitchCeiling, setPitchCeiling] = useState(500);
+    const [voicingThreshold, setVoicingThreshold] = useState(0.6);
+    const [pitchLineWidth, setPitchLineWidth] = useState(2.5);
+    const [maximumFormants, setMaximumFormants] = useState(5);
+    const [formantsToDisplay, setFormantsToDisplay] = useState(5);
+    const [formantCeiling, setFormantCeiling] = useState(5500);
+    const [formantWindowMs, setFormantWindowMs] = useState(25);
+    const [preEmphasisFrom, setPreEmphasisFrom] = useState(50);
+    const [formantDynamicRange, setFormantDynamicRange] = useState(30);
+    const [formantDotSize, setFormantDotSize] = useState(2.4);
+    const [intensityPitchFloor, setIntensityPitchFloor] = useState(75);
+    const [intensityFloor, setIntensityFloor] = useState(50);
+    const [intensityCeiling, setIntensityCeiling] = useState(100);
+    const [intensityLineWidth, setIntensityLineWidth] = useState(2.5);
+    const [splCalibration, setSplCalibration] = useState(0);
     const [timeOffset, setTimeOffset] = useState(0);
     const fileRef = useRef<HTMLInputElement | null>(null);
 
@@ -154,6 +189,64 @@ export default function App({
         gradientName,
         onDisplayChange,
     ]);
+
+    useEffect(() => {
+        onAnalysisChange({
+            pitchAlgorithm,
+            minPitchHz: pitchFloor,
+            maxPitchHz: pitchCeiling,
+            voicingThreshold,
+            maximumFormants,
+            formantCeilingHz: formantCeiling,
+            formantWindowLengthSeconds: formantWindowMs / 1000,
+            preEmphasisFromHz: preEmphasisFrom,
+            intensityPitchFloorHz: intensityPitchFloor,
+            splCalibrationDb: splCalibration,
+        });
+    }, [
+        pitchAlgorithm,
+        pitchFloor,
+        pitchCeiling,
+        voicingThreshold,
+        maximumFormants,
+        formantCeiling,
+        formantWindowMs,
+        preEmphasisFrom,
+        intensityPitchFloor,
+        splCalibration,
+        onAnalysisChange,
+    ]);
+
+    useEffect(() => {
+        onLayerDisplayChange({
+            pitchFloorHz: pitchFloor,
+            pitchCeilingHz: pitchCeiling,
+            pitchLineWidth,
+            formantsToDisplay,
+            formantDynamicRangeDb: formantDynamicRange,
+            formantDotSize,
+            intensityFloorDbSpl: intensityFloor,
+            intensityCeilingDbSpl: intensityCeiling,
+            intensityLineWidth,
+        });
+    }, [
+        pitchFloor,
+        pitchCeiling,
+        pitchLineWidth,
+        formantsToDisplay,
+        formantDynamicRange,
+        formantDotSize,
+        intensityFloor,
+        intensityCeiling,
+        intensityLineWidth,
+        onLayerDisplayChange,
+    ]);
+
+    useEffect(() => {
+        setFormantsToDisplay((current) =>
+            Math.min(current, Math.ceil(maximumFormants))
+        );
+    }, [maximumFormants]);
 
     useEffect(() => {
         onOverlayChange(
@@ -386,29 +479,53 @@ export default function App({
                             <span className="axis-title pitch-color">基频 Hz</span>
                             {mode === 'broadband' ? (
                                 <>
-                                    <span className="top pitch-color">500</span>
-                                    <span className="mid pitch-color">290</span>
-                                    <span className="bottom pitch-color">75</span>
+                                    <span className="top pitch-color">
+                                        {pitchCeiling}
+                                    </span>
+                                    <span className="mid pitch-color">
+                                        {Math.round((pitchFloor + pitchCeiling) / 2)}
+                                    </span>
+                                    <span className="bottom pitch-color">
+                                        {pitchFloor}
+                                    </span>
                                 </>
                             ) : (
                                 <>
                                     <span
                                         className="spectral-pitch-mark pitch-color"
-                                        style={{ top: `${(1 - 500 / maxFrequency) * 100}%` }}
+                                        style={{
+                                            top: `${
+                                                (1 - pitchCeiling / maxFrequency) * 100
+                                            }%`,
+                                        }}
                                     >
-                                        500
+                                        {pitchCeiling}
                                     </span>
                                     <span
                                         className="spectral-pitch-mark pitch-color"
-                                        style={{ top: `${(1 - 290 / maxFrequency) * 100}%` }}
+                                        style={{
+                                            top: `${
+                                                (1 -
+                                                    (pitchFloor + pitchCeiling) /
+                                                        2 /
+                                                        maxFrequency) *
+                                                100
+                                            }%`,
+                                        }}
                                     >
-                                        290
+                                        {Math.round(
+                                            (pitchFloor + pitchCeiling) / 2
+                                        )}
                                     </span>
                                     <span
                                         className="spectral-pitch-mark pitch-color"
-                                        style={{ top: `${(1 - 75 / maxFrequency) * 100}%` }}
+                                        style={{
+                                            top: `${
+                                                (1 - pitchFloor / maxFrequency) * 100
+                                            }%`,
+                                        }}
                                     >
-                                        75
+                                        {pitchFloor}
                                     </span>
                                 </>
                             )}
@@ -479,10 +596,17 @@ export default function App({
                             <span className="top">{maxFrequency} Hz</span>
                             {mode === 'broadband' && (
                                 <>
-                                    <span className="spl-top intensity-color">100 dB SPL*</span>
-                                    <span className="spl-mid intensity-color">75 dB</span>
+                                    <span className="spl-top intensity-color">
+                                        {intensityCeiling} dB SPL*
+                                    </span>
+                                    <span className="spl-mid intensity-color">
+                                        {Math.round(
+                                            (intensityFloor + intensityCeiling) / 2
+                                        )}{' '}
+                                        dB
+                                    </span>
                                     <span className="spl-bottom intensity-color">
-                                        50 dB SPL*
+                                        {intensityFloor} dB SPL*
                                     </span>
                                 </>
                             )}
@@ -607,105 +731,468 @@ export default function App({
                     </button>
                 </div>
 
-                <label className="setting">
-                    <span>
-                        灵敏度 <em>{Math.round(sensitivity * 100)}%</em>
-                    </span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={sensitivity}
-                        onChange={(event) => setSensitivity(Number(event.target.value))}
-                    />
-                </label>
-                <label className="setting">
-                    <span>
-                        对比度 <em>{Math.round(contrast * 100)}%</em>
-                    </span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={contrast}
-                        onChange={(event) => setContrast(Number(event.target.value))}
-                    />
-                </label>
-                <label className="setting">
-                    <span>
-                        最高频率 <em>{maxFrequency} Hz</em>
-                    </span>
-                    <input
-                        type="range"
-                        min={3000}
-                        max={10000}
-                        step={100}
-                        value={maxFrequency}
-                        onChange={(event) => setMaxFrequency(Number(event.target.value))}
-                    />
-                </label>
-                <label className="setting">
-                    <span>
-                        最低频率 <em>{minFrequency} Hz</em>
-                    </span>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1000}
-                        step={10}
-                        value={minFrequency}
-                        onChange={(event) => setMinFrequency(Number(event.target.value))}
-                    />
-                </label>
-
-                <div className="select-row">
-                    <label>
-                        F0 算法
-                        <select value={pitchAlgorithm} onChange={changeAlgorithm}>
-                            <option value="yin">YIN</option>
-                            <option value="autocorrelation">自相关</option>
-                        </select>
-                    </label>
-                    <label>
-                        频率刻度
-                        <select
-                            value={scale}
-                            onChange={(event) =>
-                                setScale(event.target.value as 'linear' | 'mel')
+                <div className="settings-tabs" role="tablist">
+                    {[
+                        ['spectrogram', '语谱图'],
+                        ['pitch', '基频'],
+                        ['formants', '共振峰'],
+                        ['intensity', '音强'],
+                    ].map(([value, label]) => (
+                        <button
+                            key={value}
+                            role="tab"
+                            aria-selected={settingsTab === value}
+                            className={settingsTab === value ? 'active' : ''}
+                            onClick={() =>
+                                setSettingsTab(
+                                    value as
+                                        | 'spectrogram'
+                                        | 'pitch'
+                                        | 'formants'
+                                        | 'intensity'
+                                )
                             }
                         >
-                            <option value="linear">线性</option>
-                            <option value="mel">Mel</option>
-                        </select>
-                    </label>
+                            {label}
+                        </button>
+                    ))}
                 </div>
 
-                <div className="palette-setting">
-                    <span>颜色主题</span>
-                    <div>
-                        {GRADIENTS.slice(0, 5).map((item) => (
-                            <button
-                                key={item.name}
-                                aria-label={item.name}
-                                title={item.name}
-                                className={gradientName === item.name ? 'active' : ''}
-                                style={{
-                                    background: `linear-gradient(135deg, ${item.gradient
-                                        .map(
-                                            (stop) =>
-                                                `rgb(${stop.color.join(',')}) ${
-                                                    stop.stop * 100
-                                                }%`
+                <div className="settings-tab-content">
+                    {settingsTab === 'spectrogram' && (
+                        <>
+                            <label className="setting">
+                                <span>
+                                    灵敏度{' '}
+                                    <em>{Math.round(sensitivity * 100)}%</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    value={sensitivity}
+                                    onChange={(event) =>
+                                        setSensitivity(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    对比度 <em>{Math.round(contrast * 100)}%</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    value={contrast}
+                                    onChange={(event) =>
+                                        setContrast(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    显示频率上限 <em>{maxFrequency} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={mode === 'broadband' ? 3000 : 600}
+                                    max={10000}
+                                    step={100}
+                                    value={maxFrequency}
+                                    onChange={(event) =>
+                                        setMaxFrequency(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    显示频率下限 <em>{minFrequency} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={Math.min(2000, maxFrequency - 100)}
+                                    step={10}
+                                    value={minFrequency}
+                                    onChange={(event) =>
+                                        setMinFrequency(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <div className="select-row one">
+                                <label>
+                                    频率刻度
+                                    <select
+                                        value={scale}
+                                        onChange={(event) =>
+                                            setScale(
+                                                event.target.value as
+                                                    | 'linear'
+                                                    | 'mel'
+                                            )
+                                        }
+                                    >
+                                        <option value="linear">线性</option>
+                                        <option value="mel">Mel</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div className="palette-setting">
+                                <span>颜色主题</span>
+                                <div>
+                                    {GRADIENTS.slice(0, 5).map((item) => (
+                                        <button
+                                            key={item.name}
+                                            aria-label={item.name}
+                                            title={item.name}
+                                            className={
+                                                gradientName === item.name
+                                                    ? 'active'
+                                                    : ''
+                                            }
+                                            style={{
+                                                background: `linear-gradient(135deg, ${item.gradient
+                                                    .map(
+                                                        (stop) =>
+                                                            `rgb(${stop.color.join(
+                                                                ','
+                                                            )}) ${
+                                                                stop.stop * 100
+                                                            }%`
+                                                    )
+                                                    .join(',')})`,
+                                            }}
+                                            onClick={() =>
+                                                setGradientName(item.name)
+                                            }
+                                        />
+                                    ))}
+                                </div>
+                                <small>{selectedGradient?.name}</small>
+                            </div>
+                        </>
+                    )}
+
+                    {settingsTab === 'pitch' && (
+                        <>
+                            <div className="select-row one">
+                                <label>
+                                    F0 检测算法
+                                    <select
+                                        value={pitchAlgorithm}
+                                        onChange={changeAlgorithm}
+                                    >
+                                        <option value="yin">YIN</option>
+                                        <option value="autocorrelation">
+                                            归一化自相关
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+                            <label className="setting">
+                                <span>
+                                    搜索与显示下限 <em>{pitchFloor} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={40}
+                                    max={200}
+                                    step={5}
+                                    value={pitchFloor}
+                                    onChange={(event) =>
+                                        setPitchFloor(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    搜索与显示上限 <em>{pitchCeiling} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={250}
+                                    max={1000}
+                                    step={10}
+                                    value={pitchCeiling}
+                                    onChange={(event) =>
+                                        setPitchCeiling(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    有声阈值{' '}
+                                    <em>{voicingThreshold.toFixed(2)}</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0.3}
+                                    max={0.95}
+                                    step={0.01}
+                                    value={voicingThreshold}
+                                    onChange={(event) =>
+                                        setVoicingThreshold(
+                                            Number(event.target.value)
                                         )
-                                        .join(',')})`,
-                                }}
-                                onClick={() => setGradientName(item.name)}
-                            />
-                        ))}
-                    </div>
-                    <small>{selectedGradient?.name}</small>
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    曲线粗细 <em>{pitchLineWidth.toFixed(1)} px</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={6}
+                                    step={0.5}
+                                    value={pitchLineWidth}
+                                    onChange={(event) =>
+                                        setPitchLineWidth(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                        </>
+                    )}
+
+                    {settingsTab === 'formants' && (
+                        <>
+                            <div className="select-row">
+                                <label>
+                                    LPC 分析数量
+                                    <select
+                                        value={maximumFormants}
+                                        onChange={(event) =>
+                                            setMaximumFormants(
+                                                Number(event.target.value)
+                                            )
+                                        }
+                                    >
+                                        {[4, 4.5, 5, 5.5, 6].map((value) => (
+                                            <option key={value} value={value}>
+                                                {value} 条
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                                <label>
+                                    画面显示数量
+                                    <select
+                                        value={formantsToDisplay}
+                                        onChange={(event) =>
+                                            setFormantsToDisplay(
+                                                Number(event.target.value)
+                                            )
+                                        }
+                                    >
+                                        {new Array(Math.ceil(maximumFormants))
+                                            .fill(0)
+                                            .map((_, index) => (
+                                                <option
+                                                    key={index + 1}
+                                                    value={index + 1}
+                                                >
+                                                    F1–F{index + 1}
+                                                </option>
+                                            ))}
+                                    </select>
+                                </label>
+                            </div>
+                            <label className="setting">
+                                <span>
+                                    Formant ceiling <em>{formantCeiling} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={3500}
+                                    max={9000}
+                                    step={100}
+                                    value={formantCeiling}
+                                    onChange={(event) =>
+                                        setFormantCeiling(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    有效分析窗 <em>{formantWindowMs} ms</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={15}
+                                    max={40}
+                                    step={1}
+                                    value={formantWindowMs}
+                                    onChange={(event) =>
+                                        setFormantWindowMs(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    预加重起点 <em>{preEmphasisFrom} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1000}
+                                    step={10}
+                                    value={preEmphasisFrom}
+                                    onChange={(event) =>
+                                        setPreEmphasisFrom(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    绘制动态范围{' '}
+                                    <em>{formantDynamicRange} dB</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={10}
+                                    max={80}
+                                    step={5}
+                                    value={formantDynamicRange}
+                                    onChange={(event) =>
+                                        setFormantDynamicRange(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    点大小 <em>{formantDotSize.toFixed(1)} px</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={5}
+                                    step={0.2}
+                                    value={formantDotSize}
+                                    onChange={(event) =>
+                                        setFormantDotSize(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <p className="setting-help">
+                                Praat 建议：成人男性可从 5000 Hz
+                                起，成人女性从 5500 Hz 起；即使只显示 F1–F3，也通常保留
+                                5 条分析数量。
+                            </p>
+                        </>
+                    )}
+
+                    {settingsTab === 'intensity' && (
+                        <>
+                            <label className="setting">
+                                <span>
+                                    音强窗 Pitch floor{' '}
+                                    <em>{intensityPitchFloor} Hz</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={40}
+                                    max={200}
+                                    step={5}
+                                    value={intensityPitchFloor}
+                                    onChange={(event) =>
+                                        setIntensityPitchFloor(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    显示下限 <em>{intensityFloor} dB SPL</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={intensityCeiling - 10}
+                                    step={1}
+                                    value={intensityFloor}
+                                    onChange={(event) =>
+                                        setIntensityFloor(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    显示上限 <em>{intensityCeiling} dB SPL</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={intensityFloor + 10}
+                                    max={140}
+                                    step={1}
+                                    value={intensityCeiling}
+                                    onChange={(event) =>
+                                        setIntensityCeiling(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    SPL 校准偏移{' '}
+                                    <em>
+                                        {splCalibration > 0 ? '+' : ''}
+                                        {splCalibration} dB
+                                    </em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={-40}
+                                    max={40}
+                                    step={0.5}
+                                    value={splCalibration}
+                                    onChange={(event) =>
+                                        setSplCalibration(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    曲线粗细{' '}
+                                    <em>{intensityLineWidth.toFixed(1)} px</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={6}
+                                    step={0.5}
+                                    value={intensityLineWidth}
+                                    onChange={(event) =>
+                                        setIntensityLineWidth(
+                                            Number(event.target.value)
+                                        )
+                                    }
+                                />
+                            </label>
+                            <p className="setting-help">
+                                未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。
+                            </p>
+                        </>
+                    )}
                 </div>
 
                 <div className="mode-explainer">

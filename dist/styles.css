@@ -922,12 +922,46 @@ select:focus-visible {
     display: grid;
     width: min(354px, calc(100vw - 36px));
     max-height: calc(100vh - 106px);
-    gap: 20px;
+    gap: 17px;
     padding: 22px;
     overflow-y: auto;
     transform: translateX(calc(100% + 30px));
     opacity: 0;
     transition: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: rgba(3, 6, 12, 0.55);
+}
+
+.settings-tabs button {
+    min-width: 0;
+    height: 33px;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 7px;
+    color: #6f7d93;
+    font-size: 9px;
+    font-weight: 650;
+    background: transparent;
+    cursor: pointer;
+}
+
+.settings-tabs button.active {
+    color: #e5edf8;
+    background: #1a2333;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+}
+
+.settings-tab-content {
+    display: grid;
+    gap: 18px;
 }
 
 .settings-panel.open {
@@ -977,6 +1011,10 @@ select:focus-visible {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+}
+
+.select-row.one {
+    grid-template-columns: 1fr;
 }
 
 .select-row label {
@@ -1032,6 +1070,16 @@ select:focus-visible {
     border: 1px solid rgba(37, 136, 255, 0.18);
     border-radius: 11px;
     background: rgba(37, 136, 255, 0.055);
+}
+
+.setting-help {
+    margin: -2px 0 0;
+    padding: 11px 12px;
+    border-left: 2px solid rgba(37, 136, 255, 0.45);
+    color: #6d7b90;
+    font-size: 8px;
+    line-height: 1.65;
+    background: rgba(37, 136, 255, 0.035);
 }
 
 .mode-explainer strong {

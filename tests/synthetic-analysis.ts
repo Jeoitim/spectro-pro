@@ -11,10 +11,12 @@ const DEFAULT_OPTIONS: AnalysisOptions = {
     pitchAlgorithm: 'yin',
     minPitchHz: 75,
     maxPitchHz: 500,
+    voicingThreshold: 0.6,
     formantCeilingHz: 5500,
     maximumFormants: 5,
     formantWindowLengthSeconds: 0.025,
     preEmphasisFromHz: 50,
+    intensityPitchFloorHz: 75,
     splCalibrationDb: 0,
 };
 

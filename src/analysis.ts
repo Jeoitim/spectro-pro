@@ -6,10 +6,12 @@ export interface AnalysisOptions {
     pitchAlgorithm: PitchAlgorithm;
     minPitchHz: number;
     maxPitchHz: number;
+    voicingThreshold: number;
     formantCeilingHz: number;
     maximumFormants: number;
     formantWindowLengthSeconds: number;
     preEmphasisFromHz: number;
+    intensityPitchFloorHz: number;
     splCalibrationDb: number;
 }
 
@@ -30,10 +32,12 @@ const DEFAULT_OPTIONS: AnalysisOptions = {
     pitchAlgorithm: 'yin',
     minPitchHz: 75,
     maxPitchHz: 500,
+    voicingThreshold: 0.6,
     formantCeilingHz: 5500,
     maximumFormants: 5,
     formantWindowLengthSeconds: 0.025,
     preEmphasisFromHz: 50,
+    intensityPitchFloorHz: 75,
     splCalibrationDb: 0,
 };
 
@@ -490,7 +494,7 @@ export function analyzeAcousticFrame(
     const intensityDbSpl = calculateIntensityDbSpl(
         samples,
         sampleRate,
-        options.minPitchHz,
+        options.intensityPitchFloorHz,
         options.splCalibrationDb
     );
 
@@ -504,7 +508,8 @@ export function analyzeAcousticFrame(
               )
             : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
 
-    const voiced = pitch.pitchHz !== null && pitch.confidence >= 0.6;
+    const voiced =
+        pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
     const formants = estimateFormants(samples, sampleRate, options);
     return {
         pitchHz: voiced ? pitch.pitchHz : null,

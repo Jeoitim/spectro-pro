@@ -9,6 +9,7 @@ import { AURORA_GRADIENT } from './color-util';
 import initialiseControlsUi from './controls-ui';
 import {
     CursorSnapshot,
+    LayerDisplayOptions,
     LiveSnapshot,
     SpectrogramMode,
     UiController,
@@ -121,11 +122,25 @@ class SpectroEngine {
         pitchAlgorithm: 'yin',
         minPitchHz: 75,
         maxPitchHz: 500,
+        voicingThreshold: 0.6,
         formantCeilingHz: 5500,
         maximumFormants: 5,
         formantWindowLengthSeconds: 0.025,
         preEmphasisFromHz: 50,
+        intensityPitchFloorHz: 75,
         splCalibrationDb: 0,
+    };
+
+    private layerDisplayOptions: LayerDisplayOptions = {
+        pitchFloorHz: PITCH_FLOOR_HZ,
+        pitchCeilingHz: PITCH_CEILING_HZ,
+        pitchLineWidth: 2.5,
+        formantsToDisplay: 5,
+        formantDynamicRangeDb: 30,
+        formantDotSize: 2.4,
+        intensityFloorDbSpl: INTENSITY_FLOOR_DB_SPL,
+        intensityCeilingDbSpl: INTENSITY_CEILING_DB_SPL,
+        intensityLineWidth: 2.5,
     };
 
     private showPitch = true;
@@ -151,6 +166,8 @@ class SpectroEngine {
     private lastUiUpdate = 0;
 
     private inspector: { x: number; y: number } | null = null;
+
+    private maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
 
     constructor(ui: UiController) {
         const canvas = document.querySelector('#spectrogramCanvas');
@@ -222,6 +239,21 @@ class SpectroEngine {
             ...this.analysisOptions,
             pitchAlgorithm: algorithm,
         };
+    }
+
+    updateAnalysis(parameters: Partial<AnalysisOptions>) {
+        this.analysisOptions = { ...this.analysisOptions, ...parameters };
+        if (parameters.pitchAlgorithm !== undefined) {
+            this.pitchAlgorithm = parameters.pitchAlgorithm;
+        }
+    }
+
+    updateLayerDisplay(parameters: Partial<LayerDisplayOptions>) {
+        this.layerDisplayOptions = {
+            ...this.layerDisplayOptions,
+            ...parameters,
+        };
+        this.overlayDirty = true;
     }
 
     setOverlays(pitch: boolean, formants: boolean, intensity: boolean) {
@@ -603,6 +635,10 @@ class SpectroEngine {
         }
 
         this.statistics.totalFrames += 1;
+        this.maximumSessionIntensityDbSpl = Math.max(
+            this.maximumSessionIntensityDbSpl,
+            analysis.intensityDbSpl
+        );
         this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
         if (analysis.pitchHz !== null) {
             this.statistics.voicedFrames += 1;
@@ -649,6 +685,7 @@ class SpectroEngine {
         this.statistics = emptyStatistics();
         this.sessionElapsedSeconds = 0;
         this.lastUiUpdate = 0;
+        this.maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
         this.clearVisualHistory();
         this.ui.updateSnapshot({
             elapsedSeconds: 0,
@@ -749,8 +786,10 @@ class SpectroEngine {
                 '#ffe39a',
                 '#fff0c7',
             ];
-            const formantCount =
-                this.analysisHistory[visible.end - 1]?.formantsHz.length || 0;
+            const formantCount = Math.min(
+                this.layerDisplayOptions.formantsToDisplay,
+                this.analysisHistory[visible.end - 1]?.formantsHz.length || 0
+            );
             for (
                 let formantIndex = 0;
                 formantIndex < formantCount;
@@ -761,11 +800,21 @@ class SpectroEngine {
                     const formant = this.analysisHistory[index].formantsHz[
                         formantIndex
                     ];
-                    if (formant !== null) {
+                    const withinDynamicRange =
+                        this.analysisHistory[index].intensityDbSpl >=
+                        this.maximumSessionIntensityDbSpl -
+                            this.layerDisplayOptions.formantDynamicRangeDb;
+                    if (formant !== null && withinDynamicRange) {
                         const y = frequencyY(formant);
                         if (y >= 0 && y <= height) {
                             ctx.beginPath();
-                            ctx.arc(xForIndex(index), y, 2.4, 0, Math.PI * 2);
+                            ctx.arc(
+                                xForIndex(index),
+                                y,
+                                this.layerDisplayOptions.formantDotSize,
+                                0,
+                                Math.PI * 2
+                            );
                             ctx.fill();
                         }
                     }
@@ -785,10 +834,12 @@ class SpectroEngine {
                         ? frequencyY(pitch)
                         : height *
                           (1 -
-                              (pitch - PITCH_FLOOR_HZ) /
-                                  (PITCH_CEILING_HZ - PITCH_FLOOR_HZ)),
+                              (pitch -
+                                  this.layerDisplayOptions.pitchFloorHz) /
+                                  (this.layerDisplayOptions.pitchCeilingHz -
+                                      this.layerDisplayOptions.pitchFloorHz)),
                 '#2588ff',
-                2.5
+                this.layerDisplayOptions.pitchLineWidth
             );
         }
 
@@ -802,11 +853,12 @@ class SpectroEngine {
                 (intensity) =>
                     height *
                     (1 -
-                        (intensity - INTENSITY_FLOOR_DB_SPL) /
-                            (INTENSITY_CEILING_DB_SPL -
-                                INTENSITY_FLOOR_DB_SPL)),
+                        (intensity -
+                            this.layerDisplayOptions.intensityFloorDbSpl) /
+                            (this.layerDisplayOptions.intensityCeilingDbSpl -
+                                this.layerDisplayOptions.intensityFloorDbSpl)),
                 '#f4df22',
-                2.5
+                this.layerDisplayOptions.intensityLineWidth
             );
         }
 
@@ -883,6 +935,9 @@ const ui = initialiseControlsUi(appContainer, {
     onModeChange: (mode) => engine?.setMode(mode),
     onPitchAlgorithmChange: (algorithm) =>
         engine?.setPitchAlgorithm(algorithm),
+    onAnalysisChange: (parameters) => engine?.updateAnalysis(parameters),
+    onLayerDisplayChange: (parameters) =>
+        engine?.updateLayerDisplay(parameters),
     onDisplayChange: (parameters) => engine?.updateDisplay(parameters),
     onOverlayChange: (pitch, formants, intensity) =>
         engine?.setOverlays(pitch, formants, intensity),
