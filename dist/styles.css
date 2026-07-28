@@ -298,12 +298,11 @@ select:focus-visible {
 }
 
 .workspace {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 296px;
-    gap: 18px;
-    width: min(1840px, 100%);
+    position: relative;
+    display: block;
+    width: 100%;
     margin: 0 auto;
-    padding: 18px;
+    padding: 0;
 }
 
 .visualizer-card,
@@ -317,7 +316,12 @@ select:focus-visible {
 
 .visualizer-card {
     min-width: 0;
+    min-height: calc(100vh - 76px);
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
+    background: #05070d;
+    box-shadow: none;
 }
 
 .visualizer-toolbar {
@@ -441,13 +445,13 @@ select:focus-visible {
 .praat-view {
     display: grid;
     grid-template-columns: 64px minmax(0, 1fr) 96px;
-    min-height: 610px;
+    min-height: calc(100vh - 143px);
     background: #05070d;
 }
 
 .plot-stack {
     display: grid;
-    grid-template-rows: minmax(500px, 1fr) 32px 12px;
+    grid-template-rows: minmax(500px, calc(100vh - 202px)) 32px 12px;
     min-width: 0;
     padding-top: 15px;
 }
@@ -647,10 +651,91 @@ select:focus-visible {
 }
 
 .metrics-panel {
+    position: fixed;
+    z-index: 18;
+    top: 94px;
+    right: 20px;
     display: flex;
-    min-height: 680px;
+    width: 296px;
+    min-width: 258px;
+    min-height: 470px;
+    max-width: min(520px, calc(100vw - 40px));
+    max-height: calc(100vh - 112px);
     flex-direction: column;
     padding: 20px;
+    overflow: auto;
+    resize: both;
+    background: linear-gradient(
+        155deg,
+        rgba(17, 23, 37, 0.88),
+        rgba(10, 14, 24, 0.92)
+    );
+    backdrop-filter: blur(22px);
+    transition:
+        width 180ms ease,
+        min-height 180ms ease,
+        border-radius 180ms ease,
+        padding 180ms ease;
+}
+
+.metrics-panel.bubble {
+    top: 98px;
+    width: 92px !important;
+    min-width: 92px;
+    height: 92px !important;
+    min-height: 92px;
+    max-height: 92px;
+    padding: 0;
+    overflow: hidden;
+    resize: none;
+    border-color: rgba(37, 136, 255, 0.35);
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 38% 30%, rgba(71, 139, 255, 0.26), transparent 48%),
+        rgba(10, 15, 27, 0.9);
+    box-shadow:
+        0 16px 50px rgba(0, 0, 0, 0.36),
+        0 0 34px rgba(37, 136, 255, 0.13);
+}
+
+.metrics-panel.bubble > *:not(.collapsed-reading) {
+    display: none;
+}
+
+.collapsed-reading {
+    display: none;
+}
+
+.metrics-panel.bubble .collapsed-reading {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    padding: 15px 8px 12px;
+    place-content: center;
+    place-items: center;
+    border: 0;
+    color: #eef6ff;
+    background: transparent;
+    cursor: pointer;
+}
+
+.collapsed-reading span,
+.collapsed-reading em {
+    color: #6fb0ff;
+    font-size: 8px;
+    font-style: normal;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.collapsed-reading strong {
+    max-width: 75px;
+    overflow: hidden;
+    font-size: 23px;
+    font-weight: 560;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.06em;
+    text-overflow: ellipsis;
 }
 
 .metrics-heading,
@@ -658,6 +743,25 @@ select:focus-visible {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+}
+
+.metrics-heading-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.metrics-heading-actions button {
+    display: grid;
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    color: #95a3b8;
+    background: rgba(255, 255, 255, 0.025);
+    cursor: pointer;
 }
 
 .eyebrow,
@@ -963,12 +1067,9 @@ select:focus-visible {
         display: none;
     }
 
-    .workspace {
-        grid-template-columns: 1fr;
-    }
-
     .metrics-panel {
-        min-height: 0;
+        top: 86px;
+        right: 12px;
     }
 
     .primary-metrics,
@@ -1001,7 +1102,7 @@ select:focus-visible {
     }
 
     .workspace {
-        padding: 8px;
+        padding: 0;
     }
 
     .visualizer-toolbar {
@@ -1019,11 +1120,11 @@ select:focus-visible {
 
     .praat-view {
         grid-template-columns: 44px minmax(0, 1fr) 65px;
-        min-height: 490px;
+        min-height: calc(100vh - 175px);
     }
 
     .plot-stack {
-        grid-template-rows: minmax(400px, 1fr) 28px 12px;
+        grid-template-rows: minmax(400px, calc(100vh - 232px)) 28px 12px;
     }
 
     .spectrogram-stage {

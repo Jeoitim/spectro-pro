@@ -102,6 +102,7 @@ export default function App({
     const [formantsVisible, setFormantsVisible] = useState(true);
     const [intensityVisible, setIntensityVisible] = useState(true);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [metricsCollapsed, setMetricsCollapsed] = useState(false);
     const [sensitivity, setSensitivity] = useState(0.54);
     const [contrast, setContrast] = useState(0.56);
     const [zoom, setZoom] = useState(1);
@@ -228,6 +229,14 @@ export default function App({
         },
         [onPitchAlgorithmChange]
     );
+
+    const toggleFullscreen = useCallback(() => {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else {
+            document.documentElement.requestFullscreen();
+        }
+    }, []);
 
     const selectedGradient = GRADIENTS.find((item) => item.name === gradientName);
 
@@ -363,6 +372,12 @@ export default function App({
                             <button onClick={onExport} className="export-button">
                                 导出图片
                             </button>
+                            <button
+                                onClick={toggleFullscreen}
+                                className="export-button"
+                            >
+                                全屏
+                            </button>
                         </div>
                     </div>
 
@@ -476,17 +491,39 @@ export default function App({
                     </div>
                 </section>
 
-                <section className="metrics-panel">
+                <section
+                    className={`metrics-panel ${
+                        metricsCollapsed ? 'bubble' : ''
+                    }`}
+                >
+                    <button
+                        className="collapsed-reading"
+                        onClick={() => setMetricsCollapsed(false)}
+                        aria-label="展开声学概览"
+                    >
+                        <span>F0</span>
+                        <strong>{formatNumber(snapshot.pitchHz)}</strong>
+                        <em>Hz</em>
+                    </button>
                     <div className="metrics-heading">
                         <div>
                             <span className="eyebrow">实时读数</span>
                             <h2>声学概览</h2>
                         </div>
-                        <span className="sample-rate">
-                            {snapshot.sampleRate
-                                ? `${(snapshot.sampleRate / 1000).toFixed(1)} kHz`
-                                : '— kHz'}
-                        </span>
+                        <div className="metrics-heading-actions">
+                            <span className="sample-rate">
+                                {snapshot.sampleRate
+                                    ? `${(snapshot.sampleRate / 1000).toFixed(1)} kHz`
+                                    : '— kHz'}
+                            </span>
+                            <button
+                                onClick={() => setMetricsCollapsed(true)}
+                                aria-label="收起声学概览"
+                                title="缩成气泡"
+                            >
+                                −
+                            </button>
+                        </div>
                     </div>
 
                     <div className="primary-metrics">
