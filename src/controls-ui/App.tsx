@@ -390,8 +390,8 @@ export default function App({
     useEffect(() => {
         const gradient = GRADIENTS.find((item) => item.name === gradientName);
         onDisplayChange({
-            sensitivity: 0.5 + sensitivity * 5,
-            contrast: contrast * 6,
+            sensitivity: 10 ** (2 + sensitivity * 2),
+            contrast: 10 ** (0.5 + contrast * 3) - 1,
             zoom,
             minFrequencyHz: minFrequency,
             maxFrequencyHz: maxFrequency,
@@ -706,6 +706,28 @@ export default function App({
             ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
             : cursor.frequencyHz;
     const maximumTimeOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
+    const scrollbarThumbWidth = 100 / Math.max(1, zoom);
+    const scrollbarThumbLeft =
+        maximumTimeOffset <= 0
+            ? 0
+            : (1 - timeOffset / maximumTimeOffset) * (100 - scrollbarThumbWidth);
+    const navigateScrollbar = useCallback(
+        (clientX: number, track: HTMLDivElement) => {
+            if (zoom <= 1 || maximumTimeOffset <= 0) {
+                return;
+            }
+            const bounds = track.getBoundingClientRect();
+            const thumbWidth = bounds.width / zoom;
+            const availableWidth = Math.max(1, bounds.width - thumbWidth);
+            const position = Math.min(
+                1,
+                Math.max(0, (clientX - bounds.left - thumbWidth / 2) / availableWidth)
+            );
+            const targetOffset = (1 - position) * maximumTimeOffset;
+            onNavigate(targetOffset - timeOffset);
+        },
+        [maximumTimeOffset, onNavigate, timeOffset, zoom]
+    );
 
     return (
         <div className="app-shell">
@@ -1156,20 +1178,72 @@ export default function App({
                                         {formatTime(transport.durationSeconds)}
                                     </span>
                                     </div>
-                                    <input
-                                        className="zoom-scrollbar"
-                                        aria-label="放大后的语谱滚动位置"
-                                        title="拖动查看放大后未显示的音频"
-                                        type="range"
-                                        min={0}
-                                        max={Math.max(0.001, maximumTimeOffset)}
-                                        step={0.001}
-                                        value={Math.min(timeOffset, maximumTimeOffset)}
-                                        disabled={zoom <= 1}
-                                        onChange={(event) =>
-                                            onNavigate(Number(event.target.value) - timeOffset)
-                                        }
-                                    />
+                                    {zoom > 1 && (
+                                        <div
+                                            className="zoom-scrollbar"
+                                            role="scrollbar"
+                                            aria-label="放大后的语谱滚动位置"
+                                            aria-orientation="horizontal"
+                                            aria-valuemin={0}
+                                            aria-valuemax={maximumTimeOffset}
+                                            aria-valuenow={timeOffset}
+                                            tabIndex={0}
+                                            title="拖动查看放大后未显示的音频"
+                                            onKeyDown={(event) => {
+                                                const step = maximumTimeOffset / 20;
+                                                if (event.key === 'ArrowLeft') {
+                                                    event.preventDefault();
+                                                    onNavigate(
+                                                        Math.min(
+                                                            maximumTimeOffset,
+                                                            timeOffset + step
+                                                        ) - timeOffset
+                                                    );
+                                                } else if (event.key === 'ArrowRight') {
+                                                    event.preventDefault();
+                                                    onNavigate(
+                                                        Math.max(0, timeOffset - step) -
+                                                            timeOffset
+                                                    );
+                                                } else if (event.key === 'Home') {
+                                                    event.preventDefault();
+                                                    onNavigate(maximumTimeOffset - timeOffset);
+                                                } else if (event.key === 'End') {
+                                                    event.preventDefault();
+                                                    onNavigate(-timeOffset);
+                                                }
+                                            }}
+                                            onPointerDown={(event) => {
+                                                event.currentTarget.setPointerCapture(
+                                                    event.pointerId
+                                                );
+                                                navigateScrollbar(
+                                                    event.clientX,
+                                                    event.currentTarget
+                                                );
+                                            }}
+                                            onPointerMove={(event) => {
+                                                if (
+                                                    event.currentTarget.hasPointerCapture(
+                                                        event.pointerId
+                                                    )
+                                                ) {
+                                                    navigateScrollbar(
+                                                        event.clientX,
+                                                        event.currentTarget
+                                                    );
+                                                }
+                                            }}
+                                        >
+                                            <span
+                                                className="zoom-scrollbar-thumb"
+                                                style={{
+                                                    width: `${scrollbarThumbWidth}%`,
+                                                    left: `${scrollbarThumbLeft}%`,
+                                                }}
+                                            />
+                                        </div>
+                                    )}
                                 </>
                             ) : (
                                 <>

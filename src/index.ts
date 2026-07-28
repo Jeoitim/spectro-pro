@@ -121,8 +121,8 @@ class SpectroEngine {
     private sampleRate = 48000;
 
     private renderParameters: Partial<RenderParameters> = {
-        sensitivity: 0.5 + 0.42 * 5,
-        contrast: 0.32 * 6,
+        sensitivity: 10 ** (2 + 0.42 * 2),
+        contrast: 10 ** (0.5 + 0.32 * 3) - 1,
         zoom: 1,
         timeOffset: 0,
         minFrequencyHz: 0,

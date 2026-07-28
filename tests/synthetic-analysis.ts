@@ -166,6 +166,17 @@ function testSpectrogramDisplayPreEmphasis() {
             `spectrogram pre-emphasis: expected upper frequencies to be clearer; received ${lowPeak} and ${highPeak}`
         );
     }
+    const defaultSensitivity = 10 ** (2 + 0.42 * 2);
+    const defaultContrast = 10 ** (0.5 + 0.32 * 3) - 1;
+    const lowDisplayIntensity =
+        Math.log(
+            1 + Math.min(1, lowPeak * defaultSensitivity) * defaultContrast
+        ) / Math.log(1 + defaultContrast);
+    if (lowDisplayIntensity < 0.15) {
+        throw new Error(
+            `spectrogram display mapping: expected visible low-frequency energy; received ${lowDisplayIntensity}`
+        );
+    }
 }
 
 testPitch('yin');
