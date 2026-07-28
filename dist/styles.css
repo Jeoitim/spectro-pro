@@ -693,6 +693,16 @@ button.media-row {
     stroke-linejoin: round;
 }
 
+.view-actions button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.view-actions button:disabled:hover {
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, 0.025);
+}
+
 .transport-control {
     width: 32px;
     height: 32px;
@@ -718,13 +728,6 @@ button.media-row {
     background: rgba(255, 79, 114, 0.13);
 }
 
-.selection-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
-.selection-actions button,
 .reset-tab-button {
     min-height: 30px;
     padding: 0 9px;
@@ -734,12 +737,6 @@ button.media-row {
     font-size: 10px;
     background: rgba(37, 136, 255, 0.07);
     cursor: pointer;
-}
-
-.selection-actions button:last-child {
-    color: #aeb9ca;
-    border-color: var(--line-strong);
-    background: rgba(255, 255, 255, 0.025);
 }
 
 .praat-view {
@@ -1258,6 +1255,13 @@ button.media-row {
     border-radius: 7px;
     color: #8e9bb0;
     font-size: 9px;
+}
+
+.playhead-time {
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
 }
 
 .primary-metrics {

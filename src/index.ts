@@ -13,7 +13,12 @@ import {
     TransportSnapshot,
     UiController,
 } from './controls-ui/App';
-import { Circular2DBuffer, clamp, hzToMel, melToHz } from './math-util';
+import {
+    Circular2DBuffer,
+    clamp,
+    frequencyToScale,
+    scaleToFrequency,
+} from './math-util';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import { offThreadAnalyzeEntireFile, offThreadGenerateSpectrogram } from './worker-util';
 
@@ -526,6 +531,7 @@ class SpectroEngine {
         const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
         this.playbackOffsetSeconds = clamp(seconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.updateSnapshotAtPlaybackOffset(true);
         this.notifyTransport();
         this.overlayDirty = true;
         if (wasPlaying && this.playbackOffsetSeconds < item.durationSeconds) {
@@ -555,6 +561,7 @@ class SpectroEngine {
         this.stopMediaPlayback(false);
         this.playbackOffsetSeconds = clamp(targetSeconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.updateSnapshotAtPlaybackOffset(true);
         this.notifyTransport();
         if (continuePlayback) {
             this.startMediaPlayback(item);
@@ -655,13 +662,14 @@ class SpectroEngine {
         }
         const minFrequency = this.renderParameters.minFrequencyHz || 0;
         const maxFrequency = this.renderParameters.maxFrequencyHz || 5500;
-        const frequency =
-            this.renderParameters.scale === 'mel'
-                ? melToHz(
-                      hzToMel(minFrequency) +
-                          (1 - y) * (hzToMel(maxFrequency) - hzToMel(minFrequency))
-                  )
-                : minFrequency + (1 - y) * (maxFrequency - minFrequency);
+        const scale = this.renderParameters.scale || 'linear';
+        const frequency = scaleToFrequency(
+            frequencyToScale(minFrequency, scale) +
+                (1 - y) *
+                    (frequencyToScale(maxFrequency, scale) -
+                        frequencyToScale(minFrequency, scale)),
+            scale
+        );
         const snapshot: CursorSnapshot = {
             x,
             y,
@@ -902,20 +910,7 @@ class SpectroEngine {
         this.playbackOffsetSeconds = clamp(this.playbackOffsetSeconds, 0, item.durationSeconds);
         this.rebuildStatisticsFromHistory();
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
-        const latest = this.analysisHistory[
-            clamp(
-                Math.round(
-                    (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
-                        (this.analysisHistory.length - 1)
-                ),
-                0,
-                Math.max(0, this.analysisHistory.length - 1)
-            )
-        ];
-        if (latest !== undefined) {
-            this.lastUiUpdate = 0;
-            this.updateUiSnapshot(latest);
-        }
+        this.updateSnapshotAtPlaybackOffset(true);
         this.ui.updateZoom(zoom);
         this.ui.updateTimeOffset(timeOffset);
         this.ui.setPlayState('stopped', item.name, '整段分析完成，可自由拖动播放');
@@ -997,18 +992,7 @@ class SpectroEngine {
         );
         this.playbackStartedAt = this.playbackContext.currentTime;
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
-        const snapshotIndex = clamp(
-            Math.round(
-                (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
-                    (this.analysisHistory.length - 1)
-            ),
-            0,
-            Math.max(0, this.analysisHistory.length - 1)
-        );
-        const snapshotPoint = this.analysisHistory[snapshotIndex];
-        if (snapshotPoint !== undefined) {
-            this.updateUiSnapshot(snapshotPoint);
-        }
+        this.updateSnapshotAtPlaybackOffset();
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -1239,9 +1223,9 @@ class SpectroEngine {
         this.updateUiSnapshot(analysis);
     }
 
-    private updateUiSnapshot(analysis: AcousticAnalysis) {
+    private updateUiSnapshot(analysis: AcousticAnalysis, force: boolean = false) {
         const now = performance.now();
-        if (now - this.lastUiUpdate < 90) {
+        if (!force && now - this.lastUiUpdate < 90) {
             return;
         }
         this.lastUiUpdate = now;
@@ -1262,6 +1246,24 @@ class SpectroEngine {
             sampleRate: this.sampleRate,
         };
         this.ui.updateSnapshot(snapshot);
+    }
+
+    private updateSnapshotAtPlaybackOffset(force: boolean = false) {
+        const item = this.activeMedia();
+        if (item === null || this.analysisHistory.length === 0) {
+            return;
+        }
+        const snapshotIndex = clamp(
+            Math.round(
+                (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
+                    (this.analysisHistory.length - 1)
+            ),
+            0,
+            this.analysisHistory.length - 1
+        );
+        const point = this.analysisHistory[snapshotIndex];
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.updateUiSnapshot(point, force);
     }
 
     private resetSession() {
@@ -1349,15 +1351,18 @@ class SpectroEngine {
         const frequencyY = (frequency: number) => {
             const min = this.renderParameters.minFrequencyHz || 0;
             const max = this.renderParameters.maxFrequencyHz || 5500;
-            if (this.renderParameters.scale === 'mel') {
-                return (
-                    height *
-                    (1 -
-                        (hzToMel(frequency) - hzToMel(min)) /
-                            Math.max(1e-9, hzToMel(max) - hzToMel(min)))
-                );
-            }
-            return height * (1 - (frequency - min) / Math.max(1, max - min));
+            const scale = this.renderParameters.scale || 'linear';
+            return (
+                height *
+                (1 -
+                    (frequencyToScale(frequency, scale) -
+                        frequencyToScale(min, scale)) /
+                        Math.max(
+                            1e-9,
+                            frequencyToScale(max, scale) -
+                                frequencyToScale(min, scale)
+                        ))
+            );
         };
 
         if (this.showFormants && this.mode === 'broadband') {

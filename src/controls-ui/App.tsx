@@ -9,6 +9,8 @@ import React, {
 
 import { AnalysisOptions, PitchAlgorithm } from '../analysis';
 import { GRADIENTS } from '../color-util';
+import { frequencyToScale } from '../math-util';
+import { Scale } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
 
 export type SpectrogramMode = 'broadband' | 'narrowband';
@@ -134,7 +136,9 @@ interface SavedSettings {
     zoom: number;
     minFrequency: number;
     maxFrequency: number;
-    scale: 'linear' | 'mel';
+    scale?: 'linear' | 'mel';
+    broadbandScale: Scale;
+    narrowbandScale: Scale;
     gradientName: string;
     pitchFloor: number;
     pitchCeiling: number;
@@ -233,7 +237,16 @@ export default function App({
     const [zoom, setZoom] = useState(saved.zoom ?? 1);
     const [minFrequency, setMinFrequency] = useState(saved.minFrequency ?? 0);
     const [maxFrequency, setMaxFrequency] = useState(saved.maxFrequency ?? 5500);
-    const [scale, setScale] = useState<'linear' | 'mel'>(saved.scale || 'linear');
+    const [broadbandScale, setBroadbandScale] = useState<Scale>(
+        saved.broadbandScale ||
+            (saved.mode === 'broadband' ? saved.scale : undefined) ||
+            'linear'
+    );
+    const [narrowbandScale, setNarrowbandScale] = useState<Scale>(
+        saved.narrowbandScale ||
+            (saved.mode === 'narrowband' ? saved.scale : undefined) ||
+            'log'
+    );
     const [gradientName, setGradientName] = useState(saved.gradientName || 'Aurora');
     const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
     const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
@@ -292,6 +305,7 @@ export default function App({
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
+    const scale = mode === 'broadband' ? broadbandScale : narrowbandScale;
 
     useEffect(() => {
         registerController({
@@ -332,7 +346,8 @@ export default function App({
             zoom,
             minFrequency,
             maxFrequency,
-            scale,
+            broadbandScale,
+            narrowbandScale,
             gradientName,
             pitchFloor,
             pitchCeiling,
@@ -367,7 +382,8 @@ export default function App({
         zoom,
         minFrequency,
         maxFrequency,
-        scale,
+        broadbandScale,
+        narrowbandScale,
         gradientName,
         pitchFloor,
         pitchCeiling,
@@ -650,7 +666,11 @@ export default function App({
                 setTimeOffset(0);
                 setMinFrequency(0);
                 setMaxFrequency(mode === 'broadband' ? 5500 : 1200);
-                setScale('linear');
+                if (mode === 'broadband') {
+                    setBroadbandScale('linear');
+                } else {
+                    setNarrowbandScale('log');
+                }
                 setGradientName('Aurora');
                 onRestoreView();
                 return;
@@ -705,6 +725,16 @@ export default function App({
             : mode === 'broadband'
             ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
             : cursor.frequencyHz;
+    const spectralPitchTop = (frequency: number) => {
+        const minimum = frequencyToScale(minFrequency, scale);
+        const maximum = frequencyToScale(maxFrequency, scale);
+        return `${
+            (1 -
+                (frequencyToScale(frequency, scale) - minimum) /
+                    Math.max(1e-9, maximum - minimum)) *
+            100
+        }%`;
+    };
     const maximumTimeOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
     const scrollbarThumbWidth = 100 / Math.max(1, zoom);
     const scrollbarThumbLeft =
@@ -990,16 +1020,6 @@ export default function App({
                                     )}
                                 </button>
                             )}
-                            {transport.activeId !== null && selection !== null && (
-                                <div className="selection-actions">
-                                    <button onClick={onFitSelection} title="让选区铺满语谱图">
-                                        铺满选区
-                                    </button>
-                                    <button onClick={onRestoreView} title="恢复完整语谱图">
-                                        还原 1×
-                                    </button>
-                                </div>
-                            )}
                         </div>
 
                         <div className="view-actions">
@@ -1016,6 +1036,36 @@ export default function App({
                             >
                                 +
                             </button>
+                            {transport.activeId !== null && (
+                                <>
+                                    <button
+                                        onClick={onFitSelection}
+                                        className="icon-action"
+                                        disabled={selection === null}
+                                        aria-label="铺满选区"
+                                        title={
+                                            selection === null
+                                                ? '先在语谱图中拖动选择一段音频'
+                                                : '让选区铺满语谱图'
+                                        }
+                                    >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M4 7V4h3m10 0h3v3M4 17v3h3m10 0h3v-3M8 12h8m-8 0 3-3m-3 3 3 3m5-3-3-3m3 3-3 3" />
+                                        </svg>
+                                    </button>
+                                    <button
+                                        onClick={onRestoreView}
+                                        className="icon-action"
+                                        disabled={zoom <= 1}
+                                        aria-label="还原完整视图"
+                                        title="还原完整语谱图至 1×"
+                                    >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M5 8V4m0 0h4M5 4l3.2 3.2A7 7 0 1 1 6 14" />
+                                        </svg>
+                                    </button>
+                                </>
+                            )}
                             <button
                                 onClick={onExport}
                                 className="icon-action"
@@ -1063,7 +1113,7 @@ export default function App({
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: `${(1 - pitchCeiling / maxFrequency) * 100}%`,
+                                            top: spectralPitchTop(pitchCeiling),
                                         }}
                                     >
                                         {pitchCeiling}
@@ -1071,13 +1121,9 @@ export default function App({
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: `${
-                                                (1 -
-                                                    (pitchFloor + pitchCeiling) /
-                                                        2 /
-                                                        maxFrequency) *
-                                                100
-                                            }%`,
+                                            top: spectralPitchTop(
+                                                (pitchFloor + pitchCeiling) / 2
+                                            ),
                                         }}
                                     >
                                         {Math.round((pitchFloor + pitchCeiling) / 2)}
@@ -1085,7 +1131,7 @@ export default function App({
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: `${(1 - pitchFloor / maxFrequency) * 100}%`,
+                                            top: spectralPitchTop(pitchFloor),
                                         }}
                                     >
                                         {pitchFloor}
@@ -1330,10 +1376,17 @@ export default function App({
                             className="metrics-drag-handle"
                             onMouseDown={(event) => beginFloatingDrag('metrics', event)}
                         >
-                            <span className="eyebrow">实时读数</span>
+                            <span className="eyebrow">
+                                {transport.activeId === null ? '实时读数' : '白线位置读数'}
+                            </span>
                             <h2>声学概览</h2>
                         </div>
                         <div className="metrics-heading-actions">
+                            {transport.activeId !== null && (
+                                <span className="playhead-time">
+                                    {formatTime(transport.currentSeconds)}
+                                </span>
+                            )}
                             <span className="sample-rate">
                                 {snapshot.sampleRate
                                     ? `${(snapshot.sampleRate / 1000).toFixed(1)} kHz`
@@ -1517,12 +1570,20 @@ export default function App({
                                     频率刻度
                                     <select
                                         value={scale}
-                                        onChange={(event) =>
-                                            setScale(event.target.value as 'linear' | 'mel')
-                                        }
+                                        onChange={(event) => {
+                                            const nextScale = event.target.value as Scale;
+                                            if (mode === 'broadband') {
+                                                setBroadbandScale(nextScale);
+                                            } else {
+                                                setNarrowbandScale(nextScale);
+                                            }
+                                        }}
                                     >
                                         <option value="linear">线性</option>
+                                        <option value="log">对数</option>
                                         <option value="mel">Mel</option>
+                                        <option value="bark">Bark</option>
+                                        <option value="erb">ERB</option>
                                     </select>
                                 </label>
                             </div>

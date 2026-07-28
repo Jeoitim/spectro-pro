@@ -1,5 +1,10 @@
 import { colorRamp, Gradient, HEATED_METAL_GRADIENT } from './color-util';
-import { Circular2DBuffer, lerp } from './math-util';
+import {
+    Circular2DBuffer,
+    frequencyToScale,
+    lerp,
+    scaleToFrequency,
+} from './math-util';
 import FragmentShader from './shaders/fragment.glsl';
 import VertexShader from './shaders/vertex.glsl';
 import { Scale } from './spectrogram';
@@ -550,38 +555,20 @@ export class SpectrogramGPURenderer {
         windowSize: number
     ) {
         const peakHz = (sampleRate * (windowSize - 2)) / (2 * windowSize);
-        switch (scale) {
-            case 'linear':
-                this.scaleRange = [minFrequencyHz / peakHz, maxFrequencyHz / peakHz];
-                break;
-            case 'mel':
-                this.scaleRange = [
-                    Math.log(1 + minFrequencyHz / 700) / Math.log(1 + peakHz / 700),
-                    Math.log(1 + maxFrequencyHz / 700) / Math.log(1 + peakHz / 700),
-                ];
-                break;
-            default:
-                throw new Error('Unknown scale');
-        }
+        const peakScale = Math.max(1e-9, frequencyToScale(peakHz, scale));
+        this.scaleRange = [
+            frequencyToScale(minFrequencyHz, scale) / peakScale,
+            frequencyToScale(maxFrequencyHz, scale) / peakScale,
+        ];
     }
 
     private updateScaleTexture(scale: Scale, sampleRate: number, windowSize: number) {
         const buffer = new Float32Array(this.spectrogramHeight);
+        const peakHz = (sampleRate * (windowSize - 2)) / (2 * windowSize);
+        const peakScale = frequencyToScale(peakHz, scale);
         for (let i = 0; i < this.spectrogramHeight; i += 1) {
-            switch (scale) {
-                case 'linear':
-                    buffer[i] = i / (this.spectrogramHeight - 1);
-                    break;
-                case 'mel': {
-                    const peakHz = (sampleRate * (windowSize - 2)) / (2 * windowSize);
-                    buffer[i] =
-                        (700 * ((1 + peakHz / 700) ** (i / (this.spectrogramHeight - 1)) - 1)) /
-                        peakHz;
-                    break;
-                }
-                default:
-                    throw new Error('Unknown scale');
-            }
+            const amount = i / (this.spectrogramHeight - 1);
+            buffer[i] = scaleToFrequency(peakScale * amount, scale) / peakHz;
         }
 
         if (this.scaleTexture === null) {

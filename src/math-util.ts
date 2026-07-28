@@ -9,12 +9,54 @@ export type TypedArray =
     | Float32Array
     | Float64Array;
 
+export type FrequencyScale = 'linear' | 'log' | 'mel' | 'bark' | 'erb';
+
 export function hzToMel(hz: number): number {
     return 2595 * Math.log10(1 + hz / 700);
 }
 
 export function melToHz(mel: number): number {
     return 700 * (10 ** (mel / 2595) - 1);
+}
+
+export function frequencyToScale(hz: number, scale: FrequencyScale): number {
+    const frequency = Math.max(0, hz);
+    switch (scale) {
+        case 'linear':
+            return frequency;
+        case 'log':
+            return Math.log(1 + frequency / 20);
+        case 'mel':
+            return hzToMel(frequency);
+        case 'bark': {
+            const ratio = frequency / 600;
+            return 6 * Math.log(ratio + Math.sqrt(ratio * ratio + 1));
+        }
+        case 'erb':
+            return 21.4 * Math.log10(1 + 0.00437 * frequency);
+        default:
+            throw new Error('Unknown frequency scale');
+    }
+}
+
+export function scaleToFrequency(value: number, scale: FrequencyScale): number {
+    const scaled = Math.max(0, value);
+    switch (scale) {
+        case 'linear':
+            return scaled;
+        case 'log':
+            return 20 * (Math.exp(scaled) - 1);
+        case 'mel':
+            return melToHz(scaled);
+        case 'bark': {
+            const ratio = scaled / 6;
+            return 600 * (Math.exp(ratio) - Math.exp(-ratio)) / 2;
+        }
+        case 'erb':
+            return (10 ** (scaled / 21.4) - 1) / 0.00437;
+        default:
+            throw new Error('Unknown frequency scale');
+    }
 }
 
 export function log(base: number, x: number): number {

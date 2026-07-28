@@ -1,8 +1,14 @@
 import { FFT } from 'jsfft';
 
-import { hzToMel, inverseLerp, lerp, melToHz } from './math-util';
+import {
+    FrequencyScale,
+    frequencyToScale,
+    inverseLerp,
+    lerp,
+    scaleToFrequency,
+} from './math-util';
 
-export type Scale = 'linear' | 'mel';
+export type Scale = FrequencyScale;
 
 export interface SpectrogramOptions {
     isStart?: boolean;
@@ -68,21 +74,13 @@ function generateSpectrogramForSingleFrame(
     const fft = FFT(windowSamples);
     for (let j = 0; j < scaleSize; j += 1) {
         const scaleAmount = inverseLerp(0, scaleSize - 1, j);
-        let n;
-        switch (scale) {
-            case 'linear': {
-                const hz = lerp(minFrequencyHz, maxFrequencyHz, scaleAmount);
-                n = (hz * windowSamples.length) / sampleRate;
-                break;
-            }
-            case 'mel': {
-                const mel = lerp(hzToMel(minFrequencyHz), hzToMel(maxFrequencyHz), scaleAmount);
-                n = (melToHz(mel) * windowSamples.length) / sampleRate;
-                break;
-            }
-            default:
-                throw new Error('Unknown scale');
-        }
+        const scaledFrequency = lerp(
+            frequencyToScale(minFrequencyHz, scale),
+            frequencyToScale(maxFrequencyHz, scale),
+            scaleAmount
+        );
+        const hz = scaleToFrequency(scaledFrequency, scale);
+        const n = (hz * windowSamples.length) / sampleRate;
 
         const lowerN = Math.floor(n);
         const upperN = Math.ceil(n);
@@ -111,7 +109,7 @@ export function generateSpectrogram(
         minFrequencyHz, // Smallest frequency in Hz to calculate the spectrogram for
         maxFrequencyHz, // Largest frequency in Hz to calculate the spectrogram for
         sampleRate, // Sample rate of the audio
-        scale = 'linear', // Scale of the returned spectrogram (can be 'linear' or 'mel')
+        scale = 'linear', // Frequency scale of the returned spectrogram
         scaleSize, // Number of rows in the returned spectrogram
     }: SpectrogramOptions
 ): SpectrogramResult {

@@ -4,7 +4,8 @@ import {
     PitchAlgorithm,
     resampleForFormants,
 } from '../src/analysis';
-import { generateSpectrogram } from '../src/spectrogram';
+import { frequencyToScale, scaleToFrequency } from '../src/math-util';
+import { generateSpectrogram, Scale } from '../src/spectrogram';
 
 const SAMPLE_RATE = 48000;
 const FORMANT_SAMPLE_RATE = 11000;
@@ -179,10 +180,32 @@ function testSpectrogramDisplayPreEmphasis() {
     }
 }
 
+function testFrequencyScales() {
+    const scales: Scale[] = ['linear', 'log', 'mel', 'bark', 'erb'];
+    const frequencies = [0, 75, 250, 1000, 5500, 10000];
+    for (const scale of scales) {
+        let previous = -1;
+        for (const frequency of frequencies) {
+            const scaled = frequencyToScale(frequency, scale);
+            if (scaled < previous) {
+                throw new Error(`${scale} scale is not monotonic at ${frequency} Hz`);
+            }
+            assertNear(
+                `${scale} scale round trip`,
+                scaleToFrequency(scaled, scale),
+                frequency,
+                Math.max(1e-6, frequency * 1e-9)
+            );
+            previous = scaled;
+        }
+    }
+}
+
 testPitch('yin');
 testPitch('autocorrelation');
 testIntensity();
 testFormants();
 testSpectrogramDisplayPreEmphasis();
+testFrequencyScales();
 
 console.log('Synthetic pitch, SPL, formant and spectrogram checks passed.');
