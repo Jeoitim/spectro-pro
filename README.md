@@ -1,5 +1,7 @@
 # Spectro Pro
 
+[![Deploy GitHub Pages](https://github.com/Jeoitim/spectro-pro/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/Jeoitim/spectro-pro/actions/workflows/deploy-pages.yml)
+
 Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具。它在
 [calebj0seph/spectro](https://github.com/calebj0seph/spectro) 的 WebAudio、
 后台 FFT 和 WebGL 渲染基础上，增加面向语音观察的实时分析与交互界面。
@@ -54,6 +56,67 @@ npm start
 npm run type-check
 npm run build
 ```
+
+## 部署
+
+Spectro Pro 的分析、播放和 WebGL 绘制全部在浏览器完成，没有后端、数据库或
+服务端运行时依赖。生产构建输出为 `dist`，其中资源使用相对路径，因此可以部署
+到域名根目录或 GitHub Pages 的 `/spectro-pro/` 子路径。麦克风功能需要平台提供
+HTTPS；下列 Pages 平台均满足这一要求。
+
+| 平台 | 适合程度 | 推荐用途 | 构建配置 |
+| --- | --- | --- | --- |
+| GitHub Pages | 很适合 | 与源码、Action 集成的公开演示站 | Action 自动执行 `npm ci`、检查、测试和构建，再发布 `dist` |
+| Cloudflare Pages | 很适合 | 独立域名、预览部署和全球静态分发 | Build command: `npm run build`; Output directory: `dist`; Node.js: `20` |
+| EdgeOne Pages | 适合 | 希望增加另一套 Pages/CDN 发布入口 | Framework preset: Custom; Build command: `npm run build`; Output directory: `dist`; Node.js: `20` |
+
+### GitHub Pages
+
+仓库包含 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)。
+它会在每次推送 `master` 后执行类型检查、合成声学测试和生产构建，通过后发布
+`dist`；也可以在 Actions 页面手动运行。
+
+首次使用时，需要在仓库 **Settings → Pages → Build and deployment** 中将
+**Source** 设为 **GitHub Actions**。之后站点地址通常为：
+
+```text
+https://jeoitim.github.io/spectro-pro/
+```
+
+### Cloudflare Pages
+
+在 Cloudflare Dashboard 的 **Workers & Pages** 中导入本 GitHub 仓库，并设置：
+
+```text
+Production branch: master
+Framework preset: None
+Build command: npm run build
+Build output directory: dist
+Root directory: /
+Node.js version: 20
+```
+
+该项目不使用前端路由，不需要额外 SPA rewrite、Pages Functions 或环境变量。
+Cloudflare Pages 会为 `master` 创建生产部署，并可为其他分支或 Pull Request 创建
+预览部署。
+
+### EdgeOne Pages
+
+在 EdgeOne Pages 中导入 GitHub 仓库，启用 Auto Deploy，并设置：
+
+```text
+Production branch: master
+Framework preset: Custom
+Install command: npm ci
+Build command: npm run build
+Output directory: dist
+Root directory: /
+Node.js version: 20
+```
+
+不要直接采用 React preset 默认的 `build` 输出目录：Spectro Pro 使用自定义
+Webpack 配置，实际产物位于 `dist`。当前没有客户端路由，也不需要 catch-all
+规则；以后若加入路径路由，再配置所有未知路径回退到 `index.html`。
 
 ## 算法说明
 
