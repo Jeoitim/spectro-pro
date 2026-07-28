@@ -51,6 +51,11 @@ interface OfflineModeCache {
     fftSize: number;
 }
 
+interface MediaViewState {
+    zoom: number;
+    timeOffset: number;
+}
+
 interface MediaItem {
     id: string;
     name: string;
@@ -60,6 +65,7 @@ interface MediaItem {
     sampleRate: number;
     samples: Float32Array;
     modes: Partial<Record<SpectrogramMode, OfflineModeCache>>;
+    views: Partial<Record<SpectrogramMode, MediaViewState>>;
     wavBlob?: Blob;
 }
 
@@ -267,11 +273,13 @@ class SpectroEngine {
             ...parameters,
             timeOffset: this.timeOffset,
         });
+        this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
     }
 
     setMode(mode: SpectrogramMode) {
+        this.saveActiveView();
         this.mode = mode;
         const activeMedia = this.activeMedia();
         if (activeMedia !== null) {
@@ -328,6 +336,7 @@ class SpectroEngine {
     }
 
     async startMicrophone() {
+        this.saveActiveView();
         this.stop();
         this.activeMediaId = null;
         this.notifyMediaLibrary();
@@ -435,7 +444,9 @@ class SpectroEngine {
                 sampleRate: audioBuffer.sampleRate,
                 samples: mono,
                 modes: {},
+                views: {},
             };
+            this.saveActiveView();
             this.mediaItems.push(item);
             this.activeMediaId = item.id;
             this.notifyMediaLibrary();
@@ -469,6 +480,7 @@ class SpectroEngine {
     }
 
     selectMedia(id: string | null) {
+        this.saveActiveView();
         this.stop();
         this.activeMediaId = id;
         this.notifyMediaLibrary();
@@ -617,6 +629,7 @@ class SpectroEngine {
         this.renderer.updateParameters({ timeOffset: nextOffset });
         this.renderParameters.timeOffset = nextOffset;
         this.ui.updateTimeOffset(nextOffset);
+        this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -728,6 +741,7 @@ class SpectroEngine {
         this.renderer.updateParameters({ zoom, timeOffset: offset });
         this.ui.updateZoom(zoom);
         this.ui.updateTimeOffset(offset);
+        this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -742,6 +756,7 @@ class SpectroEngine {
         this.renderer.updateParameters({ zoom: 1, timeOffset: 0 });
         this.ui.updateZoom(1);
         this.ui.updateTimeOffset(0);
+        this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -855,6 +870,10 @@ class SpectroEngine {
     }
 
     private displayMediaCache(item: MediaItem, cache: OfflineModeCache) {
+        const savedView = item.views[this.mode] || { zoom: 1, timeOffset: 0 };
+        const zoom = Math.max(1, savedView.zoom);
+        const maximumOffset = Math.max(0, 1 - 1 / zoom);
+        const timeOffset = clamp(savedView.timeOffset, 0, maximumOffset);
         this.sampleRate = item.sampleRate;
         this.analysisHistory = cache.analyses;
         this.spectrogramBuffer = new Circular2DBuffer(
@@ -867,15 +886,16 @@ class SpectroEngine {
         this.renderer.updateParameters({
             sampleRate: item.sampleRate,
             windowSize: cache.fftSize,
-            zoom: this.renderParameters.zoom || 1,
-            timeOffset: 0,
+            zoom,
+            timeOffset,
         });
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.renderParameters = {
             ...this.renderParameters,
-            timeOffset: 0,
+            zoom,
+            timeOffset,
         };
-        this.timeOffset = 0;
+        this.timeOffset = timeOffset;
         this.selection = null;
         this.playbackRange = null;
         this.ui.updateSelection(null);
@@ -896,7 +916,8 @@ class SpectroEngine {
             this.lastUiUpdate = 0;
             this.updateUiSnapshot(latest);
         }
-        this.ui.updateTimeOffset(0);
+        this.ui.updateZoom(zoom);
+        this.ui.updateTimeOffset(timeOffset);
         this.ui.setPlayState('stopped', item.name, '整段分析完成，可自由拖动播放');
         this.notifyTransport();
         this.overlayDirty = true;
@@ -1050,6 +1071,7 @@ class SpectroEngine {
             sampleRate: this.recordingSampleRate,
             samples,
             modes: {},
+            views: {},
         };
         this.mediaItems.unshift(item);
         this.notifyMediaLibrary();
@@ -1065,6 +1087,17 @@ class SpectroEngine {
             state: item.state,
         }));
         this.ui.updateMediaLibrary(items, this.activeMediaId);
+    }
+
+    private saveActiveView() {
+        const item = this.activeMedia();
+        if (item === null) {
+            return;
+        }
+        item.views[this.mode] = {
+            zoom: Math.max(1, this.renderParameters.zoom || 1),
+            timeOffset: this.timeOffset,
+        };
     }
 
     private notifyTransport() {
