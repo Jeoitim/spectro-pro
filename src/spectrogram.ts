@@ -1,6 +1,6 @@
 import { FFT } from 'jsfft';
 
-import { blackmanHarris, hzToMel, inverseLerp, lerp, melToHz } from './math-util';
+import { hzToMel, inverseLerp, lerp, melToHz } from './math-util';
 
 export type Scale = 'linear' | 'mel';
 
@@ -8,6 +8,7 @@ export interface SpectrogramOptions {
     isStart?: boolean;
     isEnd?: boolean;
     windowSize?: number;
+    fftSize?: number;
     windowStepSize?: number;
     minFrequencyHz?: number;
     maxFrequencyHz?: number;
@@ -24,6 +25,7 @@ export interface SpectrogramResult {
 
 function generateSpectrogramForSingleFrame(
     windowSamples: Float32Array,
+    effectiveWindowSize: number,
     resultBuffer: Float32Array,
     resultBufferIndex: number,
     minFrequencyHz: number,
@@ -32,9 +34,24 @@ function generateSpectrogramForSingleFrame(
     scale: Scale,
     scaleSize: number
 ) {
-    // Apply a Blackman-Harris windowing function to the input
+    // The effective analysis window can be shorter than the power-of-two FFT.
+    // Zero padding preserves the requested Praat-style time window while keeping
+    // jsfft on a fast radix-2 size.
+    const padding = Math.floor((windowSamples.length - effectiveWindowSize) / 2);
     for (let i = 0; i < windowSamples.length; i += 1) {
-        windowSamples[i] *= blackmanHarris(i, windowSamples.length);
+        if (i < padding || i >= padding + effectiveWindowSize) {
+            windowSamples[i] = 0;
+        } else {
+            const windowIndex = i - padding;
+            const hamming =
+                0.54 -
+                0.46 *
+                    Math.cos(
+                        (2 * Math.PI * windowIndex) /
+                            Math.max(1, effectiveWindowSize - 1)
+                    );
+            windowSamples[i] *= hamming;
+        }
     }
 
     const fft = FFT(windowSamples);
@@ -78,6 +95,7 @@ export function generateSpectrogram(
         isStart = false, // Is the frame at the start of the audio
         isEnd = false, // Is the frame at the end of the audio
         windowSize = 4096, // Size of the FFT window in samples
+        fftSize = windowSize, // Power-of-two FFT size; may include zero padding
         windowStepSize = 1024, // Number of samples between each FFT window
         minFrequencyHz, // Smallest frequency in Hz to calculate the spectrogram for
         maxFrequencyHz, // Largest frequency in Hz to calculate the spectrogram for
@@ -90,20 +108,25 @@ export function generateSpectrogram(
         minFrequencyHz = 0;
     }
     if (maxFrequencyHz === undefined) {
-        maxFrequencyHz = (sampleRate * (windowSize - 2)) / (2 * windowSize);
+        maxFrequencyHz = (sampleRate * (fftSize - 2)) / (2 * fftSize);
     }
     if (scaleSize === undefined) {
-        scaleSize = windowSize / 2;
+        scaleSize = fftSize / 2;
     }
-    if (windowSize % windowStepSize !== 0) {
-        throw new Error('Window step size must be evenly divisible by the window size');
+    if (fftSize < windowSize) {
+        throw new Error('FFT size must be greater than or equal to the analysis window size');
     }
 
     let numWindows =
-        Math.ceil(samplesLength / windowStepSize) - Math.floor(windowSize / windowStepSize) + 1;
+        samplesLength < windowSize
+            ? 0
+            : Math.floor((samplesLength - windowSize) / windowStepSize) + 1;
     let startIdx = samplesStart;
     if (isStart || isEnd) {
-        const additionalWindows = Math.floor(windowSize / windowStepSize) - 1;
+        const additionalWindows = Math.max(
+            0,
+            Math.ceil(windowSize / windowStepSize) - 1
+        );
         if (isStart) {
             numWindows += additionalWindows;
             startIdx -= additionalWindows * windowStepSize;
@@ -114,24 +137,27 @@ export function generateSpectrogram(
     }
 
     const result = new Float32Array(scaleSize * numWindows);
-    const windowSamples = new Float32Array(windowSize);
+    const windowSamples = new Float32Array(fftSize);
+    const padding = Math.floor((fftSize - windowSize) / 2);
 
     for (
         let i = startIdx, windowIdx = 0;
         windowIdx < numWindows * scaleSize;
         i += windowStepSize, windowIdx += scaleSize
     ) {
+        windowSamples.fill(0);
         for (let j = 0; j < windowSize; j += 1) {
             const sampleIdx = i + j;
             if (sampleIdx < samplesStart || sampleIdx >= samplesStart + samplesLength) {
-                windowSamples[j] = 0;
+                windowSamples[padding + j] = 0;
             } else {
-                windowSamples[j] = samples[sampleIdx];
+                windowSamples[padding + j] = samples[sampleIdx];
             }
         }
 
         generateSpectrogramForSingleFrame(
             windowSamples,
+            windowSize,
             result,
             windowIdx,
             minFrequencyHz,
@@ -148,6 +174,7 @@ export function generateSpectrogram(
             isStart,
             isEnd,
             windowSize,
+            fftSize,
             windowStepSize,
             minFrequencyHz,
             maxFrequencyHz,

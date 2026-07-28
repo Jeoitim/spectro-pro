@@ -1,21 +1,21 @@
 {
-  "name": "spectro",
-  "version": "1.0.0",
-  "description": "Real-time audio spectrogram generator for the web.",
+  "name": "spectro-pro",
+  "version": "0.1.0",
+  "description": "Modern real-time acoustic visualizer for the web.",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "webpack --mode=production",
-    "start": "webpack serve --mode=development",
+    "build": "node --openssl-legacy-provider node_modules/webpack/bin/webpack.js --mode=production",
+    "start": "node --openssl-legacy-provider node_modules/webpack-cli/bin/cli.js serve --mode=development",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'",
     "type-check": "tsc"
   },
-  "author": "Caleb Joseph (https://github.com/calebj0seph)",
+  "author": "Spectro Pro contributors; based on Spectro by Caleb Joseph",
   "license": "MIT",
-  "homepage": "https://github.com/calebj0seph/spectro",
-  "bugs": "https://github.com/calebj0seph/spectro/issues",
+  "homepage": "https://github.com/Jeoitim/spectro-pro",
+  "bugs": "https://github.com/Jeoitim/spectro-pro/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/calebj0seph/spectro.git"
+    "url": "https://github.com/Jeoitim/spectro-pro.git"
   },
   "dependencies": {
     "@material-ui/core": "^4.11.3",

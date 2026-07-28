@@ -1,3 +1,4 @@
+import { AcousticAnalysis, AnalysisOptions } from './analysis';
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 import { ACTION_COMPUTE_SPECTROGRAM, ComputeSpectrogramMessage, Message } from './worker-constants';
 // eslint-disable-next-line import/extensions
@@ -77,13 +78,17 @@ export async function offThreadGenerateSpectrogram(
     samples: Float32Array,
     samplesStart: number,
     samplesLength: number,
-    options: SpectrogramOptions
-): Promise<SpectrogramResult & { input: Float32Array }> {
+    options: SpectrogramOptions,
+    analysisSamplesStart: number,
+    analysisSamplesLength: number,
+    analysisOptions: AnalysisOptions
+): Promise<SpectrogramResult & { input: Float32Array; analysis: AcousticAnalysis }> {
     const {
         spectrogramWindowCount,
         spectrogramOptions,
         spectrogramBuffer,
         inputBuffer,
+        analysis,
     } = await queueTask<ComputeSpectrogramMessage>(
         ACTION_COMPUTE_SPECTROGRAM,
         {
@@ -91,6 +96,9 @@ export async function offThreadGenerateSpectrogram(
             samplesStart,
             samplesLength,
             options,
+            analysisSamplesStart,
+            analysisSamplesLength,
+            analysisOptions,
         },
         [samples.buffer]
     );
@@ -100,5 +108,6 @@ export async function offThreadGenerateSpectrogram(
         options: spectrogramOptions,
         spectrogram: new Float32Array(spectrogramBuffer),
         input: new Float32Array(inputBuffer),
+        analysis,
     };
 }

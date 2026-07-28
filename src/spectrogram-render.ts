@@ -8,6 +8,7 @@ export interface RenderParameters {
     contrast: number;
     sensitivity: number;
     zoom: number;
+    timeOffset: number;
     minFrequencyHz: number;
     maxFrequencyHz: number;
     sampleRate: number;
@@ -76,6 +77,8 @@ export class SpectrogramGPURenderer {
 
     private currentZoom: number = 4;
 
+    private currentTimeOffset: number = 0;
+
     private resizeHandlerLastRealWidth: number = 0;
 
     private resizeHandlerZoomOverride: number = 1;
@@ -93,6 +96,7 @@ export class SpectrogramGPURenderer {
         contrastUniform: WebGLUniformLocation;
         sensitivityUniform: WebGLUniformLocation;
         zoomUniform: WebGLUniformLocation;
+        timeOffsetUniform: WebGLUniformLocation;
     };
 
     constructor(canvas: HTMLCanvasElement, spectrogramWidth: number, spectrogramHeight: number) {
@@ -152,6 +156,10 @@ export class SpectrogramGPURenderer {
             zoomUniform: this.getUniformLocation(
                 program,
                 FragmentShader.uniforms.uZoom.variableName
+            ),
+            timeOffsetUniform: this.getUniformLocation(
+                program,
+                FragmentShader.uniforms.uTimeOffset.variableName
             ),
         };
 
@@ -225,6 +233,11 @@ export class SpectrogramGPURenderer {
             LERP_AMOUNT
         );
         this.currentZoom = stepTowards(this.currentZoom, this.parameters!.zoom, LERP_AMOUNT);
+        this.currentTimeOffset = stepTowards(
+            this.currentTimeOffset,
+            this.parameters!.timeOffset,
+            LERP_AMOUNT
+        );
         this.ctx.uniform2fv(this.program.scaleRangeUniform, this.currentScaleRange);
         this.ctx.uniform1f(this.program.contrastUniform, this.currentContrast);
         this.ctx.uniform1f(this.program.sensitivityUniform, this.currentSensitivity);
@@ -232,6 +245,7 @@ export class SpectrogramGPURenderer {
             this.program.zoomUniform,
             this.resizeHandlerZoomOverride * this.currentZoom
         );
+        this.ctx.uniform1f(this.program.timeOffsetUniform, this.currentTimeOffset);
 
         this.ctx.activeTexture(this.ctx.TEXTURE0);
         this.ctx.bindTexture(this.ctx.TEXTURE_2D, this.spectrogramTexture);
@@ -269,6 +283,7 @@ export class SpectrogramGPURenderer {
             contrast: merge(parameters.contrast, this.parameters?.contrast, 25),
             sensitivity: merge(parameters.sensitivity, this.parameters?.sensitivity, 25),
             zoom: merge(parameters.zoom, this.parameters?.zoom, 4),
+            timeOffset: merge(parameters.timeOffset, this.parameters?.timeOffset, 0),
             minFrequencyHz: merge(parameters.minFrequencyHz, this.parameters?.minFrequencyHz, 10),
             maxFrequencyHz: merge(
                 parameters.maxFrequencyHz,

@@ -1,32 +1,38 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
 
-import { RenderParameters } from '../spectrogram-render';
-
-import generateSettingsContainer from './SettingsContainer';
+import App, { AppCallbacks, UiController } from './App';
 
 export default function initialiseControlsUi(
     container: Element,
-    props: {
-        stopCallback: () => void;
-        clearSpectrogramCallback: () => void;
-        renderParametersUpdateCallback: (settings: Partial<RenderParameters>) => void;
-        renderFromMicrophoneCallback: () => void;
-        renderFromFileCallback: (file: ArrayBuffer) => void;
-    }
-) {
-    const [SettingsContainer, setPlayState] = generateSettingsContainer();
+    callbacks: AppCallbacks
+): UiController {
+    let mountedController: UiController | null = null;
+    const registerController = (controller: UiController) => {
+        mountedController = controller;
+    };
 
     ReactDOM.render(
-        <SettingsContainer
-            onStop={props.stopCallback}
-            onClearSpectrogram={props.clearSpectrogramCallback}
-            onRenderParametersUpdate={props.renderParametersUpdateCallback}
-            onRenderFromMicrophone={props.renderFromMicrophoneCallback}
-            onRenderFromFile={props.renderFromFileCallback}
-        />,
+        <App {...callbacks} registerController={registerController} />,
         container
     );
 
-    return setPlayState;
+    const withController = (callback: (controller: UiController) => void) => {
+        if (mountedController !== null) {
+            callback(mountedController);
+        }
+    };
+
+    return {
+        setPlayState: (state, sourceName, message) =>
+            withController((controller) =>
+                controller.setPlayState(state, sourceName, message)
+            ),
+        updateSnapshot: (snapshot) =>
+            withController((controller) => controller.updateSnapshot(snapshot)),
+        updateCursor: (snapshot) =>
+            withController((controller) => controller.updateCursor(snapshot)),
+        updateTimeOffset: (offset) =>
+            withController((controller) => controller.updateTimeOffset(offset)),
+    };
 }

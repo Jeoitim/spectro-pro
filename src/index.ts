@@ -1,359 +1,876 @@
 import debounce from 'lodash.debounce';
 
+import {
+    AcousticAnalysis,
+    AnalysisOptions,
+    PitchAlgorithm,
+} from './analysis';
+import { AURORA_GRADIENT } from './color-util';
 import initialiseControlsUi from './controls-ui';
-import { Circular2DBuffer } from './math-util';
-import { SpectrogramGPURenderer, RenderParameters } from './spectrogram-render';
+import {
+    CursorSnapshot,
+    LiveSnapshot,
+    SpectrogramMode,
+    UiController,
+} from './controls-ui/App';
+import { Circular2DBuffer, clamp, hzToMel, melToHz } from './math-util';
+import {
+    RenderParameters,
+    SpectrogramGPURenderer,
+} from './spectrogram-render';
 import { offThreadGenerateSpectrogram } from './worker-util';
 
-const SPECTROGRAM_WINDOW_SIZE = 4096;
-const SPECTROGRAM_WINDOW_OVERLAP = 1024;
+const AUDIO_CHUNK_SIZE = 1024;
+const SPECTROGRAM_HEIGHT = 512;
+const HISTORY_SECONDS = 8;
+const PITCH_FLOOR_HZ = 75;
+const PITCH_CEILING_HZ = 500;
+const INTENSITY_FLOOR_DB_SPL = 50;
+const INTENSITY_CEILING_DB_SPL = 100;
 
-interface SpectrogramBufferData {
-    buffer: Float32Array;
-    start: number;
-    length: number;
-    sampleRate: number;
-    isStart: boolean;
+interface ModeConfiguration {
+    windowSize: number;
+    fftSize: number;
+    hopSize: number;
+    historyCapacity: number;
 }
 
-// Starts rendering the spectrograms, returning callbacks used to provide audio samples to render
-// and update the display parameters of the spectrograms
-async function startRenderingSpectrogram(): Promise<{
-    bufferCallback: (bufferData: SpectrogramBufferData[]) => Promise<Float32Array[]>;
-    clearCallback: () => void;
-    updateRenderParameters: (parameters: Partial<RenderParameters>) => void;
-}> {
-    // The canvases that will render the spectrogram for each audio channel
-    const spectrogramCanvases = [
-        document.querySelector('#leftSpectrogram') as HTMLCanvasElement | null,
-        document.querySelector('#rightSpectrogram') as HTMLCanvasElement | null,
-    ];
+interface AnalysisPoint extends AcousticAnalysis {
+    timeSeconds: number;
+}
 
-    // The callbacks for each spectrogram that will render the audio samples provided when called
-    const bufferCallbacks: ((bufferData: SpectrogramBufferData) => Promise<Float32Array>)[] = [];
+interface ProcessRequest {
+    samples: Float32Array;
+    sampleRate: number;
+    newSamples: number;
+    endTimeSeconds: number;
+}
 
-    // Set up the WebGL contexts for each spectrogram
-    const spectrogramBuffers: Circular2DBuffer<Float32Array>[] = [];
-    const renderers: SpectrogramGPURenderer[] = [];
-    spectrogramCanvases.forEach((canvas) => {
-        if (canvas === null || canvas.parentElement === null) {
-            return;
+interface SessionStatistics {
+    totalFrames: number;
+    voicedFrames: number;
+    pitchSum: number;
+    pitchMin: number;
+    pitchMax: number;
+    intensityPowerSum: number;
+}
+
+function nextPowerOfTwo(value: number) {
+    return 2 ** Math.ceil(Math.log2(value));
+}
+
+function modeConfiguration(
+    mode: SpectrogramMode,
+    sampleRate: number
+): ModeConfiguration {
+    const durationSeconds = mode === 'broadband' ? 0.005 : 0.03;
+    const windowSize = Math.max(32, Math.round(sampleRate * durationSeconds));
+    const hopSize = mode === 'broadband' ? 128 : 256;
+    return {
+        windowSize,
+        fftSize: nextPowerOfTwo(windowSize),
+        hopSize,
+        historyCapacity: Math.ceil((HISTORY_SECONDS * sampleRate) / hopSize),
+    };
+}
+
+function emptyStatistics(): SessionStatistics {
+    return {
+        totalFrames: 0,
+        voicedFrames: 0,
+        pitchSum: 0,
+        pitchMin: Number.POSITIVE_INFINITY,
+        pitchMax: Number.NEGATIVE_INFINITY,
+        intensityPowerSum: 0,
+    };
+}
+
+class SpectroEngine {
+    private readonly ui: UiController;
+
+    private readonly canvas: HTMLCanvasElement;
+
+    private readonly overlay: HTMLCanvasElement;
+
+    private readonly stage: HTMLElement;
+
+    private renderer: SpectrogramGPURenderer;
+
+    private spectrogramBuffer: Circular2DBuffer<Float32Array>;
+
+    private analysisHistory: AnalysisPoint[] = [];
+
+    private mode: SpectrogramMode = 'broadband';
+
+    private pitchAlgorithm: PitchAlgorithm = 'yin';
+
+    private sampleRate = 48000;
+
+    private renderParameters: Partial<RenderParameters> = {
+        sensitivity: 10 ** (0.54 * 3) - 1,
+        contrast: 10 ** (0.56 * 5) - 1,
+        zoom: 1,
+        timeOffset: 0,
+        minFrequencyHz: 0,
+        maxFrequencyHz: 5500,
+        scale: 'linear',
+        gradient: AURORA_GRADIENT,
+    };
+
+    private analysisOptions: AnalysisOptions = {
+        pitchAlgorithm: 'yin',
+        minPitchHz: 75,
+        maxPitchHz: 500,
+        formantCeilingHz: 5500,
+        splCalibrationDb: 0,
+    };
+
+    private showPitch = true;
+
+    private showFormants = true;
+
+    private showIntensity = true;
+
+    private timeOffset = 0;
+
+    private overlayDirty = true;
+
+    private processing = false;
+
+    private pendingRequest: ProcessRequest | null = null;
+
+    private stopActiveSource: (() => void) | null = null;
+
+    private statistics: SessionStatistics = emptyStatistics();
+
+    private sessionElapsedSeconds = 0;
+
+    private lastUiUpdate = 0;
+
+    private inspector: { x: number; y: number } | null = null;
+
+    constructor(ui: UiController) {
+        const canvas = document.querySelector('#spectrogramCanvas');
+        const overlay = document.querySelector('#analysisOverlay');
+        const stage = document.querySelector('#spectrogramStage');
+        if (
+            !(canvas instanceof HTMLCanvasElement) ||
+            !(overlay instanceof HTMLCanvasElement) ||
+            !(stage instanceof HTMLElement)
+        ) {
+            throw new Error('Unable to initialise the Spectro Pro display');
         }
+        this.ui = ui;
+        this.canvas = canvas;
+        this.overlay = overlay;
+        this.stage = stage;
 
-        // The 2D circular queue of the FFT data for each audio channel
-        const spectrogramBuffer = new Circular2DBuffer(
+        const config = modeConfiguration(this.mode, this.sampleRate);
+        this.spectrogramBuffer = new Circular2DBuffer(
             Float32Array,
-            canvas.parentElement.offsetWidth,
-            SPECTROGRAM_WINDOW_SIZE / 2,
+            config.historyCapacity,
+            SPECTROGRAM_HEIGHT,
             1
         );
-        spectrogramBuffers.push(spectrogramBuffer);
-
-        const renderer = new SpectrogramGPURenderer(
-            canvas,
-            spectrogramBuffer.width,
-            spectrogramBuffer.height
+        this.renderer = new SpectrogramGPURenderer(
+            this.canvas,
+            this.spectrogramBuffer.width,
+            this.spectrogramBuffer.height
         );
-        renderer.resizeCanvas(canvas.parentElement.offsetWidth, canvas.parentElement.offsetHeight);
-        renderers.push(renderer);
-
-        let imageDirty = false;
-        bufferCallbacks.push(
-            async ({ buffer, start, length, sampleRate, isStart }: SpectrogramBufferData) => {
-                renderer.updateParameters({
-                    windowSize: SPECTROGRAM_WINDOW_SIZE,
-                    sampleRate,
-                });
-
-                const spectrogram = await offThreadGenerateSpectrogram(buffer, start, length, {
-                    windowSize: SPECTROGRAM_WINDOW_SIZE,
-                    windowStepSize: SPECTROGRAM_WINDOW_OVERLAP,
-                    sampleRate,
-                    isStart,
-                });
-                spectrogramBuffer.enqueue(spectrogram.spectrogram);
-                imageDirty = true;
-
-                return spectrogram.input;
-            }
-        );
-
-        // Trigger a render on each frame only if we have new spectrogram data to display
-        const render = () => {
-            if (imageDirty) {
-                renderer.updateSpectrogram(spectrogramBuffer);
-            }
-            renderer.render();
-            requestAnimationFrame(render);
-        };
-        requestAnimationFrame(render);
-    });
-
-    // Handle resizing of the window
-    const resizeHandler = debounce(() => {
-        spectrogramCanvases.forEach((canvas, i) => {
-            if (canvas === null || canvas.parentElement === null) {
-                return;
-            }
-
-            spectrogramBuffers[i].resizeWidth(canvas.parentElement.offsetWidth);
-            renderers[i].resizeCanvas(
-                canvas.parentElement.offsetWidth,
-                canvas.parentElement.offsetHeight
-            );
-            renderers[i].updateSpectrogram(spectrogramBuffers[i]);
+        this.renderer.updateParameters({
+            ...this.renderParameters,
+            sampleRate: this.sampleRate,
+            windowSize: config.fftSize,
         });
-    }, 250);
-    window.addEventListener('resize', resizeHandler);
 
-    // Make sure the canvas still displays properly in the middle of a resize
-    window.addEventListener('resize', () => {
-        spectrogramCanvases.forEach((canvas, i) => {
-            if (canvas === null || canvas.parentElement === null) {
-                return;
-            }
-
-            renderers[i].fastResizeCanvas(
-                canvas.parentElement.offsetWidth,
-                canvas.parentElement.offsetHeight
-            );
-        });
-    });
-
-    return {
-        bufferCallback: (buffers: SpectrogramBufferData[]) =>
-            Promise.all(buffers.map((buffer, i) => bufferCallbacks[i](buffer))),
-        clearCallback: () => {
-            renderers.forEach((renderer, i) => {
-                spectrogramBuffers[i].clear();
-                renderer.updateSpectrogram(spectrogramBuffers[i], true);
-            });
-        },
-        updateRenderParameters: (parameters: Partial<RenderParameters>) => {
-            for (let i = 0; i < renderers.length; i += 1) {
-                renderers[i].updateParameters(parameters);
-            }
-        },
-    };
-}
-
-async function setupSpectrogramFromMicrophone(
-    audioCtx: AudioContext,
-    bufferCallback: (bufferData: SpectrogramBufferData[]) => Promise<Float32Array[]>
-) {
-    const CHANNELS = 2;
-    const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const source = audioCtx.createMediaStreamSource(mediaStream);
-
-    const processor = audioCtx.createScriptProcessor(
-        SPECTROGRAM_WINDOW_OVERLAP,
-        CHANNELS,
-        CHANNELS
-    );
-
-    // An array of the last received audio buffers for each channel
-    const channelBuffers: Float32Array[][] = [];
-    for (let i = 0; i < CHANNELS; i += 1) {
-        channelBuffers.push([]);
+        this.resize();
+        const resize = debounce(() => this.resize(), 150);
+        window.addEventListener('resize', resize);
+        requestAnimationFrame(() => this.renderLoop());
     }
 
-    let sampleRate: number | null = null;
-    let isStart = true;
-    let bufferCallbackPromise: Promise<Float32Array[]> | null = null;
-    const processChannelBuffers = () => {
-        if (bufferCallbackPromise !== null) {
+    updateDisplay(parameters: Partial<RenderParameters>) {
+        this.renderParameters = { ...this.renderParameters, ...parameters };
+        if (parameters.timeOffset !== undefined) {
+            this.timeOffset = parameters.timeOffset;
+        }
+        this.renderer.updateParameters(parameters);
+        this.overlayDirty = true;
+    }
+
+    setMode(mode: SpectrogramMode) {
+        this.mode = mode;
+        const config = modeConfiguration(mode, this.sampleRate);
+        this.spectrogramBuffer.resizeWidth(config.historyCapacity);
+        this.renderer.updateParameters({
+            sampleRate: this.sampleRate,
+            windowSize: config.fftSize,
+            maxFrequencyHz: mode === 'broadband' ? 5500 : 1200,
+            scale: 'linear',
+            timeOffset: 0,
+        });
+        this.timeOffset = 0;
+        this.clearVisualHistory();
+    }
+
+    setPitchAlgorithm(algorithm: PitchAlgorithm) {
+        this.pitchAlgorithm = algorithm;
+        this.analysisOptions = {
+            ...this.analysisOptions,
+            pitchAlgorithm: algorithm,
+        };
+    }
+
+    setOverlays(pitch: boolean, formants: boolean, intensity: boolean) {
+        this.showPitch = pitch;
+        this.showFormants = formants;
+        this.showIntensity = intensity;
+        this.overlayDirty = true;
+    }
+
+    async startMicrophone() {
+        this.stop();
+        this.resetSession();
+        this.ui.setPlayState('loading-mic', '麦克风', '正在请求麦克风权限…');
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                },
+                video: false,
+            });
+            const audioCtx = this.createAudioContext();
+            const source = audioCtx.createMediaStreamSource(stream);
+            const processor = audioCtx.createScriptProcessor(
+                AUDIO_CHUNK_SIZE,
+                Math.min(2, source.channelCount || 1),
+                1
+            );
+            this.setSampleRate(audioCtx.sampleRate);
+
+            const rollingCapacity = Math.ceil(audioCtx.sampleRate * 0.18);
+            const rolling = new Float32Array(rollingCapacity);
+            let rollingLength = 0;
+            let receivedSamples = 0;
+
+            processor.addEventListener('audioprocess', (event) => {
+                const input = event.inputBuffer;
+                const chunk = new Float32Array(input.length);
+                for (let channel = 0; channel < input.numberOfChannels; channel += 1) {
+                    const channelData = input.getChannelData(channel);
+                    for (let i = 0; i < chunk.length; i += 1) {
+                        chunk[i] += channelData[i] / input.numberOfChannels;
+                    }
+                }
+
+                if (rollingLength + chunk.length > rolling.length) {
+                    const discard = rollingLength + chunk.length - rolling.length;
+                    rolling.copyWithin(0, discard, rollingLength);
+                    rollingLength -= discard;
+                }
+                rolling.set(chunk, rollingLength);
+                rollingLength += chunk.length;
+                receivedSamples += chunk.length;
+                this.sessionElapsedSeconds = receivedSamples / audioCtx.sampleRate;
+
+                if (rollingLength >= Math.round(audioCtx.sampleRate * 0.085)) {
+                    this.queueProcessing({
+                        samples: new Float32Array(rolling.subarray(0, rollingLength)),
+                        sampleRate: audioCtx.sampleRate,
+                        newSamples: chunk.length,
+                        endTimeSeconds: this.sessionElapsedSeconds,
+                    });
+                }
+            });
+
+            source.connect(processor);
+            processor.connect(audioCtx.destination);
+            audioCtx.resume();
+
+            this.stopActiveSource = () => {
+                processor.disconnect();
+                source.disconnect();
+                stream.getTracks().forEach((track) => track.stop());
+            };
+            this.ui.setPlayState('playing', '麦克风', '实时分析中');
+        } catch (error) {
+            this.ui.setPlayState(
+                'stopped',
+                '麦克风不可用',
+                error instanceof Error ? error.message : '无法打开麦克风'
+            );
+        }
+    }
+
+    async startFile(arrayBuffer: ArrayBuffer, name: string) {
+        this.stop();
+        this.resetSession();
+        this.ui.setPlayState('loading-file', name, '正在解码音频…');
+
+        try {
+            const audioCtx = this.createAudioContext();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            this.setSampleRate(audioBuffer.sampleRate);
+            const mono = new Float32Array(audioBuffer.length);
+            for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
+                const channelData = audioBuffer.getChannelData(channel);
+                for (let i = 0; i < mono.length; i += 1) {
+                    mono[i] += channelData[i] / audioBuffer.numberOfChannels;
+                }
+            }
+
+            const source = audioCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioCtx.destination);
+            const startedAt = audioCtx.currentTime;
+            let lastProcessedSample = 0;
+            let stopped = false;
+
+            const tick = () => {
+                if (stopped) {
+                    return;
+                }
+                const currentSample = Math.min(
+                    mono.length,
+                    Math.floor((audioCtx.currentTime - startedAt) * audioBuffer.sampleRate)
+                );
+                const available = currentSample - lastProcessedSample;
+                if (
+                    available >= AUDIO_CHUNK_SIZE &&
+                    currentSample >= Math.round(audioBuffer.sampleRate * 0.085)
+                ) {
+                    const processEnd =
+                        lastProcessedSample +
+                        Math.floor(available / AUDIO_CHUNK_SIZE) * AUDIO_CHUNK_SIZE;
+                    const start = Math.max(
+                        0,
+                        processEnd - Math.ceil(audioBuffer.sampleRate * 0.18)
+                    );
+                    this.sessionElapsedSeconds = processEnd / audioBuffer.sampleRate;
+                    this.queueProcessing({
+                        samples: new Float32Array(mono.subarray(start, processEnd)),
+                        sampleRate: audioBuffer.sampleRate,
+                        newSamples: processEnd - lastProcessedSample,
+                        endTimeSeconds: this.sessionElapsedSeconds,
+                    });
+                    lastProcessedSample = processEnd;
+                }
+            };
+
+            const timer = window.setInterval(tick, 16);
+            source.addEventListener('ended', () => {
+                tick();
+                window.clearInterval(timer);
+                if (!stopped) {
+                    this.ui.setPlayState('stopped', name, '播放与分析完成');
+                    this.stopActiveSource = null;
+                }
+            });
+            this.stopActiveSource = () => {
+                stopped = true;
+                window.clearInterval(timer);
+                try {
+                    source.stop();
+                } catch {
+                    // The source may already have ended.
+                }
+                source.disconnect();
+            };
+            source.start();
+            audioCtx.resume();
+            this.ui.setPlayState('playing', name, '播放并实时分析中');
+        } catch (error) {
+            this.ui.setPlayState(
+                'stopped',
+                name,
+                error instanceof Error ? error.message : '无法读取此音频'
+            );
+        }
+    }
+
+    stop() {
+        if (this.stopActiveSource !== null) {
+            const stop = this.stopActiveSource;
+            this.stopActiveSource = null;
+            stop();
+        }
+        this.pendingRequest = null;
+    }
+
+    clear() {
+        this.resetSession();
+    }
+
+    navigate(amount: number) {
+        const nextOffset = clamp(this.timeOffset + amount, 0, 0.9);
+        this.timeOffset = nextOffset;
+        this.renderer.updateParameters({ timeOffset: nextOffset });
+        this.ui.updateTimeOffset(nextOffset);
+        this.overlayDirty = true;
+    }
+
+    inspect(x: number, y: number) {
+        if (x < 0 || y < 0) {
+            this.inspector = null;
+            this.ui.updateCursor(null);
+            this.overlayDirty = true;
+            return;
+        }
+        this.inspector = { x, y };
+        const visible = this.visibleHistoryRange();
+        const index = clamp(
+            Math.floor(visible.start + x * (visible.end - visible.start)),
+            0,
+            Math.max(0, this.analysisHistory.length - 1)
+        );
+        const point = this.analysisHistory[index];
+        if (!point) {
+            this.ui.updateCursor(null);
+            return;
+        }
+        const minFrequency = this.renderParameters.minFrequencyHz || 0;
+        const maxFrequency = this.renderParameters.maxFrequencyHz || 5500;
+        const frequency =
+            this.renderParameters.scale === 'mel'
+                ? melToHz(
+                      hzToMel(minFrequency) +
+                          (1 - y) *
+                              (hzToMel(maxFrequency) - hzToMel(minFrequency))
+                  )
+                : minFrequency + (1 - y) * (maxFrequency - minFrequency);
+        const snapshot: CursorSnapshot = {
+            x,
+            y,
+            timeSeconds: point.timeSeconds,
+            frequencyHz: frequency,
+            pitchHz: point.pitchHz,
+            intensityDbSpl: point.intensityDbSpl,
+            formantsHz: point.formantsHz,
+        };
+        this.ui.updateCursor(snapshot);
+        this.overlayDirty = true;
+    }
+
+    exportImage() {
+        this.renderer.render();
+        this.drawOverlay();
+        const width = this.canvas.width;
+        const height = this.canvas.height;
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = width;
+        exportCanvas.height = height;
+        const ctx = exportCanvas.getContext('2d');
+        if (!ctx) {
+            return;
+        }
+        ctx.drawImage(this.canvas, 0, 0);
+        ctx.drawImage(this.overlay, 0, 0);
+        ctx.fillStyle = 'rgba(4, 7, 18, 0.72)';
+        ctx.fillRect(18, 18, 250, 48);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '600 22px Arial, sans-serif';
+        ctx.fillText('SPECTRO PRO', 32, 49);
+        ctx.fillStyle = '#9aa7bc';
+        ctx.font = '12px Arial, sans-serif';
+        ctx.fillText(
+            this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms',
+            176,
+            48
+        );
+        exportCanvas.toBlob((blob) => {
+            if (!blob) {
+                return;
+            }
+            const link = document.createElement('a');
+            link.download = `spectro-pro-${new Date()
+                .toISOString()
+                .replace(/[:.]/g, '-')}.png`;
+            link.href = URL.createObjectURL(blob);
+            link.click();
+            URL.revokeObjectURL(link.href);
+        }, 'image/png');
+    }
+
+    private createAudioContext() {
+        return new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    private setSampleRate(sampleRate: number) {
+        if (this.sampleRate === sampleRate) {
+            return;
+        }
+        this.sampleRate = sampleRate;
+        const config = modeConfiguration(this.mode, sampleRate);
+        this.spectrogramBuffer.resizeWidth(config.historyCapacity);
+        this.renderer.updateParameters({
+            sampleRate,
+            windowSize: config.fftSize,
+        });
+        this.clearVisualHistory();
+    }
+
+    private queueProcessing(request: ProcessRequest) {
+        if (this.processing) {
+            this.pendingRequest = request;
+            return;
+        }
+        this.processRequest(request);
+    }
+
+    private async processRequest(request: ProcessRequest) {
+        this.processing = true;
+        try {
+            const config = modeConfiguration(this.mode, request.sampleRate);
+            const maximumFrames = Math.floor(request.newSamples / config.hopSize);
+            const availableFrames =
+                Math.floor(
+                    (request.samples.length - config.windowSize) / config.hopSize
+                ) + 1;
+            const frameCount = Math.max(1, Math.min(maximumFrames, availableFrames));
+            const samplesLength =
+                config.windowSize + (frameCount - 1) * config.hopSize;
+            const samplesStart = request.samples.length - samplesLength;
+            const analysisLength = Math.min(
+                request.samples.length,
+                Math.round(request.sampleRate * 0.085)
+            );
+            const result = await offThreadGenerateSpectrogram(
+                request.samples,
+                samplesStart,
+                samplesLength,
+                {
+                    windowSize: config.windowSize,
+                    fftSize: config.fftSize,
+                    windowStepSize: config.hopSize,
+                    sampleRate: request.sampleRate,
+                    scaleSize: SPECTROGRAM_HEIGHT,
+                },
+                request.samples.length - analysisLength,
+                analysisLength,
+                this.analysisOptions
+            );
+
+            this.renderer.updateParameters({
+                sampleRate: request.sampleRate,
+                windowSize: config.fftSize,
+            });
+            this.spectrogramBuffer.enqueue(result.spectrogram);
+            this.renderer.updateSpectrogram(this.spectrogramBuffer);
+            this.pushAnalysis(
+                result.analysis,
+                result.windowCount,
+                request.endTimeSeconds,
+                config.hopSize,
+                request.sampleRate
+            );
+        } catch (error) {
+            // Keep the live stream running if a single analysis frame fails.
+            console.warn('Unable to analyse audio frame', error);
+        } finally {
+            this.processing = false;
+            const next = this.pendingRequest;
+            this.pendingRequest = null;
+            if (next !== null) {
+                this.processRequest(next);
+            }
+        }
+    }
+
+    private pushAnalysis(
+        analysis: AcousticAnalysis,
+        count: number,
+        endTime: number,
+        hopSize: number,
+        sampleRate: number
+    ) {
+        for (let i = count - 1; i >= 0; i -= 1) {
+            this.analysisHistory.push({
+                ...analysis,
+                timeSeconds: endTime - (i * hopSize) / sampleRate,
+            });
+        }
+        if (this.analysisHistory.length > this.spectrogramBuffer.width) {
+            this.analysisHistory.splice(
+                0,
+                this.analysisHistory.length - this.spectrogramBuffer.width
+            );
+        }
+
+        this.statistics.totalFrames += 1;
+        this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
+        if (analysis.pitchHz !== null) {
+            this.statistics.voicedFrames += 1;
+            this.statistics.pitchSum += analysis.pitchHz;
+            this.statistics.pitchMin = Math.min(
+                this.statistics.pitchMin,
+                analysis.pitchHz
+            );
+            this.statistics.pitchMax = Math.max(
+                this.statistics.pitchMax,
+                analysis.pitchHz
+            );
+        }
+        this.overlayDirty = true;
+        this.updateUiSnapshot(analysis);
+    }
+
+    private updateUiSnapshot(analysis: AcousticAnalysis) {
+        const now = performance.now();
+        if (now - this.lastUiUpdate < 90) {
+            return;
+        }
+        this.lastUiUpdate = now;
+        const voiced = this.statistics.voicedFrames;
+        const total = this.statistics.totalFrames;
+        const snapshot: LiveSnapshot = {
+            elapsedSeconds: this.sessionElapsedSeconds,
+            pitchHz: analysis.pitchHz,
+            intensityDbSpl: analysis.intensityDbSpl,
+            formantsHz: analysis.formantsHz,
+            meanPitchHz: voiced ? this.statistics.pitchSum / voiced : null,
+            minPitchHz: voiced ? this.statistics.pitchMin : null,
+            maxPitchHz: voiced ? this.statistics.pitchMax : null,
+            meanIntensityDbSpl: total
+                ? 10 * Math.log10(this.statistics.intensityPowerSum / total)
+                : null,
+            voicedPercent: total ? (100 * voiced) / total : 0,
+            sampleRate: this.sampleRate,
+        };
+        this.ui.updateSnapshot(snapshot);
+    }
+
+    private resetSession() {
+        this.statistics = emptyStatistics();
+        this.sessionElapsedSeconds = 0;
+        this.lastUiUpdate = 0;
+        this.clearVisualHistory();
+        this.ui.updateSnapshot({
+            elapsedSeconds: 0,
+            pitchHz: null,
+            intensityDbSpl: 0,
+            formantsHz: [null, null, null],
+            meanPitchHz: null,
+            minPitchHz: null,
+            maxPitchHz: null,
+            meanIntensityDbSpl: null,
+            voicedPercent: 0,
+            sampleRate: this.sampleRate,
+        });
+    }
+
+    private clearVisualHistory() {
+        this.analysisHistory = [];
+        this.spectrogramBuffer.clear();
+        this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
+        this.timeOffset = 0;
+        this.renderer.updateParameters({ timeOffset: 0 });
+        this.ui.updateTimeOffset(0);
+        this.overlayDirty = true;
+    }
+
+    private resize() {
+        const width = Math.max(1, this.stage.clientWidth);
+        const height = Math.max(1, this.stage.clientHeight);
+        const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+        this.renderer.resizeCanvas(
+            Math.round(width * pixelRatio),
+            Math.round(height * pixelRatio)
+        );
+        this.overlay.width = Math.round(width * pixelRatio);
+        this.overlay.height = Math.round(height * pixelRatio);
+        this.overlay.style.width = `${width}px`;
+        this.overlay.style.height = `${height}px`;
+        this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
+        this.overlayDirty = true;
+    }
+
+    private renderLoop() {
+        this.renderer.render();
+        if (this.overlayDirty) {
+            this.drawOverlay();
+            this.overlayDirty = false;
+        }
+        requestAnimationFrame(() => this.renderLoop());
+    }
+
+    private visibleHistoryRange() {
+        const zoom = Math.max(1, this.renderParameters.zoom || 1);
+        const span = Math.max(2, Math.floor(this.spectrogramBuffer.width / zoom));
+        const offset = Math.floor(this.timeOffset * this.spectrogramBuffer.width);
+        const end = Math.max(0, this.analysisHistory.length - offset);
+        return {
+            start: Math.max(0, end - span),
+            end,
+            span,
+        };
+    }
+
+    private drawOverlay() {
+        const ctx = this.overlay.getContext('2d');
+        if (!ctx) {
+            return;
+        }
+        const width = this.overlay.width;
+        const height = this.overlay.height;
+        ctx.clearRect(0, 0, width, height);
+        const visible = this.visibleHistoryRange();
+        if (visible.end <= visible.start) {
             return;
         }
 
-        const buffers: Float32Array[] = [];
-        for (let i = 0; i < CHANNELS; i += 1) {
-            // Check if we have at least full window to render yet
-            if (channelBuffers[i].length < SPECTROGRAM_WINDOW_SIZE / SPECTROGRAM_WINDOW_OVERLAP) {
-                break;
+        const xForIndex = (index: number) =>
+            width - ((visible.end - index - 0.5) / visible.span) * width;
+        const frequencyY = (frequency: number) => {
+            const min = this.renderParameters.minFrequencyHz || 0;
+            const max = this.renderParameters.maxFrequencyHz || 5500;
+            if (this.renderParameters.scale === 'mel') {
+                return (
+                    height *
+                    (1 -
+                        (hzToMel(frequency) - hzToMel(min)) /
+                            Math.max(1e-9, hzToMel(max) - hzToMel(min)))
+                );
             }
+            return height * (1 - (frequency - min) / Math.max(1, max - min));
+        };
 
-            // Merge all the buffers we have so far into a single buffer for rendering
-            const buffer = new Float32Array(channelBuffers[i].length * SPECTROGRAM_WINDOW_OVERLAP);
-            buffers.push(buffer);
-            for (let j = 0; j < channelBuffers[i].length; j += 1) {
-                buffer.set(channelBuffers[i][j], SPECTROGRAM_WINDOW_OVERLAP * j);
+        if (this.showFormants && this.mode === 'broadband') {
+            const colors = ['#ff4f72', '#ff8266', '#ffba66'];
+            for (let formantIndex = 0; formantIndex < 3; formantIndex += 1) {
+                ctx.fillStyle = colors[formantIndex];
+                for (let index = visible.start; index < visible.end; index += 2) {
+                    const formant = this.analysisHistory[index].formantsHz[
+                        formantIndex
+                    ];
+                    if (formant !== null) {
+                        const y = frequencyY(formant);
+                        if (y >= 0 && y <= height) {
+                            ctx.beginPath();
+                            ctx.arc(xForIndex(index), y, 2.4, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                    }
+                }
             }
+        }
 
-            // Delete the oldest buffers that aren't needed any more for the next render
-            channelBuffers[i].splice(
-                0,
-                channelBuffers[i].length - SPECTROGRAM_WINDOW_SIZE / SPECTROGRAM_WINDOW_OVERLAP + 1
+        if (this.showPitch) {
+            this.strokeSeries(
+                ctx,
+                visible.start,
+                visible.end,
+                xForIndex,
+                (point) => point.pitchHz,
+                (pitch) =>
+                    this.mode === 'narrowband'
+                        ? frequencyY(pitch)
+                        : height *
+                          (1 -
+                              (pitch - PITCH_FLOOR_HZ) /
+                                  (PITCH_CEILING_HZ - PITCH_FLOOR_HZ)),
+                '#2588ff',
+                2.5
             );
         }
 
-        // Render the single merged buffer for each channel
-        if (buffers.length > 0) {
-            bufferCallbackPromise = bufferCallback(
-                buffers.map((buffer) => ({
-                    buffer,
-                    start: 0,
-                    length: buffer.length,
-                    sampleRate: sampleRate!,
-                    isStart,
-                }))
+        if (this.showIntensity && this.mode === 'broadband') {
+            this.strokeSeries(
+                ctx,
+                visible.start,
+                visible.end,
+                xForIndex,
+                (point) => point.intensityDbSpl,
+                (intensity) =>
+                    height *
+                    (1 -
+                        (intensity - INTENSITY_FLOOR_DB_SPL) /
+                            (INTENSITY_CEILING_DB_SPL -
+                                INTENSITY_FLOOR_DB_SPL)),
+                '#f4df22',
+                2.5
             );
-            bufferCallbackPromise.then(() => {
-                bufferCallbackPromise = null;
-            });
-            isStart = false;
         }
-    };
 
-    // Each time we record an audio buffer, save it and then render the next window when we have
-    // enough samples
-    processor.addEventListener('audioprocess', (e) => {
-        for (let i = 0; i < Math.min(CHANNELS, e.inputBuffer.numberOfChannels); i += 1) {
-            const channelBuffer = e.inputBuffer.getChannelData(i);
-            channelBuffers[i].push(new Float32Array(channelBuffer));
+        if (this.inspector !== null) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 77, 98, 0.9)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(this.inspector.x * width, 0);
+            ctx.lineTo(this.inspector.x * width, height);
+            ctx.moveTo(0, this.inspector.y * height);
+            ctx.lineTo(width, this.inspector.y * height);
+            ctx.stroke();
+            ctx.restore();
         }
-        // If a single channel input, pass an empty signal for the right channel
-        for (let i = Math.min(CHANNELS, e.inputBuffer.numberOfChannels); i < CHANNELS; i += 1) {
-            channelBuffers[i].push(new Float32Array(SPECTROGRAM_WINDOW_OVERLAP));
-        }
-        sampleRate = e.inputBuffer.sampleRate;
-        processChannelBuffers();
-    });
-
-    source.connect(processor);
-    processor.connect(audioCtx.destination);
-
-    // Return a function to stop rendering
-    return () => {
-        processor.disconnect(audioCtx.destination);
-        source.disconnect(processor);
-    };
-}
-
-async function setupSpectrogramFromAudioFile(
-    audioCtx: AudioContext,
-    arrayBuffer: ArrayBuffer,
-    bufferCallback: (bufferData: SpectrogramBufferData[]) => Promise<Float32Array[]>,
-    audioEndCallback: () => void
-) {
-    const audioBuffer = await new Promise<AudioBuffer>((resolve, reject) =>
-        audioCtx.decodeAudioData(
-            arrayBuffer,
-            (buffer) => resolve(buffer),
-            (err) => reject(err)
-        )
-    );
-
-    let channelData: Float32Array[] = [];
-    for (let i = 0; i < audioBuffer.numberOfChannels; i += 1) {
-        channelData.push(new Float32Array(audioBuffer.getChannelData(i)));
     }
 
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(audioCtx.destination);
-    let isStopping = false;
-    const playStartTime = performance.now();
-    let nextSample = 0;
-
-    const audioEventCallback = async () => {
-        const duration = (performance.now() - playStartTime) / 1000;
-        const bufferCallbackData = [];
-
-        // Calculate spectrogram up to current point
-        const totalSamples =
-            Math.ceil((duration * audioBuffer.sampleRate - nextSample) / SPECTROGRAM_WINDOW_SIZE) *
-            SPECTROGRAM_WINDOW_SIZE;
-
-        if (totalSamples > 0) {
-            for (let i = 0; i < audioBuffer.numberOfChannels; i += 1) {
-                bufferCallbackData.push({
-                    buffer: channelData[i],
-                    start: nextSample,
-                    length: totalSamples,
-                    sampleRate: audioBuffer.sampleRate,
-                    isStart: nextSample === 0,
-                });
+    private strokeSeries(
+        ctx: CanvasRenderingContext2D,
+        start: number,
+        end: number,
+        xForIndex: (index: number) => number,
+        valueForPoint: (point: AnalysisPoint) => number | null,
+        yForValue: (value: number) => number,
+        color: string,
+        lineWidth: number
+    ) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 4;
+        let drawing = false;
+        ctx.beginPath();
+        for (let index = start; index < end; index += 1) {
+            const value = valueForPoint(this.analysisHistory[index]);
+            if (value === null) {
+                drawing = false;
+                continue;
             }
-
-            nextSample =
-                nextSample + totalSamples - SPECTROGRAM_WINDOW_SIZE + SPECTROGRAM_WINDOW_OVERLAP;
-            channelData = await bufferCallback(bufferCallbackData);
+            const x = xForIndex(index);
+            const y = yForValue(value);
+            if (y < 0 || y > this.overlay.height) {
+                drawing = false;
+                continue;
+            }
+            if (drawing) {
+                ctx.lineTo(x, y);
+            } else {
+                ctx.moveTo(x, y);
+                drawing = true;
+            }
         }
-
-        if (!isStopping && duration / audioBuffer.duration < 1.0) {
-            setTimeout(
-                audioEventCallback,
-                ((SPECTROGRAM_WINDOW_OVERLAP / audioBuffer.sampleRate) * 1000) / 2
-            );
-        } else {
-            source.disconnect(audioCtx.destination);
-            audioEndCallback();
-        }
-    };
-    audioEventCallback();
-
-    // Play audio
-    audioCtx.resume();
-    source.start(0);
-
-    // Return a function to stop rendering
-    return () => {
-        isStopping = true;
-        source.disconnect(audioCtx.destination);
-    };
+        ctx.stroke();
+        ctx.restore();
+    }
 }
 
-const spectrogramCallbacksPromise = startRenderingSpectrogram();
-let globalAudioCtx: AudioContext | null = null;
+const appContainer = document.querySelector('#app');
+if (appContainer === null) {
+    throw new Error('Missing Spectro Pro application container');
+}
 
-(async () => {
-    const controlsContainer = document.querySelector('.controls');
-    const {
-        bufferCallback,
-        clearCallback,
-        updateRenderParameters,
-    } = await spectrogramCallbacksPromise;
-    if (controlsContainer !== null) {
-        let stopCallback: (() => void) | null = null;
-        const setPlayState = initialiseControlsUi(controlsContainer, {
-            stopCallback: () => {
-                if (stopCallback !== null) {
-                    stopCallback();
-                }
-                stopCallback = null;
-            },
-            clearSpectrogramCallback: () => {
-                clearCallback();
-            },
-            renderParametersUpdateCallback: (parameters: Partial<RenderParameters>) => {
-                updateRenderParameters(parameters);
-            },
-            renderFromMicrophoneCallback: () => {
-                if (globalAudioCtx === null) {
-                    globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                setupSpectrogramFromMicrophone(globalAudioCtx, bufferCallback).then(
-                    (callback) => {
-                        stopCallback = callback;
-                        setPlayState('playing');
-                    },
-                    () => setPlayState('stopped')
-                );
-            },
-            renderFromFileCallback: (file: ArrayBuffer) => {
-                if (globalAudioCtx === null) {
-                    globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                setupSpectrogramFromAudioFile(globalAudioCtx, file, bufferCallback, () =>
-                    setPlayState('stopped')
-                ).then(
-                    (callback) => {
-                        stopCallback = callback;
-                        setPlayState('playing');
-                    },
-                    () => setPlayState('stopped')
-                );
-            },
-        });
-    }
-})();
+let engine: SpectroEngine | null = null;
+const ui = initialiseControlsUi(appContainer, {
+    onStartMicrophone: () => engine?.startMicrophone(),
+    onStartFile: (buffer, name) => engine?.startFile(buffer, name),
+    onStop: () => engine?.stop(),
+    onClear: () => engine?.clear(),
+    onExport: () => engine?.exportImage(),
+    onModeChange: (mode) => engine?.setMode(mode),
+    onPitchAlgorithmChange: (algorithm) =>
+        engine?.setPitchAlgorithm(algorithm),
+    onDisplayChange: (parameters) => engine?.updateDisplay(parameters),
+    onOverlayChange: (pitch, formants, intensity) =>
+        engine?.setOverlays(pitch, formants, intensity),
+    onInspect: (x, y) => engine?.inspect(x, y),
+    onNavigate: (amount) => engine?.navigate(amount),
+});
+engine = new SpectroEngine(ui);

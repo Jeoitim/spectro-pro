@@ -1,3 +1,4 @@
+import { AcousticAnalysis, AnalysisOptions } from './analysis';
 import { SpectrogramOptions } from './spectrogram';
 
 export const ACTION_COMPUTE_SPECTROGRAM = 'spectrogram-compute';
@@ -20,12 +21,16 @@ export type ComputeSpectrogramMessage = MessageBase<
         samplesStart: number;
         samplesLength: number;
         options: SpectrogramOptions;
+        analysisSamplesStart: number;
+        analysisSamplesLength: number;
+        analysisOptions: AnalysisOptions;
     },
     {
         spectrogramWindowCount: number;
         spectrogramOptions: Required<SpectrogramOptions>;
         spectrogramBuffer: ArrayBufferLike;
         inputBuffer: ArrayBufferLike;
+        analysis: AcousticAnalysis;
     }
 >;
 

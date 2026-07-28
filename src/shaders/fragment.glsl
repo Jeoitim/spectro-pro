@@ -9,6 +9,7 @@ uniform vec2 uScaleRange;
 uniform float uContrast;
 uniform float uSensitivity;
 uniform float uZoom;
+uniform float uTimeOffset;
 varying vec2 vVertexTexCoord;
 
 void main() {
@@ -21,7 +22,11 @@ void main() {
     ).r;
 
     float sampleY = mod(
-        clamp((vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength, 0.0, 1.0) + uSpectrogramOffset,
+        clamp(
+            (vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength - uTimeOffset,
+            0.0,
+            1.0
+        ) + uSpectrogramOffset,
         1.0
     );
 
@@ -35,7 +40,9 @@ void main() {
     }
 
     // Prevent wrapping issues when the spectrogram is smaller than the screen
-    if ((vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength <= 0.0) {
+    if (
+        (vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength - uTimeOffset <= 0.0
+    ) {
         intensity = 0.0;
     }
 

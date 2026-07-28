@@ -1,3 +1,4 @@
+import { analyzeAcousticFrame } from '../analysis';
 import { generateSpectrogram } from '../spectrogram';
 import {
     ACTION_COMPUTE_SPECTROGRAM,
@@ -17,6 +18,9 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                 samplesStart,
                 samplesLength,
                 options,
+                analysisSamplesStart,
+                analysisSamplesLength,
+                analysisOptions,
             } = payload as ComputeSpectrogramMessage['request']['payload'];
 
             try {
@@ -26,6 +30,14 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                     options: spectrogramOptions,
                     spectrogram,
                 } = generateSpectrogram(samples, samplesStart, samplesLength, options);
+                const analysis = analyzeAcousticFrame(
+                    samples.subarray(
+                        analysisSamplesStart,
+                        analysisSamplesStart + analysisSamplesLength
+                    ),
+                    options.sampleRate,
+                    analysisOptions
+                );
 
                 const response: ComputeSpectrogramMessage['response'] = {
                     payload: {
@@ -33,6 +45,7 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                         spectrogramOptions,
                         spectrogramBuffer: spectrogram.buffer,
                         inputBuffer: samples.buffer,
+                        analysis,
                     },
                 };
                 self.postMessage(response, [spectrogram.buffer, samples.buffer]);

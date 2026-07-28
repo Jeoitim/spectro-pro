@@ -1,71 +1,73 @@
-# 🎶 [Spectro](https://calebj0seph.github.io/spectro/)
+# Spectro Pro
 
-Spectro is a real-time audio spectrogram generator for the web. It can visualise sound from your microphone or audio files on your device.
+Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具。它在
+[calebj0seph/spectro](https://github.com/calebj0seph/spectro) 的 WebAudio、
+后台 FFT 和 WebGL 渲染基础上，增加面向语音观察的实时分析与交互界面。
 
-![Screenshot of Spectro](/docs/screenshot.png?raw=true)
+当前版本定位为视觉与教学工具，不以替代 Praat 或提供研究级测量为目标。
 
-## 💻 Usage
-*Head [here](https://calebj0seph.github.io/spectro/) to start using Spectro.*
+## 功能
 
-To start generating a spectrogram, you can either:
-* Click the **🎤 Record from mic** button to start generating a spectrogram from your microphone.
+- 麦克风实时输入或播放本地音频
+- 宽带语谱：5 ms 有效分析窗，显示 F0、LPC 共振峰和音强曲线
+- 窄带语谱：30 ms 有效分析窗，显示谐波与按同一频率坐标绘制的 F0
+- YIN、自相关两种 F0 算法
+- 按 Praat 定义换算的 dB SPL 参考读数
+- 实时 F0、F1–F3、音强读数和会话统计
+- 鼠标时间/频率取值、缩放、历史回看与配色主题
+- 导出当前语谱画面为 PNG
+- 所有分析都在浏览器本地完成，音频不会上传
 
-  If you want to record audio from your device's audio output, you can [enable 'Stereo Mix' on Windows](https://www.howtogeek.com/howto/39532/how-to-enable-stereo-mix-in-windows-7-to-record-audio/) or [use BlackHole on macOS](https://github.com/ExistentialAudio/BlackHole) and then set this device as your browser's default input device.
+## 宽带与窄带
 
-* Click the **🎵 Play audio file** button to start generating a spectrogram from an audio file on your device. This will also play the selected audio file.
+模式参数参考 Praat 文档：
 
-  Any audio format supported by your browser can be played.
+- **宽带**使用 5 ms 有效窗，对应约 260 Hz 带宽。时间分辨率较高，适合观察音节边界和共振峰运动。
+- **窄带**使用 30 ms 有效窗，对应约 43 Hz 带宽。频率分辨率较高，适合观察谐波；F0 在此模式中使用语谱图的频率坐标，可直接检查它与第一谐波的位置。
 
-The spectrogram generates from **right to left**, with the most recent audio appearing on the right and oldest on the left.
+实际 FFT 使用不小于有效窗的最小二次幂并进行零填充；窗函数使用 Hamming。
 
-There are also **⚙ Options** available to control the appearance of the spectrogram:
-* **🔊 Sensitivity** controls how sensitive the spectrogram is to the audio. Changing it has the same effect as changing the volume of the audio.
-* **🌗 Contrast** applies logarithmic scaling to the spectrogram to add contrast to the image. Changing it can help produce a better image depending on the audio being analysed.
-* **🔍 Zoom** controls how zoomed in the spectrogram appears along the time axis.
-* **📈 Min. and max. frequency** control the range of frequencies to display on the spectrogram. Lower frequencies appear at the bottom of the spectrogram, and higher frequencies at the top.
-* **🎹 Frequency scale** controls the scaling to apply to the frequency axis of the spectrogram. 'Linear' means all frequencies are represented evenly, while '[Mel](https://en.wikipedia.org/wiki/Mel_scale)' gives a more natural appearance by giving more weight to lower frequencies.
-* **🌈 Colour** controls the colour scheme to display the spectrogram with.
+## 关于 dB SPL
 
-You can click the **⏹ Stop** button to stop generating the spectrogram. If playing an audio file, the spectrogram will automatically stop at the end of the track.
+Praat 将声音强度定义为：
 
-## ❓ FAQ
-### What is a spectrogram?
-A [spectrogram](https://en.wikipedia.org/wiki/Spectrogram) is an image produced from sound. It visualises the frequencies present in sound over time, with time represented along the horizontal axis, frequency along the vertical axis, and the loudness of the frequency by colour.
-
-For example if you were to generate a spectrogram of yourself whistling, you would see a bright line at the pitch of the whistle.
-
-### What browsers does Spectro work with?
-The latest versions of Chrome, Firefox and Safari all work with Spectro. Any other Chromium based browser like the new version of Microsoft Edge should also work.
-
-### How does Spectro work?
-[Here's a blog post](/docs/making-of.md) describing it all! A quick overview:
-* The audio input is broken into frames of 4096 samples, which are overlapped every 1024 samples. I chose 4096 as my window size as it seemed to be the best trade-off between time and frequency resolution – eventually I might make it configurable.
-* These overlapping frames are then windowed using a [seven-term Blackman-Harris](https://dsp.stackexchange.com/questions/51095/seven-term-blackman-harris-window) function, which I decided on as it seemed to give the most visual clarity.
-* The windows are then run through a Fast Fourier transform (using [jsfft](https://github.com/dntj/jsfft)) in a dedicated web worker, and the norm of each frequency bin is taken as the basis of the spectrogram.
-* This raw spectrogram data is then inserted into a circular queue, which has capacity equal to the width of the spectrogram image.
-* The raw spectrogram data is then rendered to the screen with WebGL, using a shader to quickly perform all of the scaling, colourisation and other image adjustments directly on the GPU. Only new raw spectrogram data is uploaded to the GPU each frame to improve performance instead of doing a full upload.
-* The settings panel uses [React](https://reactjs.org/) and [Material-UI](https://material-ui.com/) (which accounts for most of the bundle size 😞).
-
-## 👩‍💻 Development
-Install dependencies:
-```
-npm install
+```text
+10 log10(mean(p²) / (2×10⁻⁵ Pa)²)
 ```
 
-Start webpack-dev-server:
-```
+浏览器麦克风提供的是归一化、无统一物理校准的样本。Spectro Pro 默认沿用
+Praat Sound 的计算约定，将 `1.0` 样本单位视为 `1 Pa`。因此曲线内部换算与
+Praat 公式一致，但未经声级计和麦克风标定时，绝对 dB SPL 只可作相对参考。
+
+## 开发
+
+```bash
+npm ci
 npm start
 ```
 
-Build a production bundle:
-```
+本地页面默认为 `http://localhost:9000`。
+
+类型检查与生产构建：
+
+```bash
+npm run type-check
 npm run build
 ```
 
-Perform Typescript type checking:
-```
-npm run type-check
-```
+## 算法说明
 
-## 📘 Licence
-Spectro is released under the terms of the [MIT Licence](LICENSE).
+- 语谱：Hamming 窗、零填充 FFT、Web Worker 计算、WebGL 绘制
+- F0：YIN 或归一化自相关，默认有声范围 75–500 Hz
+- 共振峰：预加重、LPC、Levinson–Durbin 与多项式根估计
+- 音强：按 `3.2 / pitchFloor` 有效窗与 Kaiser-20 加权后换算为 dB SPL
+- 音强统计：按能量域平均后换算为 dB
+
+这些实时估计优先保证响应速度和可视反馈。用于论文数据、临床或其他精密测量时，
+请使用经过校准的设备，并以 Praat 等专业分析工具复核。
+
+## 致谢与许可
+
+Spectro Pro fork 自 Caleb Joseph 的
+[Spectro](https://github.com/calebj0seph/spectro)，保留其 Git 历史与 MIT
+许可证。项目继续以 [MIT License](LICENSE) 发布。

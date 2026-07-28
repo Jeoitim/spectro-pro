@@ -43,7 +43,44 @@ export const WHITE_BLACK_GRADIENT: Gradient = [
     { stop: 1.0, color: [0, 0, 0] },
 ];
 
+export const AURORA_GRADIENT: Gradient = [
+    { stop: 0, color: [4, 7, 18] },
+    { stop: 0.22, color: [20, 22, 68] },
+    { stop: 0.48, color: [74, 53, 180] },
+    { stop: 0.72, color: [21, 206, 190] },
+    { stop: 0.9, color: [211, 247, 116] },
+    { stop: 1, color: [255, 255, 243] },
+];
+
+export const EMBER_GRADIENT: Gradient = [
+    { stop: 0, color: [8, 8, 13] },
+    { stop: 0.28, color: [47, 18, 49] },
+    { stop: 0.55, color: [174, 43, 71] },
+    { stop: 0.78, color: [255, 128, 48] },
+    { stop: 1, color: [255, 247, 194] },
+];
+
+export const OCEAN_GRADIENT: Gradient = [
+    { stop: 0, color: [3, 11, 22] },
+    { stop: 0.3, color: [9, 48, 85] },
+    { stop: 0.58, color: [0, 139, 180] },
+    { stop: 0.82, color: [95, 232, 211] },
+    { stop: 1, color: [244, 255, 250] },
+];
+
 export const GRADIENTS: { name: string; gradient: Gradient }[] = [
+    {
+        name: 'Aurora',
+        gradient: AURORA_GRADIENT,
+    },
+    {
+        name: 'Ember',
+        gradient: EMBER_GRADIENT,
+    },
+    {
+        name: 'Ocean',
+        gradient: OCEAN_GRADIENT,
+    },
     {
         name: 'Heated Metal',
         gradient: HEATED_METAL_GRADIENT,
