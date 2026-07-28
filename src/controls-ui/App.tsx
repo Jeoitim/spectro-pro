@@ -11,7 +11,7 @@ export interface LiveSnapshot {
     elapsedSeconds: number;
     pitchHz: number | null;
     intensityDbSpl: number;
-    formantsHz: [number | null, number | null, number | null];
+    formantsHz: (number | null)[];
     meanPitchHz: number | null;
     minPitchHz: number | null;
     maxPitchHz: number | null;
@@ -27,7 +27,7 @@ export interface CursorSnapshot {
     frequencyHz: number;
     pitchHz: number | null;
     intensityDbSpl: number | null;
-    formantsHz: [number | null, number | null, number | null];
+    formantsHz: (number | null)[];
 }
 
 export interface AppCallbacks {
@@ -48,7 +48,7 @@ const EMPTY_SNAPSHOT: LiveSnapshot = {
     elapsedSeconds: 0,
     pitchHz: null,
     intensityDbSpl: 0,
-    formantsHz: [null, null, null],
+    formantsHz: [null, null, null, null, null],
     meanPitchHz: null,
     minPitchHz: null,
     maxPitchHz: null,

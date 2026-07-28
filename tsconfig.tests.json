@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "module": "commonjs",
+    "outDir": ".test-dist",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "es2019",
+    "typeRoots": ["src/types", "node_modules/@types"]
+  },
+  "include": ["src/analysis.ts", "src/math-util.ts", "tests/synthetic-analysis.ts"]
+}

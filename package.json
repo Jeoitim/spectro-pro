@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Modern real-time acoustic visualizer for the web.",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run test:analysis",
+    "test:analysis": "tsc -p tsconfig.tests.json && node .test-dist/tests/synthetic-analysis.js",
     "build": "node --openssl-legacy-provider node_modules/webpack/bin/webpack.js --mode=production",
     "start": "node --openssl-legacy-provider node_modules/webpack-cli/bin/cli.js serve --mode=development",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'",

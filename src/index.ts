@@ -122,6 +122,9 @@ class SpectroEngine {
         minPitchHz: 75,
         maxPitchHz: 500,
         formantCeilingHz: 5500,
+        maximumFormants: 5,
+        formantWindowLengthSeconds: 0.025,
+        preEmphasisFromHz: 50,
         splCalibrationDb: 0,
     };
 
@@ -651,7 +654,7 @@ class SpectroEngine {
             elapsedSeconds: 0,
             pitchHz: null,
             intensityDbSpl: 0,
-            formantsHz: [null, null, null],
+            formantsHz: [null, null, null, null, null],
             meanPitchHz: null,
             minPitchHz: null,
             maxPitchHz: null,
@@ -738,9 +741,22 @@ class SpectroEngine {
         };
 
         if (this.showFormants && this.mode === 'broadband') {
-            const colors = ['#ff4f72', '#ff8266', '#ffba66'];
-            for (let formantIndex = 0; formantIndex < 3; formantIndex += 1) {
-                ctx.fillStyle = colors[formantIndex];
+            const colors = [
+                '#ff4f72',
+                '#ff755e',
+                '#ff9e61',
+                '#ffc86b',
+                '#ffe39a',
+                '#fff0c7',
+            ];
+            const formantCount =
+                this.analysisHistory[visible.end - 1]?.formantsHz.length || 0;
+            for (
+                let formantIndex = 0;
+                formantIndex < formantCount;
+                formantIndex += 1
+            ) {
+                ctx.fillStyle = colors[formantIndex % colors.length];
                 for (let index = visible.start; index < visible.end; index += 2) {
                     const formant = this.analysisHistory[index].formantsHz[
                         formantIndex

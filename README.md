@@ -59,12 +59,17 @@ npm run build
 
 - 语谱：Hamming 窗、零填充 FFT、Web Worker 计算、WebGL 绘制
 - F0：YIN 或归一化自相关，默认有声范围 75–500 Hz
-- 共振峰：预加重、LPC、Levinson–Durbin 与多项式根估计
+- 共振峰：先重采样至 `2 × formant ceiling`，再执行 50 Hz 预加重、
+  25 ms 有效 Gaussian-like 窗、Burg LPC 与根分析；默认用 10 个极点分析
+  5 条共振峰，并保留每条带宽
 - 音强：按 `3.2 / pitchFloor` 有效窗与 Kaiser-20 加权后换算为 dB SPL
 - 音强统计：按能量域平均后换算为 dB
 
 这些实时估计优先保证响应速度和可视反馈。用于论文数据、临床或其他精密测量时，
 请使用经过校准的设备，并以 Praat 等专业分析工具复核。
+
+`npm test` 会用合成信号检查 YIN、自相关、SPL 参考值、重采样频率，以及五条
+已知共振峰。后续仍需增加与真实语音的 Praat 对照数据集。
 
 ## 致谢与许可
 

@@ -7,6 +7,9 @@ export interface AnalysisOptions {
     minPitchHz: number;
     maxPitchHz: number;
     formantCeilingHz: number;
+    maximumFormants: number;
+    formantWindowLengthSeconds: number;
+    preEmphasisFromHz: number;
     splCalibrationDb: number;
 }
 
@@ -14,7 +17,8 @@ export interface AcousticAnalysis {
     pitchHz: number | null;
     pitchConfidence: number;
     intensityDbSpl: number;
-    formantsHz: [number | null, number | null, number | null];
+    formantsHz: (number | null)[];
+    formantBandwidthsHz: (number | null)[];
 }
 
 interface Complex {
@@ -27,6 +31,9 @@ const DEFAULT_OPTIONS: AnalysisOptions = {
     minPitchHz: 75,
     maxPitchHz: 500,
     formantCeilingHz: 5500,
+    maximumFormants: 5,
+    formantWindowLengthSeconds: 0.025,
+    preEmphasisFromHz: 50,
     splCalibrationDb: 0,
 };
 
@@ -153,9 +160,6 @@ function detectPitchAutocorrelation(
         if (isLocalPeak && correlation > 0.35) {
             bestCorrelation = correlation;
             bestLag = lag;
-            if (correlation > 0.92) {
-                break;
-            }
         }
     }
 
@@ -265,13 +269,13 @@ function evaluatePolynomial(coefficients: Float64Array, x: Complex): Complex {
 function polynomialRoots(coefficients: Float64Array): Complex[] {
     const degree = coefficients.length - 1;
     const roots: Complex[] = [];
-    const radius = 0.72;
+    const radius = 0.96;
     for (let i = 0; i < degree; i += 1) {
         const angle = (2 * Math.PI * i) / degree + 0.17;
         roots.push({ re: radius * Math.cos(angle), im: radius * Math.sin(angle) });
     }
 
-    for (let iteration = 0; iteration < 45; iteration += 1) {
+    for (let iteration = 0; iteration < 180; iteration += 1) {
         let maximumChange = 0;
         for (let i = 0; i < degree; i += 1) {
             let denominator = { re: 1, im: 0 };
@@ -297,78 +301,182 @@ function polynomialRoots(coefficients: Float64Array): Complex[] {
     return roots;
 }
 
+function sinc(value: number) {
+    return Math.abs(value) < 1e-12 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value);
+}
+
+export function resampleForFormants(
+    samples: Float32Array,
+    sampleRate: number,
+    targetSampleRate: number
+) {
+    if (Math.abs(sampleRate - targetSampleRate) < 1) {
+        return new Float64Array(samples);
+    }
+
+    const ratio = sampleRate / targetSampleRate;
+    const outputLength = Math.max(1, Math.floor(samples.length / ratio));
+    const output = new Float64Array(outputLength);
+    const halfTaps = 32;
+    const cutoff = Math.min(1, targetSampleRate / sampleRate) * 0.94;
+
+    for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
+        const centre = outputIndex * ratio;
+        const first = Math.max(0, Math.floor(centre) - halfTaps + 1);
+        const last = Math.min(samples.length - 1, Math.floor(centre) + halfTaps);
+        let sum = 0;
+        let weightSum = 0;
+        for (let inputIndex = first; inputIndex <= last; inputIndex += 1) {
+            const distance = inputIndex - centre;
+            const normalizedDistance = distance / halfTaps;
+            const window =
+                0.42 +
+                0.5 * Math.cos(Math.PI * normalizedDistance) +
+                0.08 * Math.cos(2 * Math.PI * normalizedDistance);
+            const weight = cutoff * sinc(cutoff * distance) * window;
+            sum += samples[inputIndex] * weight;
+            weightSum += weight;
+        }
+        output[outputIndex] = sum / Math.max(1e-12, weightSum);
+    }
+    return output;
+}
+
+function burgLpc(signal: Float64Array, order: number) {
+    const coefficients = new Float64Array(order + 1);
+    coefficients[0] = 1;
+    if (signal.length <= order + 1) {
+        return coefficients;
+    }
+
+    let forward = new Float64Array(signal);
+    let backward = new Float64Array(signal);
+
+    for (let currentOrder = 1; currentOrder <= order; currentOrder += 1) {
+        let numerator = 0;
+        let denominator = 0;
+        for (let i = currentOrder; i < signal.length; i += 1) {
+            numerator += forward[i] * backward[i - 1];
+            denominator +=
+                forward[i] * forward[i] +
+                backward[i - 1] * backward[i - 1];
+        }
+        const reflection = (-2 * numerator) / Math.max(1e-18, denominator);
+        const previousCoefficients = new Float64Array(coefficients);
+        coefficients[currentOrder] = reflection;
+        for (let i = 1; i < currentOrder; i += 1) {
+            coefficients[i] =
+                previousCoefficients[i] +
+                reflection * previousCoefficients[currentOrder - i];
+        }
+
+        const nextForward = new Float64Array(forward);
+        const nextBackward = new Float64Array(backward);
+        for (let i = currentOrder; i < signal.length; i += 1) {
+            nextForward[i] = forward[i] + reflection * backward[i - 1];
+            nextBackward[i - 1] =
+                backward[i - 1] + reflection * forward[i];
+        }
+        forward = nextForward;
+        backward = nextBackward;
+    }
+    return coefficients;
+}
+
 function estimateFormants(
     samples: Float32Array,
     sampleRate: number,
-    ceilingHz: number
-): [number | null, number | null, number | null] {
+    options: AnalysisOptions
+): { frequencies: (number | null)[]; bandwidths: (number | null)[] } {
+    const maximumFormants = clamp(Math.round(options.maximumFormants * 2) / 2, 1, 8);
+    const poleCount = Math.max(2, Math.round(maximumFormants * 2));
+    const empty = () => new Array(Math.ceil(maximumFormants)).fill(null);
     if (samples.length < 64) {
-        return [null, null, null];
+        return { frequencies: empty(), bandwidths: empty() };
     }
 
-    const order = 12;
-    const signal = new Float64Array(samples.length);
+    const actualWindowSeconds = options.formantWindowLengthSeconds * 2;
+    const sourceWindowLength = Math.min(
+        samples.length,
+        Math.max(64, Math.round(actualWindowSeconds * sampleRate))
+    );
+    const sourceWindow = samples.subarray(samples.length - sourceWindowLength);
+    const formantSampleRate = Math.min(
+        sampleRate,
+        Math.max(2000, options.formantCeilingHz * 2)
+    );
+    const resampled = resampleForFormants(
+        sourceWindow,
+        sampleRate,
+        formantSampleRate
+    );
+
+    const preEmphasisCoefficient = Math.exp(
+        (-2 * Math.PI * options.preEmphasisFromHz) / formantSampleRate
+    );
+    const signal = new Float64Array(resampled.length);
     let energy = 0;
-    for (let i = 0; i < samples.length; i += 1) {
-        const previous = i === 0 ? 0 : samples[i - 1];
-        const value = samples[i] - 0.97 * previous;
-        const window = 0.54 - 0.46 * Math.cos((2 * Math.PI * i) / (samples.length - 1));
-        signal[i] = value * window;
+    for (let i = 0; i < resampled.length; i += 1) {
+        const previous = i === 0 ? 0 : resampled[i - 1];
+        const emphasized = resampled[i] - preEmphasisCoefficient * previous;
+        const position =
+            resampled.length === 1
+                ? 0
+                : (i - (resampled.length - 1) / 2) / (resampled.length - 1);
+        const gaussianLikeWindow = Math.exp(-48 * position * position);
+        signal[i] = emphasized * gaussianLikeWindow;
         energy += signal[i] * signal[i];
     }
-    if (Math.sqrt(energy / signal.length) < 0.0015) {
-        return [null, null, null];
+    if (Math.sqrt(energy / Math.max(1, signal.length)) < 0.00008) {
+        return { frequencies: empty(), bandwidths: empty() };
     }
 
-    const autocorrelation = new Float64Array(order + 1);
-    for (let lag = 0; lag <= order; lag += 1) {
-        let sum = 0;
-        for (let i = lag; i < signal.length; i += 1) {
-            sum += signal[i] * signal[i - lag];
-        }
-        autocorrelation[lag] = sum;
-    }
-
-    let predictionError = autocorrelation[0];
-    const lpc = new Float64Array(order + 1);
-    lpc[0] = 1;
-    for (let i = 1; i <= order; i += 1) {
-        let sum = autocorrelation[i];
-        for (let j = 1; j < i; j += 1) {
-            sum += lpc[j] * autocorrelation[i - j];
-        }
-        const reflection = -sum / Math.max(1e-12, predictionError);
-        const previous = new Float64Array(lpc);
-        lpc[i] = reflection;
-        for (let j = 1; j < i; j += 1) {
-            lpc[j] = previous[j] + reflection * previous[i - j];
-        }
-        predictionError *= Math.max(1e-6, 1 - reflection * reflection);
-    }
+    const lpc = burgLpc(signal, poleCount);
 
     const candidates = polynomialRoots(lpc)
+        .map((root) => {
+            const magnitudeSquared = root.re * root.re + root.im * root.im;
+            return magnitudeSquared > 1
+                ? {
+                      re: root.re / magnitudeSquared,
+                      im: root.im / magnitudeSquared,
+                  }
+                : root;
+        })
         .filter((root) => root.im > 0)
         .map((root) => {
             const angle = Math.atan2(root.im, root.re);
-            const frequency = (angle * sampleRate) / (2 * Math.PI);
+            const frequency = (angle * formantSampleRate) / (2 * Math.PI);
             const magnitude = Math.sqrt(root.re * root.re + root.im * root.im);
-            const bandwidth = (-sampleRate * Math.log(Math.max(1e-9, magnitude))) / Math.PI;
+            const bandwidth =
+                (-formantSampleRate *
+                    Math.log(Math.max(1e-9, Math.min(1, magnitude)))) /
+                Math.PI;
             return { frequency, bandwidth };
         })
         .filter(
             ({ frequency, bandwidth }) =>
-                frequency > 90 &&
-                frequency < ceilingHz &&
-                bandwidth > 0 &&
-                bandwidth < 700
+                Number.isFinite(frequency) &&
+                Number.isFinite(bandwidth) &&
+                frequency >= 50 &&
+                frequency <= options.formantCeilingHz - 50 &&
+                bandwidth >= 0
         )
         .sort((a, b) => a.frequency - b.frequency);
 
-    return [
-        candidates.length > 0 ? candidates[0].frequency : null,
-        candidates.length > 1 ? candidates[1].frequency : null,
-        candidates.length > 2 ? candidates[2].frequency : null,
-    ];
+    const resultLength = Math.ceil(maximumFormants);
+    return {
+        frequencies: new Array(resultLength)
+            .fill(null)
+            .map((_, index) =>
+                candidates[index] ? candidates[index].frequency : null
+            ),
+        bandwidths: new Array(resultLength)
+            .fill(null)
+            .map((_, index) =>
+                candidates[index] ? candidates[index].bandwidth : null
+            ),
+    };
 }
 
 export function analyzeAcousticFrame(
@@ -397,12 +505,12 @@ export function analyzeAcousticFrame(
             : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
 
     const voiced = pitch.pitchHz !== null && pitch.confidence >= 0.6;
+    const formants = estimateFormants(samples, sampleRate, options);
     return {
         pitchHz: voiced ? pitch.pitchHz : null,
         pitchConfidence: pitch.confidence,
         intensityDbSpl,
-        formantsHz: voiced
-            ? estimateFormants(samples, sampleRate, options.formantCeilingHz)
-            : [null, null, null],
+        formantsHz: formants.frequencies,
+        formantBandwidthsHz: formants.bandwidths,
     };
 }
