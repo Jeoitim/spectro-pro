@@ -45,6 +45,14 @@ export interface TransportSnapshot {
     isPlaying: boolean;
 }
 
+export interface SelectionSnapshot {
+    xStart: number;
+    xEnd: number;
+    startSeconds: number;
+    endSeconds: number;
+    durationSeconds: number;
+}
+
 export interface AppCallbacks {
     onStartMicrophone: () => void;
     onStartFile: (buffer: ArrayBuffer, name: string) => void;
@@ -58,6 +66,7 @@ export interface AppCallbacks {
     onDisplayChange: (parameters: Partial<RenderParameters>) => void;
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
+    onSelectRange: (xStartRatio: number, xEndRatio: number) => void;
     onNavigate: (amount: number) => void;
     onSelectMedia: (id: string | null) => void;
     onToggleMediaPlayback: () => void;
@@ -111,6 +120,7 @@ export interface UiController {
     updateTimeOffset: (offset: number) => void;
     updateMediaLibrary: (items: MediaListItem[], activeId: string | null) => void;
     updateTransport: (snapshot: TransportSnapshot) => void;
+    updateSelection: (snapshot: SelectionSnapshot | null) => void;
 }
 
 export default function App({
@@ -127,6 +137,7 @@ export default function App({
     onDisplayChange,
     onOverlayChange,
     onInspect,
+    onSelectRange,
     onNavigate,
     onSelectMedia,
     onToggleMediaPlayback,
@@ -182,7 +193,9 @@ export default function App({
         durationSeconds: 0,
         isPlaying: false,
     });
+    const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
+    const dragStartRef = useRef<number | null>(null);
 
     useEffect(() => {
         registerController({
@@ -206,6 +219,7 @@ export default function App({
                 setActiveMediaId(activeId);
             },
             updateTransport: setTransport,
+            updateSelection: setSelection,
         });
     }, [registerController]);
 
@@ -338,15 +352,49 @@ export default function App({
         [onStartFile]
     );
 
-    const handlePointer = useCallback(
+    const pointerRatios = useCallback((event: MouseEvent<HTMLCanvasElement>) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        return {
+            x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
+            y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
+        };
+    }, []);
+
+    const startPlotSelection = useCallback(
         (event: MouseEvent<HTMLCanvasElement>) => {
-            const bounds = event.currentTarget.getBoundingClientRect();
-            onInspect(
-                (event.clientX - bounds.left) / bounds.width,
-                (event.clientY - bounds.top) / bounds.height
+            const point = pointerRatios(event);
+            dragStartRef.current = point.x;
+            onInspect(point.x, point.y);
+            onSelectRange(-1, -1);
+        },
+        [onInspect, onSelectRange, pointerRatios]
+    );
+
+    const updatePlotSelection = useCallback(
+        (event: MouseEvent<HTMLCanvasElement>) => {
+            if (dragStartRef.current === null) {
+                return;
+            }
+            const point = pointerRatios(event);
+            onSelectRange(dragStartRef.current, point.x);
+        },
+        [onSelectRange, pointerRatios]
+    );
+
+    const finishPlotSelection = useCallback(
+        (event: MouseEvent<HTMLCanvasElement>) => {
+            if (dragStartRef.current === null) {
+                return;
+            }
+            const point = pointerRatios(event);
+            const start = dragStartRef.current;
+            dragStartRef.current = null;
+            onSelectRange(
+                Math.abs(point.x - start) < 0.004 ? -1 : start,
+                Math.abs(point.x - start) < 0.004 ? -1 : point.x
             );
         },
-        [onInspect]
+        [onSelectRange, pointerRatios]
     );
 
     const stop = useCallback(() => {
@@ -594,6 +642,23 @@ export default function App({
                     <div className="praat-view">
                         <div className="axis axis-left">
                             <span className="axis-title pitch-color">基频 Hz</span>
+                            {cursor !== null && cursor.pitchHz !== null && (
+                                <span
+                                    className="axis-cursor-value pitch"
+                                    style={{
+                                        top: `${
+                                            mode === 'broadband'
+                                                ? (1 -
+                                                      (cursor.pitchHz - pitchFloor) /
+                                                          Math.max(1, pitchCeiling - pitchFloor)) *
+                                                  100
+                                                : (1 - cursor.pitchHz / maxFrequency) * 100
+                                        }%`,
+                                    }}
+                                >
+                                    {cursor.pitchHz.toFixed(1)}
+                                </span>
+                            )}
                             {mode === 'broadband' ? (
                                 <>
                                     <span className="top pitch-color">{pitchCeiling}</span>
@@ -643,8 +708,12 @@ export default function App({
                                 <canvas id="spectrogramCanvas" />
                                 <canvas
                                     id="analysisOverlay"
-                                    onMouseMove={handlePointer}
-                                    onMouseLeave={() => onInspect(-1, -1)}
+                                    onMouseDown={startPlotSelection}
+                                    onMouseMove={updatePlotSelection}
+                                    onMouseUp={finishPlotSelection}
+                                    onMouseLeave={() => {
+                                        dragStartRef.current = null;
+                                    }}
                                     onWheel={(event) => {
                                         event.preventDefault();
                                         onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
@@ -672,6 +741,23 @@ export default function App({
                                         {mode === 'broadband' && cursor.intensityDbSpl !== null && (
                                             <span>{cursor.intensityDbSpl.toFixed(1)} dB SPL*</span>
                                         )}
+                                    </div>
+                                )}
+                                {cursor && (
+                                    <span
+                                        className="cursor-time-mark"
+                                        style={{ left: `${cursor.x * 100}%` }}
+                                    >
+                                        {cursor.timeSeconds.toFixed(3)} s
+                                    </span>
+                                )}
+                                {selection && (
+                                    <div className="selection-reading">
+                                        <strong>{selection.durationSeconds.toFixed(3)} s</strong>
+                                        <span>
+                                            {selection.startSeconds.toFixed(3)}–
+                                            {selection.endSeconds.toFixed(3)} s
+                                        </span>
                                     </div>
                                 )}
                             </div>
@@ -727,6 +813,14 @@ export default function App({
 
                         <div className="axis axis-right">
                             <span className="axis-title">频率 / 音强</span>
+                            {cursor && (
+                                <span
+                                    className="axis-cursor-value frequency"
+                                    style={{ top: `${cursor.y * 100}%` }}
+                                >
+                                    {cursor.frequencyHz.toFixed(1)} Hz
+                                </span>
+                            )}
                             <span className="top">{maxFrequency} Hz</span>
                             {mode === 'broadband' && (
                                 <>

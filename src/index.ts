@@ -8,6 +8,7 @@ import {
     LayerDisplayOptions,
     LiveSnapshot,
     MediaListItem,
+    SelectionSnapshot,
     SpectrogramMode,
     TransportSnapshot,
     UiController,
@@ -178,6 +179,8 @@ class SpectroEngine {
     private lastUiUpdate = 0;
 
     private inspector: { x: number; y: number } | null = null;
+
+    private selection: SelectionSnapshot | null = null;
 
     private maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
 
@@ -537,6 +540,8 @@ class SpectroEngine {
         this.timeOffset = nextOffset;
         this.renderer.updateParameters({ timeOffset: nextOffset });
         this.ui.updateTimeOffset(nextOffset);
+        this.selection = null;
+        this.ui.updateSelection(null);
         this.overlayDirty = true;
     }
 
@@ -578,6 +583,38 @@ class SpectroEngine {
             formantsHz: point.formantsHz,
         };
         this.ui.updateCursor(snapshot);
+        this.overlayDirty = true;
+    }
+
+    selectRange(xStart: number, xEnd: number) {
+        if (xStart < 0 || xEnd < 0 || this.analysisHistory.length === 0) {
+            this.selection = null;
+            this.ui.updateSelection(null);
+            this.overlayDirty = true;
+            return;
+        }
+        const visible = this.visibleHistoryRange();
+        const ratioStart = clamp(Math.min(xStart, xEnd), 0, 1);
+        const ratioEnd = clamp(Math.max(xStart, xEnd), 0, 1);
+        const indexForRatio = (ratio: number) =>
+            clamp(
+                Math.floor(visible.start + ratio * Math.max(1, visible.end - visible.start)),
+                0,
+                Math.max(0, this.analysisHistory.length - 1)
+            );
+        const first = this.analysisHistory[indexForRatio(ratioStart)];
+        const last = this.analysisHistory[indexForRatio(ratioEnd)];
+        if (first === undefined || last === undefined) {
+            return;
+        }
+        this.selection = {
+            xStart: ratioStart,
+            xEnd: ratioEnd,
+            startSeconds: Math.min(first.timeSeconds, last.timeSeconds),
+            endSeconds: Math.max(first.timeSeconds, last.timeSeconds),
+            durationSeconds: Math.abs(last.timeSeconds - first.timeSeconds),
+        };
+        this.ui.updateSelection(this.selection);
         this.overlayDirty = true;
     }
 
@@ -706,6 +743,8 @@ class SpectroEngine {
             timeOffset: 0,
         };
         this.timeOffset = 0;
+        this.selection = null;
+        this.ui.updateSelection(null);
         this.playbackOffsetSeconds = clamp(this.playbackOffsetSeconds, 0, item.durationSeconds);
         this.rebuildStatisticsFromHistory();
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
@@ -1044,6 +1083,8 @@ class SpectroEngine {
 
     private clearVisualHistory() {
         this.analysisHistory = [];
+        this.selection = null;
+        this.ui.updateSelection(null);
         this.spectrogramBuffer.clear();
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.timeOffset = 0;
@@ -1185,6 +1226,24 @@ class SpectroEngine {
             );
         }
 
+        if (this.selection !== null) {
+            const selectionLeft = this.selection.xStart * width;
+            const selectionRight = this.selection.xEnd * width;
+            ctx.save();
+            ctx.fillStyle = 'rgba(37, 136, 255, 0.14)';
+            ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
+            ctx.strokeStyle = 'rgba(105, 174, 255, 0.95)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(selectionLeft, 0);
+            ctx.lineTo(selectionLeft, height);
+            ctx.moveTo(selectionRight, 0);
+            ctx.lineTo(selectionRight, height);
+            ctx.stroke();
+            ctx.restore();
+        }
+
         const activeMedia = this.activeMedia();
         if (activeMedia !== null) {
             const playheadX =
@@ -1317,6 +1376,7 @@ const ui = initialiseControlsUi(appContainer, {
     onOverlayChange: (pitch, formants, intensity) =>
         engine?.setOverlays(pitch, formants, intensity),
     onInspect: (x, y) => engine?.inspect(x, y),
+    onSelectRange: (xStart, xEnd) => engine?.selectRange(xStart, xEnd),
     onNavigate: (amount) => engine?.navigate(amount),
     onSelectMedia: (id) => engine?.selectMedia(id),
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),

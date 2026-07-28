@@ -33,5 +33,7 @@ export default function initialiseControlsUi(
             withController((controller) => controller.updateMediaLibrary(items, activeId)),
         updateTransport: (snapshot) =>
             withController((controller) => controller.updateTransport(snapshot)),
+        updateSelection: (snapshot) =>
+            withController((controller) => controller.updateSelection(snapshot)),
     };
 }
