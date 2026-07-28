@@ -30,6 +30,21 @@ export interface CursorSnapshot {
     formantsHz: (number | null)[];
 }
 
+export interface MediaListItem {
+    id: string;
+    name: string;
+    durationSeconds: number;
+    type: 'file' | 'recording';
+    state: 'ready' | 'analyzing' | 'error';
+}
+
+export interface TransportSnapshot {
+    activeId: string | null;
+    currentSeconds: number;
+    durationSeconds: number;
+    isPlaying: boolean;
+}
+
 export interface AppCallbacks {
     onStartMicrophone: () => void;
     onStartFile: (buffer: ArrayBuffer, name: string) => void;
@@ -44,6 +59,11 @@ export interface AppCallbacks {
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onNavigate: (amount: number) => void;
+    onSelectMedia: (id: string | null) => void;
+    onToggleMediaPlayback: () => void;
+    onSeekMedia: (seconds: number) => void;
+    onRenameMedia: (id: string, name: string) => void;
+    onSaveMedia: (id: string) => void;
 }
 
 export interface LayerDisplayOptions {
@@ -89,6 +109,8 @@ export interface UiController {
     updateSnapshot: (snapshot: LiveSnapshot) => void;
     updateCursor: (snapshot: CursorSnapshot | null) => void;
     updateTimeOffset: (offset: number) => void;
+    updateMediaLibrary: (items: MediaListItem[], activeId: string | null) => void;
+    updateTransport: (snapshot: TransportSnapshot) => void;
 }
 
 export default function App({
@@ -106,6 +128,11 @@ export default function App({
     onOverlayChange,
     onInspect,
     onNavigate,
+    onSelectMedia,
+    onToggleMediaPlayback,
+    onSeekMedia,
+    onRenameMedia,
+    onSaveMedia,
 }: AppProps) {
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
@@ -146,6 +173,15 @@ export default function App({
     const [intensityLineWidth, setIntensityLineWidth] = useState(2.5);
     const [splCalibration, setSplCalibration] = useState(0);
     const [timeOffset, setTimeOffset] = useState(0);
+    const [playlistOpen, setPlaylistOpen] = useState(true);
+    const [mediaItems, setMediaItems] = useState<MediaListItem[]>([]);
+    const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
+    const [transport, setTransport] = useState<TransportSnapshot>({
+        activeId: null,
+        currentSeconds: 0,
+        durationSeconds: 0,
+        isPlaying: false,
+    });
     const fileRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -165,6 +201,11 @@ export default function App({
             updateSnapshot: setSnapshot,
             updateCursor: setCursor,
             updateTimeOffset: setTimeOffset,
+            updateMediaLibrary: (items, activeId) => {
+                setMediaItems(items);
+                setActiveMediaId(activeId);
+            },
+            updateTransport: setTransport,
         });
     }, [registerController]);
 
@@ -243,9 +284,7 @@ export default function App({
     ]);
 
     useEffect(() => {
-        setFormantsToDisplay((current) =>
-            Math.min(current, Math.ceil(maximumFormants))
-        );
+        setFormantsToDisplay((current) => Math.min(current, Math.ceil(maximumFormants)));
     }, [maximumFormants]);
 
     useEffect(() => {
@@ -254,13 +293,7 @@ export default function App({
             mode === 'broadband' && formantsVisible,
             mode === 'broadband' && intensityVisible
         );
-    }, [
-        pitchVisible,
-        formantsVisible,
-        intensityVisible,
-        mode,
-        onOverlayChange,
-    ]);
+    }, [pitchVisible, formantsVisible, intensityVisible, mode, onOverlayChange]);
 
     const changeMode = useCallback(
         (newMode: SpectrogramMode) => {
@@ -275,24 +308,32 @@ export default function App({
 
     const chooseFile = useCallback(() => fileRef.current?.click(), []);
     const loadFile = useCallback(
-        (event: ChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
-            if (!file) {
+        async (event: ChangeEvent<HTMLInputElement>) => {
+            const files = Array.from(event.target.files || []);
+            if (files.length === 0) {
                 return;
             }
-            const reader = new FileReader();
             setPlayState('loading-file');
-            setSourceName(file.name);
-            setStatusMessage('正在解码音频…');
-            reader.addEventListener('load', () => {
-                if (reader.result instanceof ArrayBuffer) {
-                    onStartFile(reader.result, file.name);
-                }
-                if (fileRef.current) {
-                    fileRef.current.value = '';
-                }
-            });
-            reader.readAsArrayBuffer(file);
+            setSourceName(files.length === 1 ? files[0].name : `${files.length} 个文件`);
+            setStatusMessage('正在建立分析缓存…');
+            for (const file of files) {
+                const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.addEventListener('load', () => {
+                        if (reader.result instanceof ArrayBuffer) {
+                            resolve(reader.result);
+                        } else {
+                            reject(new Error('无法读取音频文件'));
+                        }
+                    });
+                    reader.addEventListener('error', () => reject(reader.error));
+                    reader.readAsArrayBuffer(file);
+                });
+                onStartFile(buffer, file.name);
+            }
+            if (fileRef.current) {
+                fileRef.current.value = '';
+            }
         },
         [onStartFile]
     );
@@ -368,6 +409,7 @@ export default function App({
                         ref={fileRef}
                         type="file"
                         accept="audio/*"
+                        multiple
                         onChange={loadFile}
                         hidden
                     />
@@ -377,6 +419,12 @@ export default function App({
                         disabled={playState !== 'stopped'}
                     >
                         导入音频
+                    </button>
+                    <button
+                        className={`button secondary ${playlistOpen ? 'active' : ''}`}
+                        onClick={() => setPlaylistOpen(!playlistOpen)}
+                    >
+                        播放列表
                     </button>
                     {playState === 'playing' ? (
                         <button className="button danger" onClick={stop}>
@@ -404,6 +452,78 @@ export default function App({
             </header>
 
             <main className="workspace">
+                <aside className={`media-panel ${playlistOpen ? 'open' : ''}`}>
+                    <div className="media-panel-heading">
+                        <div>
+                            <span className="eyebrow">MEDIA LIBRARY</span>
+                            <strong>播放列表</strong>
+                        </div>
+                        <button onClick={() => setPlaylistOpen(false)} aria-label="收起播放列表">
+                            ×
+                        </button>
+                    </div>
+                    <button
+                        className={`media-row microphone ${activeMediaId === null ? 'active' : ''}`}
+                        onClick={() => onSelectMedia(null)}
+                    >
+                        <span className="media-kind">LIVE</span>
+                        <span className="media-copy">
+                            <strong>麦克风</strong>
+                            <small>始终置顶 · 结束后生成录音分段</small>
+                        </span>
+                        <i className={`status-dot ${playState}`} />
+                    </button>
+                    <div className="media-list">
+                        {mediaItems.length === 0 ? (
+                            <p className="media-empty">导入音频或录制一段声音后，会保留在这里。</p>
+                        ) : (
+                            mediaItems.map((item) => (
+                                <div
+                                    className={`media-row ${
+                                        activeMediaId === item.id ? 'active' : ''
+                                    }`}
+                                    key={item.id}
+                                >
+                                    <button
+                                        className="media-select"
+                                        onClick={() => onSelectMedia(item.id)}
+                                        onDoubleClick={() => {
+                                            const nextName = window.prompt('重命名', item.name);
+                                            if (nextName?.trim()) {
+                                                onRenameMedia(item.id, nextName.trim());
+                                            }
+                                        }}
+                                    >
+                                        <span className="media-kind">
+                                            {item.type === 'recording' ? 'REC' : 'FILE'}
+                                        </span>
+                                        <span className="media-copy">
+                                            <strong>{item.name}</strong>
+                                            <small>
+                                                {item.state === 'analyzing'
+                                                    ? '正在分析…'
+                                                    : item.state === 'error'
+                                                    ? '分析失败'
+                                                    : `${formatTime(
+                                                          item.durationSeconds
+                                                      )} · 双击重命名`}
+                                            </small>
+                                        </span>
+                                    </button>
+                                    {item.type === 'recording' && (
+                                        <button
+                                            className="media-save"
+                                            onClick={() => onSaveMedia(item.id)}
+                                            title="保存 WAV"
+                                        >
+                                            保存
+                                        </button>
+                                    )}
+                                </div>
+                            ))
+                        )}
+                    </div>
+                </aside>
                 <section className="visualizer-card">
                     <div className="visualizer-toolbar">
                         <div className="mode-switch" aria-label="语谱类型">
@@ -465,10 +585,7 @@ export default function App({
                             <button onClick={onExport} className="export-button">
                                 导出图片
                             </button>
-                            <button
-                                onClick={toggleFullscreen}
-                                className="export-button"
-                            >
+                            <button onClick={toggleFullscreen} className="export-button">
                                 全屏
                             </button>
                         </div>
@@ -479,24 +596,18 @@ export default function App({
                             <span className="axis-title pitch-color">基频 Hz</span>
                             {mode === 'broadband' ? (
                                 <>
-                                    <span className="top pitch-color">
-                                        {pitchCeiling}
-                                    </span>
+                                    <span className="top pitch-color">{pitchCeiling}</span>
                                     <span className="mid pitch-color">
                                         {Math.round((pitchFloor + pitchCeiling) / 2)}
                                     </span>
-                                    <span className="bottom pitch-color">
-                                        {pitchFloor}
-                                    </span>
+                                    <span className="bottom pitch-color">{pitchFloor}</span>
                                 </>
                             ) : (
                                 <>
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: `${
-                                                (1 - pitchCeiling / maxFrequency) * 100
-                                            }%`,
+                                            top: `${(1 - pitchCeiling / maxFrequency) * 100}%`,
                                         }}
                                     >
                                         {pitchCeiling}
@@ -513,16 +624,12 @@ export default function App({
                                             }%`,
                                         }}
                                     >
-                                        {Math.round(
-                                            (pitchFloor + pitchCeiling) / 2
-                                        )}
+                                        {Math.round((pitchFloor + pitchCeiling) / 2)}
                                     </span>
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: `${
-                                                (1 - pitchFloor / maxFrequency) * 100
-                                            }%`,
+                                            top: `${(1 - pitchFloor / maxFrequency) * 100}%`,
                                         }}
                                     >
                                         {pitchFloor}
@@ -562,33 +669,60 @@ export default function App({
                                         {cursor.pitchHz !== null && (
                                             <span>F0 {cursor.pitchHz.toFixed(1)} Hz</span>
                                         )}
-                                        {mode === 'broadband' &&
-                                            cursor.intensityDbSpl !== null && (
-                                                <span>
-                                                    {cursor.intensityDbSpl.toFixed(1)} dB SPL*
-                                                </span>
-                                            )}
+                                        {mode === 'broadband' && cursor.intensityDbSpl !== null && (
+                                            <span>{cursor.intensityDbSpl.toFixed(1)} dB SPL*</span>
+                                        )}
                                     </div>
                                 )}
                             </div>
 
-                            <div className="timeline">
-                                <span>−{(8 / zoom).toFixed(1)} s</span>
-                                <span>时间</span>
-                                <span>现在</span>
-                            </div>
-                            <input
-                                className="history-slider"
-                                aria-label="回看历史"
-                                type="range"
-                                min={0}
-                                max={0.9}
-                                step={0.005}
-                                value={timeOffset}
-                                onChange={(event) =>
-                                    onNavigate(Number(event.target.value) - timeOffset)
-                                }
-                            />
+                            {transport.activeId !== null ? (
+                                <div className="file-transport">
+                                    <button
+                                        onClick={onToggleMediaPlayback}
+                                        aria-label={transport.isPlaying ? '暂停' : '播放'}
+                                    >
+                                        {transport.isPlaying ? 'Ⅱ' : '▶'}
+                                    </button>
+                                    <span>{formatTime(transport.currentSeconds)}</span>
+                                    <input
+                                        className="history-slider"
+                                        aria-label="播放位置"
+                                        type="range"
+                                        min={0}
+                                        max={Math.max(0.001, transport.durationSeconds)}
+                                        step={0.001}
+                                        value={Math.min(
+                                            transport.currentSeconds,
+                                            transport.durationSeconds
+                                        )}
+                                        onChange={(event) =>
+                                            onSeekMedia(Number(event.target.value))
+                                        }
+                                    />
+                                    <span>{formatTime(transport.durationSeconds)}</span>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="timeline">
+                                        <span>−{(8 / zoom).toFixed(1)} s</span>
+                                        <span>时间</span>
+                                        <span>现在</span>
+                                    </div>
+                                    <input
+                                        className="history-slider"
+                                        aria-label="回看历史"
+                                        type="range"
+                                        min={0}
+                                        max={0.9}
+                                        step={0.005}
+                                        value={timeOffset}
+                                        onChange={(event) =>
+                                            onNavigate(Number(event.target.value) - timeOffset)
+                                        }
+                                    />
+                                </>
+                            )}
                         </div>
 
                         <div className="axis axis-right">
@@ -600,10 +734,7 @@ export default function App({
                                         {intensityCeiling} dB SPL*
                                     </span>
                                     <span className="spl-mid intensity-color">
-                                        {Math.round(
-                                            (intensityFloor + intensityCeiling) / 2
-                                        )}{' '}
-                                        dB
+                                        {Math.round((intensityFloor + intensityCeiling) / 2)} dB
                                     </span>
                                     <span className="spl-bottom intensity-color">
                                         {intensityFloor} dB SPL*
@@ -615,11 +746,7 @@ export default function App({
                     </div>
                 </section>
 
-                <section
-                    className={`metrics-panel ${
-                        metricsCollapsed ? 'bubble' : ''
-                    }`}
-                >
+                <section className={`metrics-panel ${metricsCollapsed ? 'bubble' : ''}`}>
                     <button
                         className="collapsed-reading"
                         onClick={() => setMetricsCollapsed(false)}
@@ -700,17 +827,15 @@ export default function App({
                             {mode === 'broadband' && (
                                 <div>
                                     <dt>平均音强</dt>
-                                    <dd>
-                                        {formatNumber(snapshot.meanIntensityDbSpl, 1)} dB
-                                    </dd>
+                                    <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
                                 </div>
                             )}
                         </dl>
                     </div>
 
                     <p className="calibration-note">
-                        * 浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定
-                        1.0 样本单位 = 1 Pa；绝对 SPL 仅作参考。
+                        * 浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1
+                        Pa；绝对 SPL 仅作参考。
                     </p>
 
                     <div className="panel-actions">
@@ -745,11 +870,7 @@ export default function App({
                             className={settingsTab === value ? 'active' : ''}
                             onClick={() =>
                                 setSettingsTab(
-                                    value as
-                                        | 'spectrogram'
-                                        | 'pitch'
-                                        | 'formants'
-                                        | 'intensity'
+                                    value as 'spectrogram' | 'pitch' | 'formants' | 'intensity'
                                 )
                             }
                         >
@@ -763,8 +884,7 @@ export default function App({
                         <>
                             <label className="setting">
                                 <span>
-                                    灵敏度{' '}
-                                    <em>{Math.round(sensitivity * 100)}%</em>
+                                    灵敏度 <em>{Math.round(sensitivity * 100)}%</em>
                                 </span>
                                 <input
                                     type="range"
@@ -772,9 +892,7 @@ export default function App({
                                     max={1}
                                     step={0.01}
                                     value={sensitivity}
-                                    onChange={(event) =>
-                                        setSensitivity(Number(event.target.value))
-                                    }
+                                    onChange={(event) => setSensitivity(Number(event.target.value))}
                                 />
                             </label>
                             <label className="setting">
@@ -787,9 +905,7 @@ export default function App({
                                     max={1}
                                     step={0.01}
                                     value={contrast}
-                                    onChange={(event) =>
-                                        setContrast(Number(event.target.value))
-                                    }
+                                    onChange={(event) => setContrast(Number(event.target.value))}
                                 />
                             </label>
                             <label className="setting">
@@ -828,11 +944,7 @@ export default function App({
                                     <select
                                         value={scale}
                                         onChange={(event) =>
-                                            setScale(
-                                                event.target.value as
-                                                    | 'linear'
-                                                    | 'mel'
-                                            )
+                                            setScale(event.target.value as 'linear' | 'mel')
                                         }
                                     >
                                         <option value="linear">线性</option>
@@ -848,26 +960,18 @@ export default function App({
                                             key={item.name}
                                             aria-label={item.name}
                                             title={item.name}
-                                            className={
-                                                gradientName === item.name
-                                                    ? 'active'
-                                                    : ''
-                                            }
+                                            className={gradientName === item.name ? 'active' : ''}
                                             style={{
                                                 background: `linear-gradient(135deg, ${item.gradient
                                                     .map(
                                                         (stop) =>
-                                                            `rgb(${stop.color.join(
-                                                                ','
-                                                            )}) ${
+                                                            `rgb(${stop.color.join(',')}) ${
                                                                 stop.stop * 100
                                                             }%`
                                                     )
                                                     .join(',')})`,
                                             }}
-                                            onClick={() =>
-                                                setGradientName(item.name)
-                                            }
+                                            onClick={() => setGradientName(item.name)}
                                         />
                                     ))}
                                 </div>
@@ -881,14 +985,9 @@ export default function App({
                             <div className="select-row one">
                                 <label>
                                     F0 检测算法
-                                    <select
-                                        value={pitchAlgorithm}
-                                        onChange={changeAlgorithm}
-                                    >
+                                    <select value={pitchAlgorithm} onChange={changeAlgorithm}>
                                         <option value="yin">YIN</option>
-                                        <option value="autocorrelation">
-                                            归一化自相关
-                                        </option>
+                                        <option value="autocorrelation">归一化自相关</option>
                                     </select>
                                 </label>
                             </div>
@@ -902,9 +1001,7 @@ export default function App({
                                     max={200}
                                     step={5}
                                     value={pitchFloor}
-                                    onChange={(event) =>
-                                        setPitchFloor(Number(event.target.value))
-                                    }
+                                    onChange={(event) => setPitchFloor(Number(event.target.value))}
                                 />
                             </label>
                             <label className="setting">
@@ -924,8 +1021,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    有声阈值{' '}
-                                    <em>{voicingThreshold.toFixed(2)}</em>
+                                    有声阈值 <em>{voicingThreshold.toFixed(2)}</em>
                                 </span>
                                 <input
                                     type="range"
@@ -934,9 +1030,7 @@ export default function App({
                                     step={0.01}
                                     value={voicingThreshold}
                                     onChange={(event) =>
-                                        setVoicingThreshold(
-                                            Number(event.target.value)
-                                        )
+                                        setVoicingThreshold(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -966,9 +1060,7 @@ export default function App({
                                     <select
                                         value={maximumFormants}
                                         onChange={(event) =>
-                                            setMaximumFormants(
-                                                Number(event.target.value)
-                                            )
+                                            setMaximumFormants(Number(event.target.value))
                                         }
                                     >
                                         {[4, 4.5, 5, 5.5, 6].map((value) => (
@@ -983,18 +1075,13 @@ export default function App({
                                     <select
                                         value={formantsToDisplay}
                                         onChange={(event) =>
-                                            setFormantsToDisplay(
-                                                Number(event.target.value)
-                                            )
+                                            setFormantsToDisplay(Number(event.target.value))
                                         }
                                     >
                                         {new Array(Math.ceil(maximumFormants))
                                             .fill(0)
                                             .map((_, index) => (
-                                                <option
-                                                    key={index + 1}
-                                                    value={index + 1}
-                                                >
+                                                <option key={index + 1} value={index + 1}>
                                                     F1–F{index + 1}
                                                 </option>
                                             ))}
@@ -1012,9 +1099,7 @@ export default function App({
                                     step={100}
                                     value={formantCeiling}
                                     onChange={(event) =>
-                                        setFormantCeiling(
-                                            Number(event.target.value)
-                                        )
+                                        setFormantCeiling(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1029,9 +1114,7 @@ export default function App({
                                     step={1}
                                     value={formantWindowMs}
                                     onChange={(event) =>
-                                        setFormantWindowMs(
-                                            Number(event.target.value)
-                                        )
+                                        setFormantWindowMs(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1046,16 +1129,13 @@ export default function App({
                                     step={10}
                                     value={preEmphasisFrom}
                                     onChange={(event) =>
-                                        setPreEmphasisFrom(
-                                            Number(event.target.value)
-                                        )
+                                        setPreEmphasisFrom(Number(event.target.value))
                                     }
                                 />
                             </label>
                             <label className="setting">
                                 <span>
-                                    绘制动态范围{' '}
-                                    <em>{formantDynamicRange} dB</em>
+                                    绘制动态范围 <em>{formantDynamicRange} dB</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1064,9 +1144,7 @@ export default function App({
                                     step={5}
                                     value={formantDynamicRange}
                                     onChange={(event) =>
-                                        setFormantDynamicRange(
-                                            Number(event.target.value)
-                                        )
+                                        setFormantDynamicRange(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1081,16 +1159,13 @@ export default function App({
                                     step={0.2}
                                     value={formantDotSize}
                                     onChange={(event) =>
-                                        setFormantDotSize(
-                                            Number(event.target.value)
-                                        )
+                                        setFormantDotSize(Number(event.target.value))
                                     }
                                 />
                             </label>
                             <p className="setting-help">
-                                Praat 建议：成人男性可从 5000 Hz
-                                起，成人女性从 5500 Hz 起；即使只显示 F1–F3，也通常保留
-                                5 条分析数量。
+                                Praat 建议：成人男性可从 5000 Hz 起，成人女性从 5500 Hz
+                                起；即使只显示 F1–F3，也通常保留 5 条分析数量。
                             </p>
                         </>
                     )}
@@ -1099,8 +1174,7 @@ export default function App({
                         <>
                             <label className="setting">
                                 <span>
-                                    音强窗 Pitch floor{' '}
-                                    <em>{intensityPitchFloor} Hz</em>
+                                    音强窗 Pitch floor <em>{intensityPitchFloor} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1109,9 +1183,7 @@ export default function App({
                                     step={5}
                                     value={intensityPitchFloor}
                                     onChange={(event) =>
-                                        setIntensityPitchFloor(
-                                            Number(event.target.value)
-                                        )
+                                        setIntensityPitchFloor(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1126,9 +1198,7 @@ export default function App({
                                     step={1}
                                     value={intensityFloor}
                                     onChange={(event) =>
-                                        setIntensityFloor(
-                                            Number(event.target.value)
-                                        )
+                                        setIntensityFloor(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1143,9 +1213,7 @@ export default function App({
                                     step={1}
                                     value={intensityCeiling}
                                     onChange={(event) =>
-                                        setIntensityCeiling(
-                                            Number(event.target.value)
-                                        )
+                                        setIntensityCeiling(Number(event.target.value))
                                     }
                                 />
                             </label>
@@ -1164,16 +1232,13 @@ export default function App({
                                     step={0.5}
                                     value={splCalibration}
                                     onChange={(event) =>
-                                        setSplCalibration(
-                                            Number(event.target.value)
-                                        )
+                                        setSplCalibration(Number(event.target.value))
                                     }
                                 />
                             </label>
                             <label className="setting">
                                 <span>
-                                    曲线粗细{' '}
-                                    <em>{intensityLineWidth.toFixed(1)} px</em>
+                                    曲线粗细 <em>{intensityLineWidth.toFixed(1)} px</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1182,9 +1247,7 @@ export default function App({
                                     step={0.5}
                                     value={intensityLineWidth}
                                     onChange={(event) =>
-                                        setIntensityLineWidth(
-                                            Number(event.target.value)
-                                        )
+                                        setIntensityLineWidth(Number(event.target.value))
                                     }
                                 />
                             </label>

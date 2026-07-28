@@ -12,10 +12,7 @@ export default function initialiseControlsUi(
         mountedController = controller;
     };
 
-    ReactDOM.render(
-        <App {...callbacks} registerController={registerController} />,
-        container
-    );
+    ReactDOM.render(<App {...callbacks} registerController={registerController} />, container);
 
     const withController = (callback: (controller: UiController) => void) => {
         if (mountedController !== null) {
@@ -25,14 +22,16 @@ export default function initialiseControlsUi(
 
     return {
         setPlayState: (state, sourceName, message) =>
-            withController((controller) =>
-                controller.setPlayState(state, sourceName, message)
-            ),
+            withController((controller) => controller.setPlayState(state, sourceName, message)),
         updateSnapshot: (snapshot) =>
             withController((controller) => controller.updateSnapshot(snapshot)),
         updateCursor: (snapshot) =>
             withController((controller) => controller.updateCursor(snapshot)),
         updateTimeOffset: (offset) =>
             withController((controller) => controller.updateTimeOffset(offset)),
+        updateMediaLibrary: (items, activeId) =>
+            withController((controller) => controller.updateMediaLibrary(items, activeId)),
+        updateTransport: (snapshot) =>
+            withController((controller) => controller.updateTransport(snapshot)),
     };
 }

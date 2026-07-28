@@ -1,6 +1,12 @@
-import { AcousticAnalysis, AnalysisOptions } from './analysis';
+import { AcousticAnalysis, AnalysisOptions, TimedAcousticAnalysis } from './analysis';
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
-import { ACTION_COMPUTE_SPECTROGRAM, ComputeSpectrogramMessage, Message } from './worker-constants';
+import {
+    ACTION_ANALYZE_OFFLINE,
+    ACTION_COMPUTE_SPECTROGRAM,
+    AnalyzeOfflineMessage,
+    ComputeSpectrogramMessage,
+    Message,
+} from './worker-constants';
 // eslint-disable-next-line import/extensions
 import HelperWorker from './workers/helper.worker.ts';
 
@@ -109,5 +115,40 @@ export async function offThreadGenerateSpectrogram(
         spectrogram: new Float32Array(spectrogramBuffer),
         input: new Float32Array(inputBuffer),
         analysis,
+    };
+}
+
+export async function offThreadAnalyzeEntireFile(
+    samples: Float32Array,
+    options: SpectrogramOptions,
+    analysisOptions: AnalysisOptions
+): Promise<
+    SpectrogramResult & {
+        input: Float32Array;
+        analyses: TimedAcousticAnalysis[];
+    }
+> {
+    const {
+        spectrogramWindowCount,
+        spectrogramOptions,
+        spectrogramBuffer,
+        inputBuffer,
+        analyses,
+    } = await queueTask<AnalyzeOfflineMessage>(
+        ACTION_ANALYZE_OFFLINE,
+        {
+            samplesBuffer: samples.buffer,
+            options,
+            analysisOptions,
+        },
+        [samples.buffer]
+    );
+
+    return {
+        windowCount: spectrogramWindowCount,
+        options: spectrogramOptions,
+        spectrogram: new Float32Array(spectrogramBuffer),
+        input: new Float32Array(inputBuffer),
+        analyses,
     };
 }

@@ -23,6 +23,10 @@ export interface AcousticAnalysis {
     formantBandwidthsHz: (number | null)[];
 }
 
+export interface TimedAcousticAnalysis extends AcousticAnalysis {
+    timeSeconds: number;
+}
+
 interface Complex {
     re: number;
     im: number;
@@ -73,9 +77,7 @@ function calculateIntensityDbSpl(
     let weightSum = 0;
     for (let i = 0; i < windowLength; i += 1) {
         const ratio = windowLength === 1 ? 0 : (2 * i) / (windowLength - 1) - 1;
-        const weight =
-            besselI0(20 * Math.sqrt(Math.max(0, 1 - ratio * ratio))) /
-            denominator;
+        const weight = besselI0(20 * Math.sqrt(Math.max(0, 1 - ratio * ratio))) / denominator;
         weightedPower += samples[start + i] * samples[start + i] * weight;
         weightSum += weight;
     }
@@ -209,8 +211,7 @@ function detectPitchYin(
     difference[0] = 1;
     for (let lag = 1; lag <= maxLag; lag += 1) {
         runningSum += difference[lag];
-        difference[lag] =
-            runningSum === 0 ? 1 : (difference[lag] * lag) / runningSum;
+        difference[lag] = runningSum === 0 ? 1 : (difference[lag] * lag) / runningSum;
     }
 
     const threshold = 0.15;
@@ -291,12 +292,18 @@ function polynomialRoots(coefficients: Float64Array): Complex[] {
                     });
                 }
             }
-            const correction = complexDivide(evaluatePolynomial(coefficients, roots[i]), denominator);
+            const correction = complexDivide(
+                evaluatePolynomial(coefficients, roots[i]),
+                denominator
+            );
             roots[i] = {
                 re: roots[i].re - correction.re,
                 im: roots[i].im - correction.im,
             };
-            maximumChange = Math.max(maximumChange, Math.sqrt(correction.re ** 2 + correction.im ** 2));
+            maximumChange = Math.max(
+                maximumChange,
+                Math.sqrt(correction.re ** 2 + correction.im ** 2)
+            );
         }
         if (maximumChange < 1e-7) {
             break;
@@ -361,25 +368,21 @@ function burgLpc(signal: Float64Array, order: number) {
         let denominator = 0;
         for (let i = currentOrder; i < signal.length; i += 1) {
             numerator += forward[i] * backward[i - 1];
-            denominator +=
-                forward[i] * forward[i] +
-                backward[i - 1] * backward[i - 1];
+            denominator += forward[i] * forward[i] + backward[i - 1] * backward[i - 1];
         }
         const reflection = (-2 * numerator) / Math.max(1e-18, denominator);
         const previousCoefficients = new Float64Array(coefficients);
         coefficients[currentOrder] = reflection;
         for (let i = 1; i < currentOrder; i += 1) {
             coefficients[i] =
-                previousCoefficients[i] +
-                reflection * previousCoefficients[currentOrder - i];
+                previousCoefficients[i] + reflection * previousCoefficients[currentOrder - i];
         }
 
         const nextForward = new Float64Array(forward);
         const nextBackward = new Float64Array(backward);
         for (let i = currentOrder; i < signal.length; i += 1) {
             nextForward[i] = forward[i] + reflection * backward[i - 1];
-            nextBackward[i - 1] =
-                backward[i - 1] + reflection * forward[i];
+            nextBackward[i - 1] = backward[i - 1] + reflection * forward[i];
         }
         forward = nextForward;
         backward = nextBackward;
@@ -405,15 +408,8 @@ function estimateFormants(
         Math.max(64, Math.round(actualWindowSeconds * sampleRate))
     );
     const sourceWindow = samples.subarray(samples.length - sourceWindowLength);
-    const formantSampleRate = Math.min(
-        sampleRate,
-        Math.max(2000, options.formantCeilingHz * 2)
-    );
-    const resampled = resampleForFormants(
-        sourceWindow,
-        sampleRate,
-        formantSampleRate
-    );
+    const formantSampleRate = Math.min(sampleRate, Math.max(2000, options.formantCeilingHz * 2));
+    const resampled = resampleForFormants(sourceWindow, sampleRate, formantSampleRate);
 
     const preEmphasisCoefficient = Math.exp(
         (-2 * Math.PI * options.preEmphasisFromHz) / formantSampleRate
@@ -424,9 +420,7 @@ function estimateFormants(
         const previous = i === 0 ? 0 : resampled[i - 1];
         const emphasized = resampled[i] - preEmphasisCoefficient * previous;
         const position =
-            resampled.length === 1
-                ? 0
-                : (i - (resampled.length - 1) / 2) / (resampled.length - 1);
+            resampled.length === 1 ? 0 : (i - (resampled.length - 1) / 2) / (resampled.length - 1);
         const gaussianLikeWindow = Math.exp(-48 * position * position);
         signal[i] = emphasized * gaussianLikeWindow;
         energy += signal[i] * signal[i];
@@ -453,9 +447,7 @@ function estimateFormants(
             const frequency = (angle * formantSampleRate) / (2 * Math.PI);
             const magnitude = Math.sqrt(root.re * root.re + root.im * root.im);
             const bandwidth =
-                (-formantSampleRate *
-                    Math.log(Math.max(1e-9, Math.min(1, magnitude)))) /
-                Math.PI;
+                (-formantSampleRate * Math.log(Math.max(1e-9, Math.min(1, magnitude)))) / Math.PI;
             return { frequency, bandwidth };
         })
         .filter(
@@ -472,14 +464,10 @@ function estimateFormants(
     return {
         frequencies: new Array(resultLength)
             .fill(null)
-            .map((_, index) =>
-                candidates[index] ? candidates[index].frequency : null
-            ),
+            .map((_, index) => (candidates[index] ? candidates[index].frequency : null)),
         bandwidths: new Array(resultLength)
             .fill(null)
-            .map((_, index) =>
-                candidates[index] ? candidates[index].bandwidth : null
-            ),
+            .map((_, index) => (candidates[index] ? candidates[index].bandwidth : null)),
     };
 }
 
@@ -508,8 +496,7 @@ export function analyzeAcousticFrame(
               )
             : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
 
-    const voiced =
-        pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
+    const voiced = pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
     const formants = estimateFormants(samples, sampleRate, options);
     return {
         pitchHz: voiced ? pitch.pitchHz : null,

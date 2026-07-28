@@ -1,25 +1,20 @@
 import debounce from 'lodash.debounce';
 
-import {
-    AcousticAnalysis,
-    AnalysisOptions,
-    PitchAlgorithm,
-} from './analysis';
+import { AcousticAnalysis, AnalysisOptions, PitchAlgorithm } from './analysis';
 import { AURORA_GRADIENT } from './color-util';
 import initialiseControlsUi from './controls-ui';
 import {
     CursorSnapshot,
     LayerDisplayOptions,
     LiveSnapshot,
+    MediaListItem,
     SpectrogramMode,
+    TransportSnapshot,
     UiController,
 } from './controls-ui/App';
 import { Circular2DBuffer, clamp, hzToMel, melToHz } from './math-util';
-import {
-    RenderParameters,
-    SpectrogramGPURenderer,
-} from './spectrogram-render';
-import { offThreadGenerateSpectrogram } from './worker-util';
+import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
+import { offThreadAnalyzeEntireFile, offThreadGenerateSpectrogram } from './worker-util';
 
 const AUDIO_CHUNK_SIZE = 1024;
 const SPECTROGRAM_HEIGHT = 512;
@@ -28,6 +23,7 @@ const PITCH_FLOOR_HZ = 75;
 const PITCH_CEILING_HZ = 500;
 const INTENSITY_FLOOR_DB_SPL = 50;
 const INTENSITY_CEILING_DB_SPL = 100;
+const MAX_OFFLINE_COLUMNS = 2048;
 
 interface ModeConfiguration {
     windowSize: number;
@@ -47,6 +43,25 @@ interface ProcessRequest {
     endTimeSeconds: number;
 }
 
+interface OfflineModeCache {
+    spectrogram: Float32Array;
+    analyses: AnalysisPoint[];
+    windowCount: number;
+    fftSize: number;
+}
+
+interface MediaItem {
+    id: string;
+    name: string;
+    type: 'file' | 'recording';
+    state: 'ready' | 'analyzing' | 'error';
+    durationSeconds: number;
+    sampleRate: number;
+    samples: Float32Array;
+    modes: Partial<Record<SpectrogramMode, OfflineModeCache>>;
+    wavBlob?: Blob;
+}
+
 interface SessionStatistics {
     totalFrames: number;
     voicedFrames: number;
@@ -60,10 +75,7 @@ function nextPowerOfTwo(value: number) {
     return 2 ** Math.ceil(Math.log2(value));
 }
 
-function modeConfiguration(
-    mode: SpectrogramMode,
-    sampleRate: number
-): ModeConfiguration {
+function modeConfiguration(mode: SpectrogramMode, sampleRate: number): ModeConfiguration {
     const durationSeconds = mode === 'broadband' ? 0.005 : 0.03;
     const windowSize = Math.max(32, Math.round(sampleRate * durationSeconds));
     const hopSize = mode === 'broadband' ? 128 : 256;
@@ -169,6 +181,30 @@ class SpectroEngine {
 
     private maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
 
+    private mediaItems: MediaItem[] = [];
+
+    private activeMediaId: string | null = null;
+
+    private mediaSequence = 0;
+
+    private playbackContext: AudioContext | null = null;
+
+    private playbackSource: AudioBufferSourceNode | null = null;
+
+    private playbackTimer: number | null = null;
+
+    private playbackStartedAt = 0;
+
+    private playbackOffsetSeconds = 0;
+
+    private playbackIsPlaying = false;
+
+    private recordingChunks: Float32Array[] = [];
+
+    private recordingSampleRate = 48000;
+
+    private isRecordingMicrophone = false;
+
     constructor(ui: UiController) {
         const canvas = document.querySelector('#spectrogramCanvas');
         const overlay = document.querySelector('#analysisOverlay');
@@ -207,6 +243,8 @@ class SpectroEngine {
         const resize = debounce(() => this.resize(), 150);
         window.addEventListener('resize', resize);
         requestAnimationFrame(() => this.renderLoop());
+        this.notifyMediaLibrary();
+        this.notifyTransport();
     }
 
     updateDisplay(parameters: Partial<RenderParameters>) {
@@ -220,6 +258,12 @@ class SpectroEngine {
 
     setMode(mode: SpectrogramMode) {
         this.mode = mode;
+        const activeMedia = this.activeMedia();
+        if (activeMedia !== null) {
+            this.stopMediaPlayback();
+            this.showOrAnalyzeMedia(activeMedia);
+            return;
+        }
         const config = modeConfiguration(mode, this.sampleRate);
         this.spectrogramBuffer.resizeWidth(config.historyCapacity);
         this.renderer.updateParameters({
@@ -246,6 +290,13 @@ class SpectroEngine {
         if (parameters.pitchAlgorithm !== undefined) {
             this.pitchAlgorithm = parameters.pitchAlgorithm;
         }
+        for (const item of this.mediaItems) {
+            item.modes = {};
+        }
+        const activeMedia = this.activeMedia();
+        if (activeMedia !== null) {
+            this.showOrAnalyzeMedia(activeMedia);
+        }
     }
 
     updateLayerDisplay(parameters: Partial<LayerDisplayOptions>) {
@@ -265,6 +316,9 @@ class SpectroEngine {
 
     async startMicrophone() {
         this.stop();
+        this.activeMediaId = null;
+        this.notifyMediaLibrary();
+        this.notifyTransport();
         this.resetSession();
         this.ui.setPlayState('loading-mic', '麦克风', '正在请求麦克风权限…');
 
@@ -285,6 +339,9 @@ class SpectroEngine {
                 1
             );
             this.setSampleRate(audioCtx.sampleRate);
+            this.recordingChunks = [];
+            this.recordingSampleRate = audioCtx.sampleRate;
+            this.isRecordingMicrophone = true;
 
             const rollingCapacity = Math.ceil(audioCtx.sampleRate * 0.18);
             const rolling = new Float32Array(rollingCapacity);
@@ -309,6 +366,7 @@ class SpectroEngine {
                 rolling.set(chunk, rollingLength);
                 rollingLength += chunk.length;
                 receivedSamples += chunk.length;
+                this.recordingChunks.push(chunk);
                 this.sessionElapsedSeconds = receivedSamples / audioCtx.sampleRate;
 
                 if (rollingLength >= Math.round(audioCtx.sampleRate * 0.085)) {
@@ -329,6 +387,7 @@ class SpectroEngine {
                 processor.disconnect();
                 source.disconnect();
                 stream.getTracks().forEach((track) => track.stop());
+                audioCtx.close();
             };
             this.ui.setPlayState('playing', '麦克风', '实时分析中');
         } catch (error) {
@@ -341,14 +400,11 @@ class SpectroEngine {
     }
 
     async startFile(arrayBuffer: ArrayBuffer, name: string) {
-        this.stop();
-        this.resetSession();
         this.ui.setPlayState('loading-file', name, '正在解码音频…');
 
         try {
             const audioCtx = this.createAudioContext();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            this.setSampleRate(audioBuffer.sampleRate);
             const mono = new Float32Array(audioBuffer.length);
             for (let channel = 0; channel < audioBuffer.numberOfChannels; channel += 1) {
                 const channelData = audioBuffer.getChannelData(channel);
@@ -356,67 +412,22 @@ class SpectroEngine {
                     mono[i] += channelData[i] / audioBuffer.numberOfChannels;
                 }
             }
-
-            const source = audioCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioCtx.destination);
-            const startedAt = audioCtx.currentTime;
-            let lastProcessedSample = 0;
-            let stopped = false;
-
-            const tick = () => {
-                if (stopped) {
-                    return;
-                }
-                const currentSample = Math.min(
-                    mono.length,
-                    Math.floor((audioCtx.currentTime - startedAt) * audioBuffer.sampleRate)
-                );
-                const available = currentSample - lastProcessedSample;
-                if (
-                    available >= AUDIO_CHUNK_SIZE &&
-                    currentSample >= Math.round(audioBuffer.sampleRate * 0.085)
-                ) {
-                    const processEnd =
-                        lastProcessedSample +
-                        Math.floor(available / AUDIO_CHUNK_SIZE) * AUDIO_CHUNK_SIZE;
-                    const start = Math.max(
-                        0,
-                        processEnd - Math.ceil(audioBuffer.sampleRate * 0.18)
-                    );
-                    this.sessionElapsedSeconds = processEnd / audioBuffer.sampleRate;
-                    this.queueProcessing({
-                        samples: new Float32Array(mono.subarray(start, processEnd)),
-                        sampleRate: audioBuffer.sampleRate,
-                        newSamples: processEnd - lastProcessedSample,
-                        endTimeSeconds: this.sessionElapsedSeconds,
-                    });
-                    lastProcessedSample = processEnd;
-                }
+            await audioCtx.close();
+            const item: MediaItem = {
+                id: `media-${Date.now()}-${(this.mediaSequence += 1)}`,
+                name,
+                type: 'file',
+                state: 'analyzing',
+                durationSeconds: mono.length / audioBuffer.sampleRate,
+                sampleRate: audioBuffer.sampleRate,
+                samples: mono,
+                modes: {},
             };
-
-            const timer = window.setInterval(tick, 16);
-            source.addEventListener('ended', () => {
-                tick();
-                window.clearInterval(timer);
-                if (!stopped) {
-                    this.ui.setPlayState('stopped', name, '播放与分析完成');
-                    this.stopActiveSource = null;
-                }
-            });
-            this.stopActiveSource = () => {
-                stopped = true;
-                window.clearInterval(timer);
-                try {
-                    source.stop();
-                } catch {
-                    // The source may already have ended.
-                }
-                source.disconnect();
-            };
-            source.start();
-            audioCtx.resume();
-            this.ui.setPlayState('playing', name, '播放并实时分析中');
+            this.mediaItems.push(item);
+            this.activeMediaId = item.id;
+            this.notifyMediaLibrary();
+            this.notifyTransport();
+            await this.showOrAnalyzeMedia(item);
         } catch (error) {
             this.ui.setPlayState(
                 'stopped',
@@ -427,16 +438,98 @@ class SpectroEngine {
     }
 
     stop() {
+        this.stopMediaPlayback();
         if (this.stopActiveSource !== null) {
             const stop = this.stopActiveSource;
             this.stopActiveSource = null;
             stop();
         }
         this.pendingRequest = null;
+        if (this.isRecordingMicrophone) {
+            this.isRecordingMicrophone = false;
+            this.finalizeRecording();
+        }
     }
 
     clear() {
         this.resetSession();
+    }
+
+    selectMedia(id: string | null) {
+        this.stop();
+        this.activeMediaId = id;
+        this.notifyMediaLibrary();
+        this.notifyTransport();
+        if (id === null) {
+            const config = modeConfiguration(this.mode, this.sampleRate);
+            this.spectrogramBuffer = new Circular2DBuffer(
+                Float32Array,
+                config.historyCapacity,
+                SPECTROGRAM_HEIGHT,
+                1
+            );
+            this.clearVisualHistory();
+            this.ui.setPlayState('stopped', '麦克风', '点击麦克风开始新的录音分段');
+            return;
+        }
+        const item = this.activeMedia();
+        if (item !== null) {
+            this.showOrAnalyzeMedia(item);
+        }
+    }
+
+    toggleMediaPlayback() {
+        const item = this.activeMedia();
+        if (item === null || item.state !== 'ready') {
+            return;
+        }
+        if (this.playbackIsPlaying) {
+            this.pauseMediaPlayback();
+        } else {
+            this.startMediaPlayback(item);
+        }
+    }
+
+    seekMedia(seconds: number) {
+        const item = this.activeMedia();
+        if (item === null) {
+            return;
+        }
+        const wasPlaying = this.playbackIsPlaying;
+        this.stopMediaPlayback(false);
+        this.playbackOffsetSeconds = clamp(seconds, 0, item.durationSeconds);
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.notifyTransport();
+        this.overlayDirty = true;
+        if (wasPlaying && this.playbackOffsetSeconds < item.durationSeconds) {
+            this.startMediaPlayback(item);
+        }
+    }
+
+    renameMedia(id: string, name: string) {
+        const item = this.mediaItems.find((candidate) => candidate.id === id);
+        if (item === undefined) {
+            return;
+        }
+        item.name = name;
+        this.notifyMediaLibrary();
+        if (this.activeMediaId === id) {
+            this.ui.setPlayState('stopped', name, '分析缓存已就绪');
+        }
+    }
+
+    saveMedia(id: string) {
+        const item = this.mediaItems.find((candidate) => candidate.id === id);
+        if (item?.type !== 'recording') {
+            return;
+        }
+        const blob = item.wavBlob || encodeWav(item.samples, item.sampleRate);
+        item.wavBlob = blob;
+        const link = document.createElement('a');
+        link.download = `${item.name.replace(/[<>:"/\\|?*]/g, '_')}.wav`;
+        link.href = URL.createObjectURL(blob);
+        link.click();
+        URL.revokeObjectURL(link.href);
     }
 
     navigate(amount: number) {
@@ -472,8 +565,7 @@ class SpectroEngine {
             this.renderParameters.scale === 'mel'
                 ? melToHz(
                       hzToMel(minFrequency) +
-                          (1 - y) *
-                              (hzToMel(maxFrequency) - hzToMel(minFrequency))
+                          (1 - y) * (hzToMel(maxFrequency) - hzToMel(minFrequency))
                   )
                 : minFrequency + (1 - y) * (maxFrequency - minFrequency);
         const snapshot: CursorSnapshot = {
@@ -510,23 +602,281 @@ class SpectroEngine {
         ctx.fillText('SPECTRO PRO', 32, 49);
         ctx.fillStyle = '#9aa7bc';
         ctx.font = '12px Arial, sans-serif';
-        ctx.fillText(
-            this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms',
-            176,
-            48
-        );
+        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 176, 48);
         exportCanvas.toBlob((blob) => {
             if (!blob) {
                 return;
             }
             const link = document.createElement('a');
-            link.download = `spectro-pro-${new Date()
-                .toISOString()
-                .replace(/[:.]/g, '-')}.png`;
+            link.download = `spectro-pro-${new Date().toISOString().replace(/[:.]/g, '-')}.png`;
             link.href = URL.createObjectURL(blob);
             link.click();
             URL.revokeObjectURL(link.href);
         }, 'image/png');
+    }
+
+    private activeMedia() {
+        return this.mediaItems.find((item) => item.id === this.activeMediaId) || null;
+    }
+
+    private async showOrAnalyzeMedia(item: MediaItem) {
+        const cache = item.modes[this.mode];
+        if (cache !== undefined) {
+            this.displayMediaCache(item, cache);
+            return;
+        }
+        await this.analyzeMedia(item, this.mode, true);
+    }
+
+    private async analyzeMedia(item: MediaItem, mode: SpectrogramMode, displayWhenReady: boolean) {
+        item.state = 'analyzing';
+        this.notifyMediaLibrary();
+        if (displayWhenReady && this.activeMediaId === item.id) {
+            this.ui.setPlayState(
+                'loading-file',
+                item.name,
+                mode === 'broadband' ? '正在分析整段宽带语谱…' : '正在分析整段窄带语谱…'
+            );
+        }
+        try {
+            const config = modeConfiguration(mode, item.sampleRate);
+            const adaptiveHop = Math.max(
+                config.hopSize,
+                Math.ceil(
+                    Math.max(0, item.samples.length - config.windowSize) /
+                        Math.max(1, MAX_OFFLINE_COLUMNS - 1)
+                )
+            );
+            const result = await offThreadAnalyzeEntireFile(
+                new Float32Array(item.samples),
+                {
+                    windowSize: config.windowSize,
+                    fftSize: config.fftSize,
+                    windowStepSize: adaptiveHop,
+                    sampleRate: item.sampleRate,
+                    scaleSize: SPECTROGRAM_HEIGHT,
+                },
+                this.analysisOptions
+            );
+            const cache: OfflineModeCache = {
+                spectrogram: result.spectrogram,
+                analyses: result.analyses,
+                windowCount: result.windowCount,
+                fftSize: config.fftSize,
+            };
+            item.modes[mode] = cache;
+            item.state = 'ready';
+            this.notifyMediaLibrary();
+            if (displayWhenReady && this.activeMediaId === item.id && this.mode === mode) {
+                this.displayMediaCache(item, cache);
+            }
+        } catch (error) {
+            item.state = 'error';
+            this.notifyMediaLibrary();
+            if (displayWhenReady && this.activeMediaId === item.id) {
+                this.ui.setPlayState(
+                    'stopped',
+                    item.name,
+                    error instanceof Error ? error.message : '无法分析此音频'
+                );
+            }
+        }
+    }
+
+    private displayMediaCache(item: MediaItem, cache: OfflineModeCache) {
+        this.sampleRate = item.sampleRate;
+        this.analysisHistory = cache.analyses;
+        this.spectrogramBuffer = new Circular2DBuffer(
+            Float32Array,
+            Math.max(2, cache.windowCount),
+            SPECTROGRAM_HEIGHT,
+            1
+        );
+        this.spectrogramBuffer.enqueue(cache.spectrogram);
+        this.renderer.updateParameters({
+            sampleRate: item.sampleRate,
+            windowSize: cache.fftSize,
+            zoom: 1,
+            timeOffset: 0,
+        });
+        this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
+        this.renderParameters = {
+            ...this.renderParameters,
+            zoom: 1,
+            timeOffset: 0,
+        };
+        this.timeOffset = 0;
+        this.playbackOffsetSeconds = clamp(this.playbackOffsetSeconds, 0, item.durationSeconds);
+        this.rebuildStatisticsFromHistory();
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        const latest = this.analysisHistory[
+            clamp(
+                Math.round(
+                    (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
+                        (this.analysisHistory.length - 1)
+                ),
+                0,
+                Math.max(0, this.analysisHistory.length - 1)
+            )
+        ];
+        if (latest !== undefined) {
+            this.lastUiUpdate = 0;
+            this.updateUiSnapshot(latest);
+        }
+        this.ui.updateTimeOffset(0);
+        this.ui.setPlayState('stopped', item.name, '整段分析完成，可自由拖动播放');
+        this.notifyTransport();
+        this.overlayDirty = true;
+    }
+
+    private rebuildStatisticsFromHistory() {
+        this.statistics = emptyStatistics();
+        this.maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
+        for (const point of this.analysisHistory) {
+            this.statistics.totalFrames += 1;
+            this.maximumSessionIntensityDbSpl = Math.max(
+                this.maximumSessionIntensityDbSpl,
+                point.intensityDbSpl
+            );
+            this.statistics.intensityPowerSum += 10 ** (point.intensityDbSpl / 10);
+            if (point.pitchHz !== null) {
+                this.statistics.voicedFrames += 1;
+                this.statistics.pitchSum += point.pitchHz;
+                this.statistics.pitchMin = Math.min(this.statistics.pitchMin, point.pitchHz);
+                this.statistics.pitchMax = Math.max(this.statistics.pitchMax, point.pitchHz);
+            }
+        }
+    }
+
+    private startMediaPlayback(item: MediaItem) {
+        if (this.playbackOffsetSeconds >= item.durationSeconds) {
+            this.playbackOffsetSeconds = 0;
+        }
+        this.stopMediaPlayback(false);
+        const audioCtx = this.createAudioContext();
+        const buffer = audioCtx.createBuffer(1, item.samples.length, item.sampleRate);
+        buffer.copyToChannel(item.samples, 0);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        this.playbackContext = audioCtx;
+        this.playbackSource = source;
+        this.playbackStartedAt = audioCtx.currentTime;
+        this.playbackIsPlaying = true;
+        source.addEventListener('ended', () => {
+            if (this.playbackSource !== source) {
+                return;
+            }
+            this.playbackOffsetSeconds = item.durationSeconds;
+            this.stopMediaPlayback(false);
+            this.ui.setPlayState('stopped', item.name, '播放完成');
+        });
+        source.start(0, this.playbackOffsetSeconds);
+        audioCtx.resume();
+        this.playbackTimer = window.setInterval(() => this.updatePlaybackPosition(), 33);
+        this.ui.setPlayState('playing', item.name, '播放中 · 分析图保持完整');
+        this.notifyTransport();
+    }
+
+    private updatePlaybackPosition() {
+        const item = this.activeMedia();
+        if (item === null || this.playbackContext === null || !this.playbackIsPlaying) {
+            return;
+        }
+        this.playbackOffsetSeconds = Math.min(
+            item.durationSeconds,
+            this.playbackOffsetSeconds + (this.playbackContext.currentTime - this.playbackStartedAt)
+        );
+        this.playbackStartedAt = this.playbackContext.currentTime;
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.notifyTransport();
+        this.overlayDirty = true;
+    }
+
+    private pauseMediaPlayback() {
+        const item = this.activeMedia();
+        this.updatePlaybackPosition();
+        this.stopMediaPlayback(false);
+        if (item !== null) {
+            this.ui.setPlayState('stopped', item.name, '已暂停，可拖动定位');
+        }
+    }
+
+    private stopMediaPlayback(resetPosition: boolean = false) {
+        if (this.playbackTimer !== null) {
+            window.clearInterval(this.playbackTimer);
+            this.playbackTimer = null;
+        }
+        const source = this.playbackSource;
+        this.playbackSource = null;
+        if (source !== null) {
+            try {
+                source.stop();
+            } catch {
+                // The source may already have ended.
+            }
+            source.disconnect();
+        }
+        if (this.playbackContext !== null) {
+            this.playbackContext.close();
+            this.playbackContext = null;
+        }
+        this.playbackIsPlaying = false;
+        if (resetPosition) {
+            this.playbackOffsetSeconds = 0;
+        }
+        this.notifyTransport();
+    }
+
+    private finalizeRecording() {
+        const totalLength = this.recordingChunks.reduce((total, chunk) => total + chunk.length, 0);
+        if (totalLength === 0) {
+            this.recordingChunks = [];
+            return;
+        }
+        const samples = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of this.recordingChunks) {
+            samples.set(chunk, offset);
+            offset += chunk.length;
+        }
+        this.recordingChunks = [];
+        const sequence = this.mediaItems.filter((item) => item.type === 'recording').length;
+        const item: MediaItem = {
+            id: `recording-${Date.now()}-${(this.mediaSequence += 1)}`,
+            name: `录音 ${sequence + 1}`,
+            type: 'recording',
+            state: 'analyzing',
+            durationSeconds: samples.length / this.recordingSampleRate,
+            sampleRate: this.recordingSampleRate,
+            samples,
+            modes: {},
+        };
+        this.mediaItems.unshift(item);
+        this.notifyMediaLibrary();
+        this.analyzeMedia(item, this.mode, false);
+    }
+
+    private notifyMediaLibrary() {
+        const items: MediaListItem[] = this.mediaItems.map((item) => ({
+            id: item.id,
+            name: item.name,
+            durationSeconds: item.durationSeconds,
+            type: item.type,
+            state: item.state,
+        }));
+        this.ui.updateMediaLibrary(items, this.activeMediaId);
+    }
+
+    private notifyTransport() {
+        const item = this.activeMedia();
+        const snapshot: TransportSnapshot = {
+            activeId: item?.id || null,
+            currentSeconds: item === null ? 0 : this.playbackOffsetSeconds,
+            durationSeconds: item?.durationSeconds || 0,
+            isPlaying: this.playbackIsPlaying,
+        };
+        this.ui.updateTransport(snapshot);
     }
 
     private createAudioContext() {
@@ -561,12 +911,9 @@ class SpectroEngine {
             const config = modeConfiguration(this.mode, request.sampleRate);
             const maximumFrames = Math.floor(request.newSamples / config.hopSize);
             const availableFrames =
-                Math.floor(
-                    (request.samples.length - config.windowSize) / config.hopSize
-                ) + 1;
+                Math.floor((request.samples.length - config.windowSize) / config.hopSize) + 1;
             const frameCount = Math.max(1, Math.min(maximumFrames, availableFrames));
-            const samplesLength =
-                config.windowSize + (frameCount - 1) * config.hopSize;
+            const samplesLength = config.windowSize + (frameCount - 1) * config.hopSize;
             const samplesStart = request.samples.length - samplesLength;
             const analysisLength = Math.min(
                 request.samples.length,
@@ -643,14 +990,8 @@ class SpectroEngine {
         if (analysis.pitchHz !== null) {
             this.statistics.voicedFrames += 1;
             this.statistics.pitchSum += analysis.pitchHz;
-            this.statistics.pitchMin = Math.min(
-                this.statistics.pitchMin,
-                analysis.pitchHz
-            );
-            this.statistics.pitchMax = Math.max(
-                this.statistics.pitchMax,
-                analysis.pitchHz
-            );
+            this.statistics.pitchMin = Math.min(this.statistics.pitchMin, analysis.pitchHz);
+            this.statistics.pitchMax = Math.max(this.statistics.pitchMax, analysis.pitchHz);
         }
         this.overlayDirty = true;
         this.updateUiSnapshot(analysis);
@@ -715,10 +1056,7 @@ class SpectroEngine {
         const width = Math.max(1, this.stage.clientWidth);
         const height = Math.max(1, this.stage.clientHeight);
         const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
-        this.renderer.resizeCanvas(
-            Math.round(width * pixelRatio),
-            Math.round(height * pixelRatio)
-        );
+        this.renderer.resizeCanvas(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
         this.overlay.width = Math.round(width * pixelRatio);
         this.overlay.height = Math.round(height * pixelRatio);
         this.overlay.style.width = `${width}px`;
@@ -778,28 +1116,15 @@ class SpectroEngine {
         };
 
         if (this.showFormants && this.mode === 'broadband') {
-            const colors = [
-                '#ff4f72',
-                '#ff755e',
-                '#ff9e61',
-                '#ffc86b',
-                '#ffe39a',
-                '#fff0c7',
-            ];
+            const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
             const formantCount = Math.min(
                 this.layerDisplayOptions.formantsToDisplay,
                 this.analysisHistory[visible.end - 1]?.formantsHz.length || 0
             );
-            for (
-                let formantIndex = 0;
-                formantIndex < formantCount;
-                formantIndex += 1
-            ) {
+            for (let formantIndex = 0; formantIndex < formantCount; formantIndex += 1) {
                 ctx.fillStyle = colors[formantIndex % colors.length];
                 for (let index = visible.start; index < visible.end; index += 2) {
-                    const formant = this.analysisHistory[index].formantsHz[
-                        formantIndex
-                    ];
+                    const formant = this.analysisHistory[index].formantsHz[formantIndex];
                     const withinDynamicRange =
                         this.analysisHistory[index].intensityDbSpl >=
                         this.maximumSessionIntensityDbSpl -
@@ -834,8 +1159,7 @@ class SpectroEngine {
                         ? frequencyY(pitch)
                         : height *
                           (1 -
-                              (pitch -
-                                  this.layerDisplayOptions.pitchFloorHz) /
+                              (pitch - this.layerDisplayOptions.pitchFloorHz) /
                                   (this.layerDisplayOptions.pitchCeilingHz -
                                       this.layerDisplayOptions.pitchFloorHz)),
                 '#2588ff',
@@ -853,13 +1177,33 @@ class SpectroEngine {
                 (intensity) =>
                     height *
                     (1 -
-                        (intensity -
-                            this.layerDisplayOptions.intensityFloorDbSpl) /
+                        (intensity - this.layerDisplayOptions.intensityFloorDbSpl) /
                             (this.layerDisplayOptions.intensityCeilingDbSpl -
                                 this.layerDisplayOptions.intensityFloorDbSpl)),
                 '#f4df22',
                 this.layerDisplayOptions.intensityLineWidth
             );
+        }
+
+        const activeMedia = this.activeMedia();
+        if (activeMedia !== null) {
+            const playheadX =
+                (this.playbackOffsetSeconds / Math.max(0.001, activeMedia.durationSeconds)) * width;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(playheadX, 0);
+            ctx.lineTo(playheadX, height);
+            ctx.stroke();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.moveTo(playheadX - 5, 0);
+            ctx.lineTo(playheadX + 5, 0);
+            ctx.lineTo(playheadX, 8);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
         }
 
         if (this.inspector !== null) {
@@ -920,6 +1264,39 @@ class SpectroEngine {
     }
 }
 
+function encodeWav(samples: Float32Array, sampleRate: number) {
+    const bytesPerSample = 2;
+    const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+    const view = new DataView(buffer);
+    const writeText = (offset: number, value: string) => {
+        for (let index = 0; index < value.length; index += 1) {
+            view.setUint8(offset + index, value.charCodeAt(index));
+        }
+    };
+    writeText(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * bytesPerSample, true);
+    writeText(8, 'WAVE');
+    writeText(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * bytesPerSample, true);
+    view.setUint16(32, bytesPerSample, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    writeText(36, 'data');
+    view.setUint32(40, samples.length * bytesPerSample, true);
+    for (let index = 0; index < samples.length; index += 1) {
+        const sample = clamp(samples[index], -1, 1);
+        view.setInt16(
+            44 + index * bytesPerSample,
+            sample < 0 ? sample * 32768 : sample * 32767,
+            true
+        );
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+}
+
 const appContainer = document.querySelector('#app');
 if (appContainer === null) {
     throw new Error('Missing Spectro Pro application container');
@@ -933,15 +1310,18 @@ const ui = initialiseControlsUi(appContainer, {
     onClear: () => engine?.clear(),
     onExport: () => engine?.exportImage(),
     onModeChange: (mode) => engine?.setMode(mode),
-    onPitchAlgorithmChange: (algorithm) =>
-        engine?.setPitchAlgorithm(algorithm),
+    onPitchAlgorithmChange: (algorithm) => engine?.setPitchAlgorithm(algorithm),
     onAnalysisChange: (parameters) => engine?.updateAnalysis(parameters),
-    onLayerDisplayChange: (parameters) =>
-        engine?.updateLayerDisplay(parameters),
+    onLayerDisplayChange: (parameters) => engine?.updateLayerDisplay(parameters),
     onDisplayChange: (parameters) => engine?.updateDisplay(parameters),
     onOverlayChange: (pitch, formants, intensity) =>
         engine?.setOverlays(pitch, formants, intensity),
     onInspect: (x, y) => engine?.inspect(x, y),
     onNavigate: (amount) => engine?.navigate(amount),
+    onSelectMedia: (id) => engine?.selectMedia(id),
+    onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
+    onSeekMedia: (seconds) => engine?.seekMedia(seconds),
+    onRenameMedia: (id, name) => engine?.renameMedia(id, name),
+    onSaveMedia: (id) => engine?.saveMedia(id),
 });
 engine = new SpectroEngine(ui);
