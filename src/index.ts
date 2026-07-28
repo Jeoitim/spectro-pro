@@ -121,8 +121,8 @@ class SpectroEngine {
     private sampleRate = 48000;
 
     private renderParameters: Partial<RenderParameters> = {
-        sensitivity: 10 ** (0.54 * 3) - 1,
-        contrast: 10 ** (0.56 * 5) - 1,
+        sensitivity: 0.5 + 0.42 * 5,
+        contrast: 0.32 * 6,
         zoom: 1,
         timeOffset: 0,
         minFrequencyHz: 0,
@@ -539,10 +539,16 @@ class SpectroEngine {
             this.analysisHistory[index]?.timeSeconds ?? clamp(xRatio, 0, 1) * item.durationSeconds;
         const minimum = this.playbackRange?.startSeconds ?? 0;
         const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
+        const continuePlayback = this.playbackIsPlaying;
         this.stopMediaPlayback(false);
         this.playbackOffsetSeconds = clamp(targetSeconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
-        this.startMediaPlayback(item);
+        this.notifyTransport();
+        if (continuePlayback) {
+            this.startMediaPlayback(item);
+        } else {
+            this.ui.setPlayState('stopped', item.name, '已定位，按绿色播放按钮开始');
+        }
         this.overlayDirty = true;
     }
 

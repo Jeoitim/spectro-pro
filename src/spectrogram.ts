@@ -38,6 +38,17 @@ function generateSpectrogramForSingleFrame(
     // Zero padding preserves the requested Praat-style time window while keeping
     // jsfft on a fast radix-2 size.
     const padding = Math.floor((windowSamples.length - effectiveWindowSize) / 2);
+    const firstSample = padding;
+    const lastSample = padding + effectiveWindowSize - 1;
+    // Praat-style +6 dB/octave display pre-emphasis flattens the natural spectral
+    // slope of speech so upper formants remain visible without saturating F1.
+    const preEmphasis = Math.exp((-2 * Math.PI * 50) / sampleRate);
+    for (let i = lastSample; i > firstSample; i -= 1) {
+        windowSamples[i] -= preEmphasis * windowSamples[i - 1];
+    }
+    if (effectiveWindowSize > 0) {
+        windowSamples[firstSample] *= 1 - preEmphasis;
+    }
     for (let i = 0; i < windowSamples.length; i += 1) {
         if (i < padding || i >= padding + effectiveWindowSize) {
             windowSamples[i] = 0;

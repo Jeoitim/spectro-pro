@@ -154,7 +154,7 @@ interface SavedSettings {
     splCalibration: number;
 }
 
-const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v1';
+const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v2';
 
 const loadSavedSettings = (): Partial<SavedSettings> => {
     try {
@@ -228,8 +228,8 @@ export default function App({
     const [intensityVisible, setIntensityVisible] = useState(saved.intensityVisible ?? true);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
-    const [sensitivity, setSensitivity] = useState(saved.sensitivity ?? 0.54);
-    const [contrast, setContrast] = useState(saved.contrast ?? 0.56);
+    const [sensitivity, setSensitivity] = useState(saved.sensitivity ?? 0.42);
+    const [contrast, setContrast] = useState(saved.contrast ?? 0.32);
     const [zoom, setZoom] = useState(saved.zoom ?? 1);
     const [minFrequency, setMinFrequency] = useState(saved.minFrequency ?? 0);
     const [maxFrequency, setMaxFrequency] = useState(saved.maxFrequency ?? 5500);
@@ -390,8 +390,8 @@ export default function App({
     useEffect(() => {
         const gradient = GRADIENTS.find((item) => item.name === gradientName);
         onDisplayChange({
-            sensitivity: 10 ** (sensitivity * 3) - 1,
-            contrast: 10 ** (contrast * 5) - 1,
+            sensitivity: 0.5 + sensitivity * 5,
+            contrast: contrast * 6,
             zoom,
             minFrequencyHz: minFrequency,
             maxFrequencyHz: maxFrequency,
@@ -644,8 +644,8 @@ export default function App({
     const resetSettingsTab = useCallback(
         (tab: 'spectrogram' | 'pitch' | 'formants' | 'intensity') => {
             if (tab === 'spectrogram') {
-                setSensitivity(0.54);
-                setContrast(0.56);
+                setSensitivity(0.42);
+                setContrast(0.32);
                 setZoom(1);
                 setTimeOffset(0);
                 setMinFrequency(0);
@@ -1195,7 +1195,10 @@ export default function App({
                         </div>
 
                         <div className="axis axis-right">
-                            <span className="axis-title">频率 / 音强</span>
+                            <span className="axis-title intensity-axis-title intensity-color">
+                                音强
+                            </span>
+                            <span className="axis-title frequency-axis-title">频率</span>
                             {cursor && (
                                 <span
                                     className="axis-cursor-value frequency"
@@ -1381,7 +1384,7 @@ export default function App({
                             </button>
                             <label className="setting">
                                 <span>
-                                    灵敏度 <em>{Math.round(sensitivity * 100)}%</em>
+                                    显示增益 <em>{Math.round(sensitivity * 100)}%</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1394,7 +1397,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    对比度 <em>{Math.round(contrast * 100)}%</em>
+                                    层次对比 <em>{Math.round(contrast * 100)}%</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1474,6 +1477,10 @@ export default function App({
                                 </div>
                                 <small>{selectedGradient?.name}</small>
                             </div>
+                            <p className="setting-help">
+                                专业语音建议：宽带使用 5 ms、频率上限 5000–5500
+                                Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。
+                            </p>
                         </>
                     )}
 

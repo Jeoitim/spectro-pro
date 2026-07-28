@@ -8,5 +8,11 @@
     "target": "es2019",
     "typeRoots": ["src/types", "node_modules/@types"]
   },
-  "include": ["src/analysis.ts", "src/math-util.ts", "tests/synthetic-analysis.ts"]
+  "include": [
+    "src/analysis.ts",
+    "src/math-util.ts",
+    "src/spectrogram.ts",
+    "src/types/jsfft*.d.ts",
+    "tests/synthetic-analysis.ts"
+  ]
 }

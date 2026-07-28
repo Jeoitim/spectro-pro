@@ -4,6 +4,7 @@ import {
     PitchAlgorithm,
     resampleForFormants,
 } from '../src/analysis';
+import { generateSpectrogram } from '../src/spectrogram';
 
 const SAMPLE_RATE = 48000;
 const FORMANT_SAMPLE_RATE = 11000;
@@ -142,9 +143,35 @@ function testFormants() {
     });
 }
 
+function testSpectrogramDisplayPreEmphasis() {
+    const peakForTone = (frequencyHz: number) => {
+        const samples = syntheticTone(frequencyHz, 0.05, 0.02);
+        const result = generateSpectrogram(samples, 0, samples.length, {
+            windowSize: 240,
+            fftSize: 1024,
+            windowStepSize: 240,
+            sampleRate: SAMPLE_RATE,
+            scaleSize: 512,
+        });
+        let peak = 0;
+        for (let i = 0; i < result.spectrogram.length; i += 1) {
+            peak = Math.max(peak, result.spectrogram[i]);
+        }
+        return peak;
+    };
+    const lowPeak = peakForTone(250);
+    const highPeak = peakForTone(2000);
+    if (highPeak <= lowPeak * 3) {
+        throw new Error(
+            `spectrogram pre-emphasis: expected upper frequencies to be clearer; received ${lowPeak} and ${highPeak}`
+        );
+    }
+}
+
 testPitch('yin');
 testPitch('autocorrelation');
 testIntensity();
 testFormants();
+testSpectrogramDisplayPreEmphasis();
 
-console.log('Synthetic pitch, SPL and five-formant checks passed.');
+console.log('Synthetic pitch, SPL, formant and spectrogram checks passed.');
