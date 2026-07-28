@@ -77,6 +77,7 @@ export interface AppCallbacks {
     onNavigate: (amount: number) => void;
     onSelectMedia: (id: string | null) => void;
     onToggleMediaPlayback: () => void;
+    onPlayMediaAt: (xRatio: number) => void;
     onSeekMedia: (seconds: number) => void;
     onRenameMedia: (id: string, name: string) => void;
     onSaveMedia: (id: string) => void;
@@ -118,6 +119,47 @@ const formatTime = (seconds: number) => {
     return `${minutes.toString().padStart(2, '0')}:${remainder.toFixed(1).padStart(4, '0')}`;
 };
 
+interface SavedSettings {
+    mode: SpectrogramMode;
+    pitchAlgorithm: PitchAlgorithm;
+    pitchVisible: boolean;
+    formantsVisible: boolean;
+    intensityVisible: boolean;
+    sensitivity: number;
+    contrast: number;
+    zoom: number;
+    minFrequency: number;
+    maxFrequency: number;
+    scale: 'linear' | 'mel';
+    gradientName: string;
+    pitchFloor: number;
+    pitchCeiling: number;
+    voicingThreshold: number;
+    pitchLineWidth: number;
+    maximumFormants: number;
+    formantsToDisplay: number;
+    formantCeiling: number;
+    formantWindowMs: number;
+    preEmphasisFrom: number;
+    formantDynamicRange: number;
+    formantDotSize: number;
+    intensityPitchFloor: number;
+    intensityFloor: number;
+    intensityCeiling: number;
+    intensityLineWidth: number;
+    splCalibration: number;
+}
+
+const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v1';
+
+const loadSavedSettings = (): Partial<SavedSettings> => {
+    try {
+        return JSON.parse(window.localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    } catch {
+        return {};
+    }
+};
+
 export interface AppProps extends AppCallbacks {
     registerController: (controller: UiController) => void;
 }
@@ -150,50 +192,72 @@ export default function App({
     onNavigate,
     onSelectMedia,
     onToggleMediaPlayback,
+    onPlayMediaAt,
     onSeekMedia,
     onRenameMedia,
     onSaveMedia,
     onRemoveMedia,
     onClearPlaylist,
 }: AppProps) {
+    const savedSettingsRef = useRef<Partial<SavedSettings> | null>(null);
+    if (savedSettingsRef.current === null) {
+        savedSettingsRef.current = loadSavedSettings();
+    }
+    const saved = savedSettingsRef.current || {};
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
     const [statusMessage, setStatusMessage] = useState('选择麦克风或音频文件开始');
-    const [mode, setMode] = useState<SpectrogramMode>('broadband');
-    const [pitchAlgorithm, setPitchAlgorithm] = useState<PitchAlgorithm>('yin');
+    const [mode, setMode] = useState<SpectrogramMode>(saved.mode || 'broadband');
+    const [pitchAlgorithm, setPitchAlgorithm] = useState<PitchAlgorithm>(
+        saved.pitchAlgorithm || 'yin'
+    );
     const [settingsTab, setSettingsTab] = useState<
         'spectrogram' | 'pitch' | 'formants' | 'intensity'
     >('spectrogram');
     const [snapshot, setSnapshot] = useState<LiveSnapshot>(EMPTY_SNAPSHOT);
     const [cursor, setCursor] = useState<CursorSnapshot | null>(null);
-    const [pitchVisible, setPitchVisible] = useState(true);
-    const [formantsVisible, setFormantsVisible] = useState(true);
-    const [intensityVisible, setIntensityVisible] = useState(true);
+    const [pitchVisible, setPitchVisible] = useState(saved.pitchVisible ?? true);
+    const [formantsVisible, setFormantsVisible] = useState(saved.formantsVisible ?? true);
+    const [intensityVisible, setIntensityVisible] = useState(saved.intensityVisible ?? true);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
-    const [sensitivity, setSensitivity] = useState(0.54);
-    const [contrast, setContrast] = useState(0.56);
-    const [zoom, setZoom] = useState(1);
-    const [minFrequency, setMinFrequency] = useState(0);
-    const [maxFrequency, setMaxFrequency] = useState(5500);
-    const [scale, setScale] = useState<'linear' | 'mel'>('linear');
-    const [gradientName, setGradientName] = useState('Aurora');
-    const [pitchFloor, setPitchFloor] = useState(75);
-    const [pitchCeiling, setPitchCeiling] = useState(500);
-    const [voicingThreshold, setVoicingThreshold] = useState(0.6);
-    const [pitchLineWidth, setPitchLineWidth] = useState(2.5);
-    const [maximumFormants, setMaximumFormants] = useState(5);
-    const [formantsToDisplay, setFormantsToDisplay] = useState(5);
-    const [formantCeiling, setFormantCeiling] = useState(5500);
-    const [formantWindowMs, setFormantWindowMs] = useState(25);
-    const [preEmphasisFrom, setPreEmphasisFrom] = useState(50);
-    const [formantDynamicRange, setFormantDynamicRange] = useState(30);
-    const [formantDotSize, setFormantDotSize] = useState(2.4);
-    const [intensityPitchFloor, setIntensityPitchFloor] = useState(75);
-    const [intensityFloor, setIntensityFloor] = useState(50);
-    const [intensityCeiling, setIntensityCeiling] = useState(100);
-    const [intensityLineWidth, setIntensityLineWidth] = useState(2.5);
-    const [splCalibration, setSplCalibration] = useState(0);
+    const [sensitivity, setSensitivity] = useState(saved.sensitivity ?? 0.54);
+    const [contrast, setContrast] = useState(saved.contrast ?? 0.56);
+    const [zoom, setZoom] = useState(saved.zoom ?? 1);
+    const [minFrequency, setMinFrequency] = useState(saved.minFrequency ?? 0);
+    const [maxFrequency, setMaxFrequency] = useState(saved.maxFrequency ?? 5500);
+    const [scale, setScale] = useState<'linear' | 'mel'>(saved.scale || 'linear');
+    const [gradientName, setGradientName] = useState(saved.gradientName || 'Aurora');
+    const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
+    const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
+    const [voicingThreshold, setVoicingThreshold] = useState(
+        saved.voicingThreshold ?? 0.6
+    );
+    const [pitchLineWidth, setPitchLineWidth] = useState(saved.pitchLineWidth ?? 2.5);
+    const [maximumFormants, setMaximumFormants] = useState(saved.maximumFormants ?? 5);
+    const [formantsToDisplay, setFormantsToDisplay] = useState(
+        saved.formantsToDisplay ?? 5
+    );
+    const [formantCeiling, setFormantCeiling] = useState(saved.formantCeiling ?? 5500);
+    const [formantWindowMs, setFormantWindowMs] = useState(saved.formantWindowMs ?? 25);
+    const [preEmphasisFrom, setPreEmphasisFrom] = useState(
+        saved.preEmphasisFrom ?? 50
+    );
+    const [formantDynamicRange, setFormantDynamicRange] = useState(
+        saved.formantDynamicRange ?? 30
+    );
+    const [formantDotSize, setFormantDotSize] = useState(saved.formantDotSize ?? 2.4);
+    const [intensityPitchFloor, setIntensityPitchFloor] = useState(
+        saved.intensityPitchFloor ?? 75
+    );
+    const [intensityFloor, setIntensityFloor] = useState(saved.intensityFloor ?? 50);
+    const [intensityCeiling, setIntensityCeiling] = useState(
+        saved.intensityCeiling ?? 100
+    );
+    const [intensityLineWidth, setIntensityLineWidth] = useState(
+        saved.intensityLineWidth ?? 2.5
+    );
+    const [splCalibration, setSplCalibration] = useState(saved.splCalibration ?? 0);
     const [timeOffset, setTimeOffset] = useState(0);
     const [playlistOpen, setPlaylistOpen] = useState(true);
     const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
@@ -245,6 +309,73 @@ export default function App({
             updateSelection: setSelection,
         });
     }, [registerController]);
+
+    useEffect(() => {
+        const settings: SavedSettings = {
+            mode,
+            pitchAlgorithm,
+            pitchVisible,
+            formantsVisible,
+            intensityVisible,
+            sensitivity,
+            contrast,
+            zoom,
+            minFrequency,
+            maxFrequency,
+            scale,
+            gradientName,
+            pitchFloor,
+            pitchCeiling,
+            voicingThreshold,
+            pitchLineWidth,
+            maximumFormants,
+            formantsToDisplay,
+            formantCeiling,
+            formantWindowMs,
+            preEmphasisFrom,
+            formantDynamicRange,
+            formantDotSize,
+            intensityPitchFloor,
+            intensityFloor,
+            intensityCeiling,
+            intensityLineWidth,
+            splCalibration,
+        };
+        try {
+            window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+        } catch {
+            // The visualizer remains usable when browser storage is unavailable.
+        }
+    }, [
+        mode,
+        pitchAlgorithm,
+        pitchVisible,
+        formantsVisible,
+        intensityVisible,
+        sensitivity,
+        contrast,
+        zoom,
+        minFrequency,
+        maxFrequency,
+        scale,
+        gradientName,
+        pitchFloor,
+        pitchCeiling,
+        voicingThreshold,
+        pitchLineWidth,
+        maximumFormants,
+        formantsToDisplay,
+        formantCeiling,
+        formantWindowMs,
+        preEmphasisFrom,
+        formantDynamicRange,
+        formantDotSize,
+        intensityPitchFloor,
+        intensityFloor,
+        intensityCeiling,
+        intensityLineWidth,
+        splCalibration,
+    ]);
 
     useEffect(() => {
         const gradient = GRADIENTS.find((item) => item.name === gradientName);
@@ -328,19 +459,20 @@ export default function App({
         onOverlayChange(
             pitchVisible,
             mode === 'broadband' && formantsVisible,
-            mode === 'broadband' && intensityVisible
+            intensityVisible
         );
     }, [pitchVisible, formantsVisible, intensityVisible, mode, onOverlayChange]);
+
+    useEffect(() => {
+        onModeChange(mode);
+    }, [mode, onModeChange]);
 
     const changeMode = useCallback(
         (newMode: SpectrogramMode) => {
             setMode(newMode);
-            setMaxFrequency(newMode === 'broadband' ? 5500 : 1200);
-            setScale('linear');
             setTimeOffset(0);
-            onModeChange(newMode);
         },
-        [onModeChange]
+        []
     );
 
     const chooseFile = useCallback(() => fileRef.current?.click(), []);
@@ -416,8 +548,11 @@ export default function App({
                 Math.abs(point.x - start) < 0.004 ? -1 : start,
                 Math.abs(point.x - start) < 0.004 ? -1 : point.x
             );
+            if (transport.activeId !== null) {
+                onPlayMediaAt(Math.min(start, point.x));
+            }
         },
-        [onSelectRange, pointerRatios]
+        [onPlayMediaAt, onSelectRange, pointerRatios, transport.activeId]
     );
 
     const beginFloatingDrag = useCallback(
@@ -435,29 +570,44 @@ export default function App({
             const startX = event.clientX;
             const startY = event.clientY;
             let moved = false;
+            let latestLeft = bounds.left;
+            let latestTop = bounds.top;
+            panel.classList.add('dragging');
+            panel.style.transition = 'none';
 
             const move = (moveEvent: MouseEvent) => {
                 const deltaX = moveEvent.clientX - startX;
                 const deltaY = moveEvent.clientY - startY;
                 moved = moved || Math.abs(deltaX) + Math.abs(deltaY) > 3;
-                const left = Math.min(
+                latestLeft = Math.min(
                     Math.max(8, bounds.left + deltaX),
                     Math.max(8, window.innerWidth - bounds.width - 8)
                 );
-                const top = Math.min(
+                latestTop = Math.min(
                     Math.max(76, bounds.top + deltaY),
                     Math.max(76, window.innerHeight - bounds.height - 8)
                 );
-                const nextPosition = { left, top };
-                if (panelName === 'playlist') {
-                    setPlaylistPosition(nextPosition);
-                } else {
-                    setMetricsPosition(nextPosition);
-                }
+                panel.style.transform = `translate3d(${latestLeft - bounds.left}px, ${
+                    latestTop - bounds.top
+                }px, 0)`;
             };
             const finish = () => {
                 document.removeEventListener('mousemove', move);
                 document.removeEventListener('mouseup', finish);
+                panel.style.transform = '';
+                panel.style.left = `${latestLeft}px`;
+                panel.style.top = `${latestTop}px`;
+                panel.style.right = 'auto';
+                panel.style.transition = '';
+                panel.classList.remove('dragging');
+                if (moved) {
+                    const nextPosition = { left: latestLeft, top: latestTop };
+                    if (panelName === 'playlist') {
+                        setPlaylistPosition(nextPosition);
+                    } else {
+                        setMetricsPosition(nextPosition);
+                    }
+                }
                 draggedPanelRef.current = moved ? panelName : null;
             };
             document.addEventListener('mousemove', move);
@@ -557,7 +707,7 @@ export default function App({
                     >
                         播放列表
                     </button>
-                    {playState === 'playing' ? (
+                    {playState === 'playing' && transport.activeId === null ? (
                         <button className="button danger" onClick={stop}>
                             停止
                         </button>
@@ -723,28 +873,48 @@ export default function App({
                             </button>
                         </div>
 
-                        <div className="overlay-toggles">
-                            <button
-                                className={pitchVisible ? 'on pitch' : ''}
-                                onClick={() => setPitchVisible(!pitchVisible)}
-                            >
-                                <i /> 基频
-                            </button>
-                            {mode === 'broadband' && (
-                                <>
+                        <div className="toolbar-center">
+                            <div className="overlay-toggles">
+                                <button
+                                    className={pitchVisible ? 'on pitch' : ''}
+                                    onClick={() => setPitchVisible(!pitchVisible)}
+                                >
+                                    <i /> 基频
+                                </button>
+                                {mode === 'broadband' && (
                                     <button
                                         className={formantsVisible ? 'on formants' : ''}
                                         onClick={() => setFormantsVisible(!formantsVisible)}
                                     >
                                         <i /> 共振峰
                                     </button>
-                                    <button
-                                        className={intensityVisible ? 'on intensity' : ''}
-                                        onClick={() => setIntensityVisible(!intensityVisible)}
-                                    >
-                                        <i /> 音强
-                                    </button>
-                                </>
+                                )}
+                                <button
+                                    className={intensityVisible ? 'on intensity' : ''}
+                                    onClick={() => setIntensityVisible(!intensityVisible)}
+                                >
+                                    <i /> 音强
+                                </button>
+                            </div>
+                            {transport.activeId !== null && (
+                                <button
+                                    className={`transport-control ${
+                                        transport.isPlaying ? 'pause' : 'play'
+                                    }`}
+                                    onClick={onToggleMediaPlayback}
+                                    aria-label={transport.isPlaying ? '暂停' : '播放'}
+                                    title={transport.isPlaying ? '暂停' : '播放'}
+                                >
+                                    {transport.isPlaying ? (
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                                        </svg>
+                                    ) : (
+                                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                                            <path d="M8 5v14l11-7z" />
+                                        </svg>
+                                    )}
+                                </button>
                             )}
                         </div>
 
@@ -762,11 +932,25 @@ export default function App({
                             >
                                 +
                             </button>
-                            <button onClick={onExport} className="export-button">
-                                导出图片
+                            <button
+                                onClick={onExport}
+                                className="icon-action"
+                                aria-label="导出图片"
+                                title="导出图片"
+                            >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4" />
+                                </svg>
                             </button>
-                            <button onClick={toggleFullscreen} className="export-button">
-                                全屏
+                            <button
+                                onClick={toggleFullscreen}
+                                className="icon-action"
+                                aria-label="全屏"
+                                title="全屏"
+                            >
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M8 4H4v4M16 4h4v4M8 20H4v-4m12 4h4v-4" />
+                                </svg>
                             </button>
                         </div>
                     </div>
@@ -862,7 +1046,7 @@ export default function App({
                                         {cursor.pitchHz !== null && (
                                             <span>F0 {cursor.pitchHz.toFixed(1)} Hz</span>
                                         )}
-                                        {mode === 'broadband' && cursor.intensityDbSpl !== null && (
+                                        {cursor.intensityDbSpl !== null && (
                                             <span>{cursor.intensityDbSpl.toFixed(1)} dB SPL*</span>
                                         )}
                                         {selection && (
@@ -878,13 +1062,6 @@ export default function App({
 
                             {transport.activeId !== null ? (
                                 <div className="file-transport">
-                                    <button
-                                        onClick={onToggleMediaPlayback}
-                                        aria-label={transport.isPlaying ? '暂停' : '播放'}
-                                    >
-                                        {transport.isPlaying ? 'Ⅱ' : '▶'}
-                                    </button>
-                                    <span>{formatTime(transport.currentSeconds)}</span>
                                     <input
                                         className="history-slider"
                                         aria-label="播放位置"
@@ -900,7 +1077,12 @@ export default function App({
                                             onSeekMedia(Number(event.target.value))
                                         }
                                     />
-                                    <span>{formatTime(transport.durationSeconds)}</span>
+                                    <span className="transport-current">
+                                        {formatTime(transport.currentSeconds)}
+                                    </span>
+                                    <span className="transport-duration">
+                                        {formatTime(transport.durationSeconds)}
+                                    </span>
                                 </div>
                             ) : (
                                 <>
@@ -936,19 +1118,15 @@ export default function App({
                                 </span>
                             )}
                             <span className="top">{maxFrequency} Hz</span>
-                            {mode === 'broadband' && (
-                                <>
-                                    <span className="spl-top intensity-color">
-                                        {intensityCeiling} dB SPL*
-                                    </span>
-                                    <span className="spl-mid intensity-color">
-                                        {Math.round((intensityFloor + intensityCeiling) / 2)} dB
-                                    </span>
-                                    <span className="spl-bottom intensity-color">
-                                        {intensityFloor} dB SPL*
-                                    </span>
-                                </>
-                            )}
+                            <span className="spl-top intensity-color">
+                                {intensityCeiling} dB SPL*
+                            </span>
+                            <span className="spl-mid intensity-color">
+                                {Math.round((intensityFloor + intensityCeiling) / 2)} dB
+                            </span>
+                            <span className="spl-bottom intensity-color">
+                                {intensityFloor} dB SPL*
+                            </span>
                             <span className="bottom">0 Hz</span>
                         </div>
                     </div>
@@ -984,7 +1162,10 @@ export default function App({
                         <em>Hz</em>
                     </button>
                     <div className="metrics-heading">
-                        <div>
+                        <div
+                            className="metrics-drag-handle"
+                            onMouseDown={(event) => beginFloatingDrag('metrics', event)}
+                        >
                             <span className="eyebrow">实时读数</span>
                             <h2>声学概览</h2>
                         </div>
@@ -1011,14 +1192,12 @@ export default function App({
                             <em>Hz</em>
                             <small>YIN / 自相关实时估计</small>
                         </article>
-                        {mode === 'broadband' && (
-                            <article>
-                                <span className="metric-label intensity-color">音强</span>
-                                <strong>{formatNumber(snapshot.intensityDbSpl, 1)}</strong>
-                                <em>dB SPL*</em>
-                                <small>参考声压 20 μPa</small>
-                            </article>
-                        )}
+                        <article>
+                            <span className="metric-label intensity-color">音强</span>
+                            <strong>{formatNumber(snapshot.intensityDbSpl, 1)}</strong>
+                            <em>dB SPL*</em>
+                            <small>参考声压 20 μPa</small>
+                        </article>
                     </div>
 
                     {mode === 'broadband' && (
@@ -1051,12 +1230,10 @@ export default function App({
                                 <dt>有声比例</dt>
                                 <dd>{snapshot.voicedPercent.toFixed(0)}%</dd>
                             </div>
-                            {mode === 'broadband' && (
-                                <div>
-                                    <dt>平均音强</dt>
-                                    <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
-                                </div>
-                            )}
+                            <div>
+                                <dt>平均音强</dt>
+                                <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
+                            </div>
                         </dl>
                     </div>
 

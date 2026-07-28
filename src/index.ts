@@ -272,8 +272,6 @@ class SpectroEngine {
         this.renderer.updateParameters({
             sampleRate: this.sampleRate,
             windowSize: config.fftSize,
-            maxFrequencyHz: mode === 'broadband' ? 5500 : 1200,
-            scale: 'linear',
             timeOffset: 0,
         });
         this.timeOffset = 0;
@@ -509,6 +507,29 @@ class SpectroEngine {
         }
     }
 
+    playMediaAt(xRatio: number) {
+        const item = this.activeMedia();
+        if (item === null || item.state !== 'ready') {
+            return;
+        }
+        const visible = this.visibleHistoryRange();
+        const index = clamp(
+            Math.floor(
+                visible.start +
+                    clamp(xRatio, 0, 1) * Math.max(1, visible.end - visible.start)
+            ),
+            0,
+            Math.max(0, this.analysisHistory.length - 1)
+        );
+        const targetSeconds =
+            this.analysisHistory[index]?.timeSeconds ?? clamp(xRatio, 0, 1) * item.durationSeconds;
+        this.stopMediaPlayback(false);
+        this.playbackOffsetSeconds = clamp(targetSeconds, 0, item.durationSeconds);
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.startMediaPlayback(item);
+        this.overlayDirty = true;
+    }
+
     renameMedia(id: string, name: string) {
         const item = this.mediaItems.find((candidate) => candidate.id === id);
         if (item === undefined) {
@@ -664,13 +685,13 @@ class SpectroEngine {
         ctx.drawImage(this.canvas, 0, 0);
         ctx.drawImage(this.overlay, 0, 0);
         ctx.fillStyle = 'rgba(4, 7, 18, 0.72)';
-        ctx.fillRect(18, 18, 250, 48);
+        ctx.fillRect(18, 18, 250, 72);
         ctx.fillStyle = '#ffffff';
         ctx.font = '600 22px Arial, sans-serif';
         ctx.fillText('SPECTRO PRO', 32, 49);
         ctx.fillStyle = '#9aa7bc';
         ctx.font = '12px Arial, sans-serif';
-        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 176, 48);
+        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 32, 73);
         exportCanvas.toBlob((blob) => {
             if (!blob) {
                 return;
@@ -764,13 +785,12 @@ class SpectroEngine {
         this.renderer.updateParameters({
             sampleRate: item.sampleRate,
             windowSize: cache.fftSize,
-            zoom: 1,
+            zoom: this.renderParameters.zoom || 1,
             timeOffset: 0,
         });
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.renderParameters = {
             ...this.renderParameters,
-            zoom: 1,
             timeOffset: 0,
         };
         this.timeOffset = 0;
@@ -1239,7 +1259,7 @@ class SpectroEngine {
             );
         }
 
-        if (this.showIntensity && this.mode === 'broadband') {
+        if (this.showIntensity) {
             this.strokeSeries(
                 ctx,
                 visible.start,
@@ -1442,6 +1462,7 @@ const ui = initialiseControlsUi(appContainer, {
     onNavigate: (amount) => engine?.navigate(amount),
     onSelectMedia: (id) => engine?.selectMedia(id),
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
+    onPlayMediaAt: (xRatio) => engine?.playMediaAt(xRatio),
     onSeekMedia: (seconds) => engine?.seekMedia(seconds),
     onRenameMedia: (id, name) => engine?.renameMedia(id, name),
     onSaveMedia: (id) => engine?.saveMedia(id),
