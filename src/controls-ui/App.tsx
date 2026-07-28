@@ -1,4 +1,11 @@
-import React, { ChangeEvent, MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+    ChangeEvent,
+    MouseEvent as ReactMouseEvent,
+    useCallback,
+    useEffect,
+    useRef,
+    useState,
+} from 'react';
 
 import { AnalysisOptions, PitchAlgorithm } from '../analysis';
 import { GRADIENTS } from '../color-util';
@@ -73,6 +80,8 @@ export interface AppCallbacks {
     onSeekMedia: (seconds: number) => void;
     onRenameMedia: (id: string, name: string) => void;
     onSaveMedia: (id: string) => void;
+    onRemoveMedia: (id: string) => void;
+    onClearPlaylist: () => void;
 }
 
 export interface LayerDisplayOptions {
@@ -144,6 +153,8 @@ export default function App({
     onSeekMedia,
     onRenameMedia,
     onSaveMedia,
+    onRemoveMedia,
+    onClearPlaylist,
 }: AppProps) {
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
@@ -185,6 +196,15 @@ export default function App({
     const [splCalibration, setSplCalibration] = useState(0);
     const [timeOffset, setTimeOffset] = useState(0);
     const [playlistOpen, setPlaylistOpen] = useState(true);
+    const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
+    const [playlistPosition, setPlaylistPosition] = useState<{
+        left: number;
+        top: number;
+    } | null>(null);
+    const [metricsPosition, setMetricsPosition] = useState<{
+        left: number;
+        top: number;
+    } | null>(null);
     const [mediaItems, setMediaItems] = useState<MediaListItem[]>([]);
     const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
     const [transport, setTransport] = useState<TransportSnapshot>({
@@ -196,6 +216,9 @@ export default function App({
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const dragStartRef = useRef<number | null>(null);
+    const playlistRef = useRef<HTMLElement | null>(null);
+    const metricsRef = useRef<HTMLElement | null>(null);
+    const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
 
     useEffect(() => {
         registerController({
@@ -352,7 +375,7 @@ export default function App({
         [onStartFile]
     );
 
-    const pointerRatios = useCallback((event: MouseEvent<HTMLCanvasElement>) => {
+    const pointerRatios = useCallback((event: ReactMouseEvent<HTMLCanvasElement>) => {
         const bounds = event.currentTarget.getBoundingClientRect();
         return {
             x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
@@ -361,7 +384,7 @@ export default function App({
     }, []);
 
     const startPlotSelection = useCallback(
-        (event: MouseEvent<HTMLCanvasElement>) => {
+        (event: ReactMouseEvent<HTMLCanvasElement>) => {
             const point = pointerRatios(event);
             dragStartRef.current = point.x;
             onInspect(point.x, point.y);
@@ -371,18 +394,18 @@ export default function App({
     );
 
     const updatePlotSelection = useCallback(
-        (event: MouseEvent<HTMLCanvasElement>) => {
-            if (dragStartRef.current === null) {
-                return;
-            }
+        (event: ReactMouseEvent<HTMLCanvasElement>) => {
             const point = pointerRatios(event);
-            onSelectRange(dragStartRef.current, point.x);
+            onInspect(point.x, point.y);
+            if (dragStartRef.current !== null) {
+                onSelectRange(dragStartRef.current, point.x);
+            }
         },
-        [onSelectRange, pointerRatios]
+        [onInspect, onSelectRange, pointerRatios]
     );
 
     const finishPlotSelection = useCallback(
-        (event: MouseEvent<HTMLCanvasElement>) => {
+        (event: ReactMouseEvent<HTMLCanvasElement>) => {
             if (dragStartRef.current === null) {
                 return;
             }
@@ -395,6 +418,52 @@ export default function App({
             );
         },
         [onSelectRange, pointerRatios]
+    );
+
+    const beginFloatingDrag = useCallback(
+        (panelName: 'playlist' | 'metrics', event: ReactMouseEvent<HTMLElement>) => {
+            if (event.button !== 0) {
+                return;
+            }
+            const panel =
+                panelName === 'playlist' ? playlistRef.current : metricsRef.current;
+            if (panel === null) {
+                return;
+            }
+            event.preventDefault();
+            const bounds = panel.getBoundingClientRect();
+            const startX = event.clientX;
+            const startY = event.clientY;
+            let moved = false;
+
+            const move = (moveEvent: MouseEvent) => {
+                const deltaX = moveEvent.clientX - startX;
+                const deltaY = moveEvent.clientY - startY;
+                moved = moved || Math.abs(deltaX) + Math.abs(deltaY) > 3;
+                const left = Math.min(
+                    Math.max(8, bounds.left + deltaX),
+                    Math.max(8, window.innerWidth - bounds.width - 8)
+                );
+                const top = Math.min(
+                    Math.max(76, bounds.top + deltaY),
+                    Math.max(76, window.innerHeight - bounds.height - 8)
+                );
+                const nextPosition = { left, top };
+                if (panelName === 'playlist') {
+                    setPlaylistPosition(nextPosition);
+                } else {
+                    setMetricsPosition(nextPosition);
+                }
+            };
+            const finish = () => {
+                document.removeEventListener('mousemove', move);
+                document.removeEventListener('mouseup', finish);
+                draggedPanelRef.current = moved ? panelName : null;
+            };
+            document.addEventListener('mousemove', move);
+            document.addEventListener('mouseup', finish);
+        },
+        []
     );
 
     const stop = useCallback(() => {
@@ -421,6 +490,20 @@ export default function App({
     }, []);
 
     const selectedGradient = GRADIENTS.find((item) => item.name === gradientName);
+    const cursorAxisTop =
+        cursor === null
+            ? undefined
+            : {
+                  top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(
+                      cursor.y * 44
+                  ).toFixed(2)}px)`,
+              };
+    const cursorPitchCoordinate =
+        cursor === null
+            ? null
+            : mode === 'broadband'
+            ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
+            : cursor.frequencyHz;
 
     return (
         <div className="app-shell">
@@ -500,15 +583,56 @@ export default function App({
             </header>
 
             <main className="workspace">
-                <aside className={`media-panel ${playlistOpen ? 'open' : ''}`}>
+                <aside
+                    ref={playlistRef}
+                    className={`media-panel ${playlistOpen ? 'open' : ''} ${
+                        playlistCollapsed ? 'collapsed' : ''
+                    }`}
+                    style={
+                        playlistPosition
+                            ? {
+                                  left: playlistPosition.left,
+                                  top: playlistPosition.top,
+                              }
+                            : undefined
+                    }
+                >
                     <div className="media-panel-heading">
-                        <div>
+                        <div
+                            className="panel-drag-handle"
+                            onMouseDown={(event) => beginFloatingDrag('playlist', event)}
+                        >
                             <span className="eyebrow">MEDIA LIBRARY</span>
-                            <strong>播放列表</strong>
+                            <strong>
+                                播放列表
+                                <small>{mediaItems.length}</small>
+                            </strong>
                         </div>
-                        <button onClick={() => setPlaylistOpen(false)} aria-label="收起播放列表">
-                            ×
-                        </button>
+                        <div className="media-panel-actions">
+                            <button
+                                className="clear-playlist"
+                                onClick={onClearPlaylist}
+                                disabled={mediaItems.length === 0}
+                                aria-label="清空播放列表"
+                                title="清空播放列表"
+                            >
+                                清空
+                            </button>
+                            <button
+                                onClick={() => setPlaylistCollapsed(!playlistCollapsed)}
+                                aria-label={playlistCollapsed ? '展开播放列表' : '收起播放列表'}
+                                title={playlistCollapsed ? '展开列表' : '收起列表'}
+                            >
+                                {playlistCollapsed ? '+' : '−'}
+                            </button>
+                            <button
+                                onClick={() => setPlaylistOpen(false)}
+                                aria-label="关闭播放列表"
+                                title="关闭播放列表"
+                            >
+                                ×
+                            </button>
+                        </div>
                     </div>
                     <button
                         className={`media-row microphone ${activeMediaId === null ? 'active' : ''}`}
@@ -567,6 +691,14 @@ export default function App({
                                             保存
                                         </button>
                                     )}
+                                    <button
+                                        className="media-remove"
+                                        onClick={() => onRemoveMedia(item.id)}
+                                        title="从播放列表移除"
+                                        aria-label={`移除 ${item.name}`}
+                                    >
+                                        移除
+                                    </button>
                                 </div>
                             ))
                         )}
@@ -642,21 +774,12 @@ export default function App({
                     <div className="praat-view">
                         <div className="axis axis-left">
                             <span className="axis-title pitch-color">基频 Hz</span>
-                            {cursor !== null && cursor.pitchHz !== null && (
+                            {cursor !== null && cursorPitchCoordinate !== null && (
                                 <span
                                     className="axis-cursor-value pitch"
-                                    style={{
-                                        top: `${
-                                            mode === 'broadband'
-                                                ? (1 -
-                                                      (cursor.pitchHz - pitchFloor) /
-                                                          Math.max(1, pitchCeiling - pitchFloor)) *
-                                                  100
-                                                : (1 - cursor.pitchHz / maxFrequency) * 100
-                                        }%`,
-                                    }}
+                                    style={cursorAxisTop}
                                 >
-                                    {cursor.pitchHz.toFixed(1)}
+                                    {cursorPitchCoordinate.toFixed(1)}
                                 </span>
                             )}
                             {mode === 'broadband' ? (
@@ -713,6 +836,7 @@ export default function App({
                                     onMouseUp={finishPlotSelection}
                                     onMouseLeave={() => {
                                         dragStartRef.current = null;
+                                        onInspect(-1, -1);
                                     }}
                                     onWheel={(event) => {
                                         event.preventDefault();
@@ -741,23 +865,13 @@ export default function App({
                                         {mode === 'broadband' && cursor.intensityDbSpl !== null && (
                                             <span>{cursor.intensityDbSpl.toFixed(1)} dB SPL*</span>
                                         )}
-                                    </div>
-                                )}
-                                {cursor && (
-                                    <span
-                                        className="cursor-time-mark"
-                                        style={{ left: `${cursor.x * 100}%` }}
-                                    >
-                                        {cursor.timeSeconds.toFixed(3)} s
-                                    </span>
-                                )}
-                                {selection && (
-                                    <div className="selection-reading">
-                                        <strong>{selection.durationSeconds.toFixed(3)} s</strong>
-                                        <span>
-                                            {selection.startSeconds.toFixed(3)}–
-                                            {selection.endSeconds.toFixed(3)} s
-                                        </span>
+                                        {selection && (
+                                            <span className="tooltip-selection">
+                                                {selection.durationSeconds.toFixed(1)} s (
+                                                {selection.startSeconds.toFixed(1)}–
+                                                {selection.endSeconds.toFixed(1)} s)
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -816,7 +930,7 @@ export default function App({
                             {cursor && (
                                 <span
                                     className="axis-cursor-value frequency"
-                                    style={{ top: `${cursor.y * 100}%` }}
+                                    style={cursorAxisTop}
                                 >
                                     {cursor.frequencyHz.toFixed(1)} Hz
                                 </span>
@@ -840,10 +954,29 @@ export default function App({
                     </div>
                 </section>
 
-                <section className={`metrics-panel ${metricsCollapsed ? 'bubble' : ''}`}>
+                <section
+                    ref={metricsRef}
+                    className={`metrics-panel ${metricsCollapsed ? 'bubble' : ''}`}
+                    style={
+                        metricsPosition
+                            ? {
+                                  left: metricsPosition.left,
+                                  right: 'auto',
+                                  top: metricsPosition.top,
+                              }
+                            : undefined
+                    }
+                >
                     <button
                         className="collapsed-reading"
-                        onClick={() => setMetricsCollapsed(false)}
+                        onMouseDown={(event) => beginFloatingDrag('metrics', event)}
+                        onClick={() => {
+                            if (draggedPanelRef.current === 'metrics') {
+                                draggedPanelRef.current = null;
+                                return;
+                            }
+                            setMetricsCollapsed(false);
+                        }}
                         aria-label="展开声学概览"
                     >
                         <span>F0</span>

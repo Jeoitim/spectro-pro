@@ -305,9 +305,9 @@ select:focus-visible {
 }
 
 .media-panel {
-    position: absolute;
+    position: fixed;
     z-index: 32;
-    top: 74px;
+    top: 94px;
     left: 12px;
     display: grid;
     width: min(330px, calc(100vw - 24px));
@@ -338,13 +338,30 @@ select:focus-visible {
     padding: 2px 4px 11px;
 }
 
-.media-panel-heading > div {
+.media-panel-heading > .panel-drag-handle {
     display: grid;
+    min-width: 0;
+    flex: 1;
     gap: 3px;
+    cursor: move;
+    user-select: none;
 }
 
 .media-panel-heading strong {
     font-size: 14px;
+}
+
+.media-panel-heading strong small {
+    margin-left: 7px;
+    color: #718097;
+    font-size: 9px;
+    font-weight: 650;
+}
+
+.media-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
 }
 
 .media-panel-heading button {
@@ -355,6 +372,36 @@ select:focus-visible {
     color: #8794a8;
     background: transparent;
     cursor: pointer;
+}
+
+.media-panel-heading button.clear-playlist {
+    width: auto;
+    padding: 0 7px;
+    font-size: 9px;
+}
+
+.media-panel-heading button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.media-panel.collapsed {
+    width: min(210px, calc(100vw - 24px));
+    max-height: 52px;
+    grid-template-rows: auto;
+    padding: 8px 10px;
+    overflow: hidden;
+}
+
+.media-panel.collapsed .media-panel-heading {
+    padding: 0;
+}
+
+.media-panel.collapsed .eyebrow,
+.media-panel.collapsed .clear-playlist,
+.media-panel.collapsed > .media-row,
+.media-panel.collapsed .media-list {
+    display: none;
 }
 
 .media-list {
@@ -452,7 +499,8 @@ button.media-row {
     font-size: 8px;
 }
 
-.media-save {
+.media-save,
+.media-remove {
     padding: 6px 7px;
     border: 1px solid var(--line-strong);
     border-radius: 7px;
@@ -460,6 +508,15 @@ button.media-row {
     font-size: 8px;
     background: transparent;
     cursor: pointer;
+}
+
+.media-remove {
+    color: #a78790;
+}
+
+.media-remove:hover {
+    border-color: rgba(255, 79, 114, 0.4);
+    color: #ff9bad;
 }
 
 .media-empty {
@@ -690,11 +747,19 @@ button.media-row {
 
 .cursor-tooltip strong {
     color: #fff;
-    font-size: 11px;
+    font-size: 13px;
 }
 
 .cursor-tooltip span {
-    font-size: 9px;
+    font-size: 11px;
+}
+
+.cursor-tooltip .tooltip-selection {
+    margin-top: 3px;
+    padding-top: 5px;
+    border-top: 1px solid rgba(105, 174, 255, 0.3);
+    color: #8fc0ff;
+    font-weight: 700;
 }
 
 .cursor-time-mark {
@@ -741,7 +806,9 @@ button.media-row {
     align-items: center;
     justify-content: space-between;
     color: #758299;
-    font-size: 9px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .history-slider {
@@ -758,7 +825,7 @@ button.media-row {
     align-items: center;
     gap: 8px;
     color: #8491a5;
-    font-size: 9px;
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
 }
 
@@ -779,7 +846,7 @@ button.media-row {
     position: relative;
     min-width: 0;
     color: #adb8c9;
-    font-size: 9px;
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
 }
 
@@ -790,7 +857,7 @@ button.media-row {
 
 .axis-title {
     top: 8px;
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -871,6 +938,7 @@ button.media-row {
     padding: 3px 5px;
     border-radius: 4px;
     font-weight: 750;
+    font-size: 12px;
     background: #111827;
     transform: translateY(-50%);
 }
@@ -937,6 +1005,8 @@ button.media-row {
     background: radial-gradient(circle at 38% 30%, rgba(71, 139, 255, 0.26), transparent 48%),
         rgba(10, 15, 27, 0.9);
     box-shadow: 0 16px 50px rgba(0, 0, 0, 0.36), 0 0 34px rgba(37, 136, 255, 0.13);
+    cursor: move;
+    user-select: none;
 }
 
 .metrics-panel.bubble > *:not(.collapsed-reading) {
@@ -957,7 +1027,7 @@ button.media-row {
     border: 0;
     color: #eef6ff;
     background: transparent;
-    cursor: pointer;
+    cursor: move;
 }
 
 .collapsed-reading span,

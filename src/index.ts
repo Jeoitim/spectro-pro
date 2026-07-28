@@ -535,6 +535,37 @@ class SpectroEngine {
         URL.revokeObjectURL(link.href);
     }
 
+    clearPlaylist() {
+        this.stop();
+        this.mediaItems = [];
+        this.activeMediaId = null;
+        this.playbackOffsetSeconds = 0;
+        this.resetSession();
+        this.notifyMediaLibrary();
+        this.notifyTransport();
+        this.ui.setPlayState('stopped', '麦克风', '播放列表已清空，可开始新的会话');
+    }
+
+    removeMedia(id: string) {
+        const index = this.mediaItems.findIndex((item) => item.id === id);
+        if (index < 0) {
+            return;
+        }
+        const wasActive = this.activeMediaId === id;
+        if (wasActive) {
+            this.stopMediaPlayback();
+            this.activeMediaId = null;
+            this.playbackOffsetSeconds = 0;
+            this.resetSession();
+            this.ui.setPlayState('stopped', '麦克风', '音频已移除，可开始新的会话');
+        }
+        this.mediaItems.splice(index, 1);
+        this.notifyMediaLibrary();
+        if (wasActive) {
+            this.notifyTransport();
+        }
+    }
+
     navigate(amount: number) {
         const nextOffset = clamp(this.timeOffset + amount, 0, 0.9);
         this.timeOffset = nextOffset;
@@ -1267,6 +1298,37 @@ class SpectroEngine {
 
         if (this.inspector !== null) {
             ctx.save();
+            const inspectorIndex = clamp(
+                Math.floor(
+                    visible.start +
+                        this.inspector.x * Math.max(1, visible.end - visible.start)
+                ),
+                visible.start,
+                Math.max(visible.start, visible.end - 1)
+            );
+            const inspectorPitch = this.analysisHistory[inspectorIndex]?.pitchHz;
+            if (this.showPitch && inspectorPitch !== null && inspectorPitch !== undefined) {
+                const pitchY =
+                    this.mode === 'narrowband'
+                        ? frequencyY(inspectorPitch)
+                        : height *
+                          (1 -
+                              (inspectorPitch - this.layerDisplayOptions.pitchFloorHz) /
+                                  Math.max(
+                                      1,
+                                      this.layerDisplayOptions.pitchCeilingHz -
+                                          this.layerDisplayOptions.pitchFloorHz
+                                  ));
+                if (pitchY >= 0 && pitchY <= height) {
+                    ctx.strokeStyle = 'rgba(61, 151, 255, 0.72)';
+                    ctx.lineWidth = 0.75;
+                    ctx.setLineDash([2, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(this.inspector.x * width, this.inspector.y * height);
+                    ctx.lineTo(this.inspector.x * width, pitchY);
+                    ctx.stroke();
+                }
+            }
             ctx.strokeStyle = 'rgba(255, 77, 98, 0.9)';
             ctx.lineWidth = 1;
             ctx.setLineDash([5, 5]);
@@ -1383,5 +1445,7 @@ const ui = initialiseControlsUi(appContainer, {
     onSeekMedia: (seconds) => engine?.seekMedia(seconds),
     onRenameMedia: (id, name) => engine?.renameMedia(id, name),
     onSaveMedia: (id) => engine?.saveMedia(id),
+    onRemoveMedia: (id) => engine?.removeMedia(id),
+    onClearPlaylist: () => engine?.clearPlaylist(),
 });
 engine = new SpectroEngine(ui);
