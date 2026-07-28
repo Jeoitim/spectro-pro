@@ -49,6 +49,8 @@ export interface TransportSnapshot {
     activeId: string | null;
     currentSeconds: number;
     durationSeconds: number;
+    viewStartSeconds: number;
+    viewEndSeconds: number;
     isPlaying: boolean;
 }
 
@@ -78,6 +80,8 @@ export interface AppCallbacks {
     onSelectMedia: (id: string | null) => void;
     onToggleMediaPlayback: () => void;
     onPlayMediaAt: (xRatio: number) => void;
+    onFitSelection: () => void;
+    onRestoreView: () => void;
     onSeekMedia: (seconds: number) => void;
     onRenameMedia: (id: string, name: string) => void;
     onSaveMedia: (id: string) => void;
@@ -169,6 +173,7 @@ export interface UiController {
     updateSnapshot: (snapshot: LiveSnapshot) => void;
     updateCursor: (snapshot: CursorSnapshot | null) => void;
     updateTimeOffset: (offset: number) => void;
+    updateZoom: (zoom: number) => void;
     updateMediaLibrary: (items: MediaListItem[], activeId: string | null) => void;
     updateTransport: (snapshot: TransportSnapshot) => void;
     updateSelection: (snapshot: SelectionSnapshot | null) => void;
@@ -193,6 +198,8 @@ export default function App({
     onSelectMedia,
     onToggleMediaPlayback,
     onPlayMediaAt,
+    onFitSelection,
+    onRestoreView,
     onSeekMedia,
     onRenameMedia,
     onSaveMedia,
@@ -275,6 +282,8 @@ export default function App({
         activeId: null,
         currentSeconds: 0,
         durationSeconds: 0,
+        viewStartSeconds: 0,
+        viewEndSeconds: 0,
         isPlaying: false,
     });
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
@@ -301,6 +310,7 @@ export default function App({
             updateSnapshot: setSnapshot,
             updateCursor: setCursor,
             updateTimeOffset: setTimeOffset,
+            updateZoom: setZoom,
             updateMediaLibrary: (items, activeId) => {
                 setMediaItems(items);
                 setActiveMediaId(activeId);
@@ -631,6 +641,47 @@ export default function App({
         [onPitchAlgorithmChange]
     );
 
+    const resetSettingsTab = useCallback(
+        (tab: 'spectrogram' | 'pitch' | 'formants' | 'intensity') => {
+            if (tab === 'spectrogram') {
+                setSensitivity(0.54);
+                setContrast(0.56);
+                setZoom(1);
+                setTimeOffset(0);
+                setMinFrequency(0);
+                setMaxFrequency(mode === 'broadband' ? 5500 : 1200);
+                setScale('linear');
+                setGradientName('Aurora');
+                onRestoreView();
+                return;
+            }
+            if (tab === 'pitch') {
+                setPitchAlgorithm('yin');
+                setPitchFloor(75);
+                setPitchCeiling(500);
+                setVoicingThreshold(0.6);
+                setPitchLineWidth(2.5);
+                return;
+            }
+            if (tab === 'formants') {
+                setMaximumFormants(5);
+                setFormantsToDisplay(5);
+                setFormantCeiling(5500);
+                setFormantWindowMs(25);
+                setPreEmphasisFrom(50);
+                setFormantDynamicRange(30);
+                setFormantDotSize(2.4);
+                return;
+            }
+            setIntensityPitchFloor(75);
+            setIntensityFloor(50);
+            setIntensityCeiling(100);
+            setIntensityLineWidth(2.5);
+            setSplCalibration(0);
+        },
+        [mode, onRestoreView]
+    );
+
     const toggleFullscreen = useCallback(() => {
         if (document.fullscreenElement) {
             document.exitFullscreen();
@@ -645,7 +696,7 @@ export default function App({
             ? undefined
             : {
                   top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(
-                      cursor.y * 44
+                      cursor.y * 50
                   ).toFixed(2)}px)`,
               };
     const cursorPitchCoordinate =
@@ -654,6 +705,7 @@ export default function App({
             : mode === 'broadband'
             ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
             : cursor.frequencyHz;
+    const maximumTimeOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
 
     return (
         <div className="app-shell">
@@ -916,6 +968,16 @@ export default function App({
                                     )}
                                 </button>
                             )}
+                            {transport.activeId !== null && selection !== null && (
+                                <div className="selection-actions">
+                                    <button onClick={onFitSelection} title="让选区铺满语谱图">
+                                        铺满选区
+                                    </button>
+                                    <button onClick={onRestoreView} title="恢复完整语谱图">
+                                        还原 1×
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         <div className="view-actions">
@@ -927,7 +989,7 @@ export default function App({
                             </button>
                             <span>{zoom.toFixed(1)}×</span>
                             <button
-                                onClick={() => setZoom(Math.min(8, zoom + 0.5))}
+                                onClick={() => setZoom(Math.min(64, zoom + 0.5))}
                                 aria-label="放大"
                             >
                                 +
@@ -1061,17 +1123,27 @@ export default function App({
                             </div>
 
                             {transport.activeId !== null ? (
-                                <div className="file-transport">
+                                <>
+                                    <div className="file-transport">
                                     <input
                                         className="history-slider"
                                         aria-label="播放位置"
                                         type="range"
-                                        min={0}
-                                        max={Math.max(0.001, transport.durationSeconds)}
+                                        min={transport.viewStartSeconds}
+                                        max={Math.max(
+                                            transport.viewStartSeconds + 0.001,
+                                            transport.viewEndSeconds
+                                        )}
                                         step={0.001}
                                         value={Math.min(
-                                            transport.currentSeconds,
-                                            transport.durationSeconds
+                                            Math.max(
+                                                transport.currentSeconds,
+                                                transport.viewStartSeconds
+                                            ),
+                                            Math.max(
+                                                transport.viewStartSeconds + 0.001,
+                                                transport.viewEndSeconds
+                                            )
                                         )}
                                         onChange={(event) =>
                                             onSeekMedia(Number(event.target.value))
@@ -1083,7 +1155,22 @@ export default function App({
                                     <span className="transport-duration">
                                         {formatTime(transport.durationSeconds)}
                                     </span>
-                                </div>
+                                    </div>
+                                    <input
+                                        className="zoom-scrollbar"
+                                        aria-label="放大后的语谱滚动位置"
+                                        title="拖动查看放大后未显示的音频"
+                                        type="range"
+                                        min={0}
+                                        max={Math.max(0.001, maximumTimeOffset)}
+                                        step={0.001}
+                                        value={Math.min(timeOffset, maximumTimeOffset)}
+                                        disabled={zoom <= 1}
+                                        onChange={(event) =>
+                                            onNavigate(Number(event.target.value) - timeOffset)
+                                        }
+                                    />
+                                </>
                             ) : (
                                 <>
                                     <div className="timeline">
@@ -1286,6 +1373,12 @@ export default function App({
                 <div className="settings-tab-content">
                     {settingsTab === 'spectrogram' && (
                         <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('spectrogram')}
+                            >
+                                恢复本页默认参数
+                            </button>
                             <label className="setting">
                                 <span>
                                     灵敏度 <em>{Math.round(sensitivity * 100)}%</em>
@@ -1386,6 +1479,12 @@ export default function App({
 
                     {settingsTab === 'pitch' && (
                         <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('pitch')}
+                            >
+                                恢复本页默认参数
+                            </button>
                             <div className="select-row one">
                                 <label>
                                     F0 检测算法
@@ -1458,6 +1557,12 @@ export default function App({
 
                     {settingsTab === 'formants' && (
                         <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('formants')}
+                            >
+                                恢复本页默认参数
+                            </button>
                             <div className="select-row">
                                 <label>
                                     LPC 分析数量
@@ -1576,6 +1681,12 @@ export default function App({
 
                     {settingsTab === 'intensity' && (
                         <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('intensity')}
+                            >
+                                恢复本页默认参数
+                            </button>
                             <label className="setting">
                                 <span>
                                     音强窗 Pitch floor <em>{intensityPitchFloor} Hz</em>

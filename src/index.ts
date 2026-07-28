@@ -182,6 +182,8 @@ class SpectroEngine {
 
     private selection: SelectionSnapshot | null = null;
 
+    private playbackRange: { startSeconds: number; endSeconds: number } | null = null;
+
     private maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
 
     private mediaItems: MediaItem[] = [];
@@ -255,7 +257,17 @@ class SpectroEngine {
         if (parameters.timeOffset !== undefined) {
             this.timeOffset = parameters.timeOffset;
         }
-        this.renderer.updateParameters(parameters);
+        if (parameters.zoom !== undefined) {
+            const maximumOffset = Math.max(0, 1 - 1 / Math.max(1, parameters.zoom));
+            this.timeOffset = clamp(this.timeOffset, 0, maximumOffset);
+            this.renderParameters.timeOffset = this.timeOffset;
+            this.ui.updateTimeOffset(this.timeOffset);
+        }
+        this.renderer.updateParameters({
+            ...parameters,
+            timeOffset: this.timeOffset,
+        });
+        this.notifyTransport();
         this.overlayDirty = true;
     }
 
@@ -498,7 +510,9 @@ class SpectroEngine {
         }
         const wasPlaying = this.playbackIsPlaying;
         this.stopMediaPlayback(false);
-        this.playbackOffsetSeconds = clamp(seconds, 0, item.durationSeconds);
+        const minimum = this.playbackRange?.startSeconds ?? 0;
+        const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
+        this.playbackOffsetSeconds = clamp(seconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
         this.notifyTransport();
         this.overlayDirty = true;
@@ -523,8 +537,10 @@ class SpectroEngine {
         );
         const targetSeconds =
             this.analysisHistory[index]?.timeSeconds ?? clamp(xRatio, 0, 1) * item.durationSeconds;
+        const minimum = this.playbackRange?.startSeconds ?? 0;
+        const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
         this.stopMediaPlayback(false);
-        this.playbackOffsetSeconds = clamp(targetSeconds, 0, item.durationSeconds);
+        this.playbackOffsetSeconds = clamp(targetSeconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
         this.startMediaPlayback(item);
         this.overlayDirty = true;
@@ -588,12 +604,14 @@ class SpectroEngine {
     }
 
     navigate(amount: number) {
-        const nextOffset = clamp(this.timeOffset + amount, 0, 0.9);
+        const zoom = this.renderParameters.zoom || 1;
+        const maximumOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
+        const nextOffset = clamp(this.timeOffset + amount, 0, maximumOffset);
         this.timeOffset = nextOffset;
         this.renderer.updateParameters({ timeOffset: nextOffset });
+        this.renderParameters.timeOffset = nextOffset;
         this.ui.updateTimeOffset(nextOffset);
-        this.selection = null;
-        this.ui.updateSelection(null);
+        this.notifyTransport();
         this.overlayDirty = true;
     }
 
@@ -641,6 +659,7 @@ class SpectroEngine {
     selectRange(xStart: number, xEnd: number) {
         if (xStart < 0 || xEnd < 0 || this.analysisHistory.length === 0) {
             this.selection = null;
+            this.playbackRange = null;
             this.ui.updateSelection(null);
             this.overlayDirty = true;
             return;
@@ -666,7 +685,58 @@ class SpectroEngine {
             endSeconds: Math.max(first.timeSeconds, last.timeSeconds),
             durationSeconds: Math.abs(last.timeSeconds - first.timeSeconds),
         };
+        this.playbackRange = {
+            startSeconds: this.selection.startSeconds,
+            endSeconds: this.selection.endSeconds,
+        };
         this.ui.updateSelection(this.selection);
+        this.overlayDirty = true;
+    }
+
+    fitSelection() {
+        const item = this.activeMedia();
+        if (item === null || this.selection === null || this.analysisHistory.length < 2) {
+            return;
+        }
+        const total = this.analysisHistory.length;
+        const startIndex = clamp(
+            Math.floor((this.selection.startSeconds / item.durationSeconds) * total),
+            0,
+            total - 1
+        );
+        const endIndex = clamp(
+            Math.ceil((this.selection.endSeconds / item.durationSeconds) * total),
+            startIndex + 1,
+            total
+        );
+        const selectedColumns = Math.max(2, endIndex - startIndex);
+        const zoom = clamp(total / selectedColumns, 1, 64);
+        const maximumOffset = Math.max(0, 1 - 1 / zoom);
+        const offset = clamp((total - endIndex) / total, 0, maximumOffset);
+        this.renderParameters = {
+            ...this.renderParameters,
+            zoom,
+            timeOffset: offset,
+        };
+        this.timeOffset = offset;
+        this.renderer.updateParameters({ zoom, timeOffset: offset });
+        this.ui.updateZoom(zoom);
+        this.ui.updateTimeOffset(offset);
+        this.notifyTransport();
+        this.overlayDirty = true;
+    }
+
+    restoreView() {
+        this.renderParameters = {
+            ...this.renderParameters,
+            zoom: 1,
+            timeOffset: 0,
+        };
+        this.timeOffset = 0;
+        this.renderer.updateParameters({ zoom: 1, timeOffset: 0 });
+        this.ui.updateZoom(1);
+        this.ui.updateTimeOffset(0);
+        this.notifyTransport();
         this.overlayDirty = true;
     }
 
@@ -685,13 +755,19 @@ class SpectroEngine {
         ctx.drawImage(this.canvas, 0, 0);
         ctx.drawImage(this.overlay, 0, 0);
         ctx.fillStyle = 'rgba(4, 7, 18, 0.72)';
-        ctx.fillRect(18, 18, 250, 72);
+        ctx.fillRect(18, 18, 280, 90);
         ctx.fillStyle = '#ffffff';
         ctx.font = '600 22px Arial, sans-serif';
-        ctx.fillText('SPECTRO PRO', 32, 49);
+        ctx.fillText('SPECTRO PRO', 32, 50);
+        ctx.strokeStyle = 'rgba(154, 167, 188, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(32, 64);
+        ctx.lineTo(284, 64);
+        ctx.stroke();
         ctx.fillStyle = '#9aa7bc';
         ctx.font = '12px Arial, sans-serif';
-        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 32, 73);
+        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 32, 88);
         exportCanvas.toBlob((blob) => {
             if (!blob) {
                 return;
@@ -795,6 +871,7 @@ class SpectroEngine {
         };
         this.timeOffset = 0;
         this.selection = null;
+        this.playbackRange = null;
         this.ui.updateSelection(null);
         this.playbackOffsetSeconds = clamp(this.playbackOffsetSeconds, 0, item.durationSeconds);
         this.rebuildStatisticsFromHistory();
@@ -839,8 +916,13 @@ class SpectroEngine {
     }
 
     private startMediaPlayback(item: MediaItem) {
-        if (this.playbackOffsetSeconds >= item.durationSeconds) {
-            this.playbackOffsetSeconds = 0;
+        const rangeStart = this.playbackRange?.startSeconds ?? 0;
+        const rangeEnd = this.playbackRange?.endSeconds ?? item.durationSeconds;
+        if (
+            this.playbackOffsetSeconds < rangeStart ||
+            this.playbackOffsetSeconds >= rangeEnd
+        ) {
+            this.playbackOffsetSeconds = rangeStart;
         }
         this.stopMediaPlayback(false);
         const audioCtx = this.createAudioContext();
@@ -857,11 +939,19 @@ class SpectroEngine {
             if (this.playbackSource !== source) {
                 return;
             }
-            this.playbackOffsetSeconds = item.durationSeconds;
+            this.playbackOffsetSeconds = rangeEnd;
             this.stopMediaPlayback(false);
-            this.ui.setPlayState('stopped', item.name, '播放完成');
+            this.ui.setPlayState(
+                'stopped',
+                item.name,
+                this.playbackRange === null ? '播放完成' : '选区播放完成'
+            );
         });
-        source.start(0, this.playbackOffsetSeconds);
+        source.start(
+            0,
+            this.playbackOffsetSeconds,
+            Math.max(0.001, rangeEnd - this.playbackOffsetSeconds)
+        );
         audioCtx.resume();
         this.playbackTimer = window.setInterval(() => this.updatePlaybackPosition(), 33);
         this.ui.setPlayState('playing', item.name, '播放中 · 分析图保持完整');
@@ -873,12 +963,25 @@ class SpectroEngine {
         if (item === null || this.playbackContext === null || !this.playbackIsPlaying) {
             return;
         }
+        const rangeEnd = this.playbackRange?.endSeconds ?? item.durationSeconds;
         this.playbackOffsetSeconds = Math.min(
-            item.durationSeconds,
+            rangeEnd,
             this.playbackOffsetSeconds + (this.playbackContext.currentTime - this.playbackStartedAt)
         );
         this.playbackStartedAt = this.playbackContext.currentTime;
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        const snapshotIndex = clamp(
+            Math.round(
+                (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
+                    (this.analysisHistory.length - 1)
+            ),
+            0,
+            Math.max(0, this.analysisHistory.length - 1)
+        );
+        const snapshotPoint = this.analysisHistory[snapshotIndex];
+        if (snapshotPoint !== undefined) {
+            this.updateUiSnapshot(snapshotPoint);
+        }
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -960,10 +1063,20 @@ class SpectroEngine {
 
     private notifyTransport() {
         const item = this.activeMedia();
+        const visible = this.visibleHistoryRange();
+        const analysisLength = Math.max(1, this.analysisHistory.length);
+        const viewStartSeconds =
+            item === null ? 0 : (item.durationSeconds * visible.start) / analysisLength;
+        const viewEndSeconds =
+            item === null
+                ? 0
+                : (item.durationSeconds * visible.end) / analysisLength;
         const snapshot: TransportSnapshot = {
             activeId: item?.id || null,
             currentSeconds: item === null ? 0 : this.playbackOffsetSeconds,
             durationSeconds: item?.durationSeconds || 0,
+            viewStartSeconds,
+            viewEndSeconds: Math.max(viewStartSeconds, viewEndSeconds),
             isPlaying: this.playbackIsPlaying,
         };
         this.ui.updateTransport(snapshot);
@@ -1135,6 +1248,7 @@ class SpectroEngine {
     private clearVisualHistory() {
         this.analysisHistory = [];
         this.selection = null;
+        this.playbackRange = null;
         this.ui.updateSelection(null);
         this.spectrogramBuffer.clear();
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
@@ -1277,43 +1391,73 @@ class SpectroEngine {
             );
         }
 
+        const activeMedia = this.activeMedia();
+        const analysisLength = Math.max(1, this.analysisHistory.length);
+        const viewStartSeconds =
+            activeMedia === null
+                ? 0
+                : (activeMedia.durationSeconds * visible.start) / analysisLength;
+        const viewEndSeconds =
+            activeMedia === null
+                ? 0
+                : (activeMedia.durationSeconds * visible.end) / analysisLength;
+        const xForTime = (seconds: number) =>
+            ((seconds - viewStartSeconds) /
+                Math.max(0.001, viewEndSeconds - viewStartSeconds)) *
+            width;
+
         if (this.selection !== null) {
-            const selectionLeft = this.selection.xStart * width;
-            const selectionRight = this.selection.xEnd * width;
-            ctx.save();
-            ctx.fillStyle = 'rgba(37, 136, 255, 0.14)';
-            ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
-            ctx.strokeStyle = 'rgba(105, 174, 255, 0.95)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(selectionLeft, 0);
-            ctx.lineTo(selectionLeft, height);
-            ctx.moveTo(selectionRight, 0);
-            ctx.lineTo(selectionRight, height);
-            ctx.stroke();
-            ctx.restore();
+            const rawSelectionLeft =
+                activeMedia === null
+                    ? this.selection.xStart * width
+                    : xForTime(this.selection.startSeconds);
+            const rawSelectionRight =
+                activeMedia === null
+                    ? this.selection.xEnd * width
+                    : xForTime(this.selection.endSeconds);
+            const selectionLeft = clamp(rawSelectionLeft, 0, width);
+            const selectionRight = clamp(rawSelectionRight, 0, width);
+            if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(37, 136, 255, 0.14)';
+                ctx.fillRect(
+                    selectionLeft,
+                    0,
+                    Math.max(1, selectionRight - selectionLeft),
+                    height
+                );
+                ctx.strokeStyle = 'rgba(105, 174, 255, 0.95)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(selectionLeft, 0);
+                ctx.lineTo(selectionLeft, height);
+                ctx.moveTo(selectionRight, 0);
+                ctx.lineTo(selectionRight, height);
+                ctx.stroke();
+                ctx.restore();
+            }
         }
 
-        const activeMedia = this.activeMedia();
         if (activeMedia !== null) {
-            const playheadX =
-                (this.playbackOffsetSeconds / Math.max(0.001, activeMedia.durationSeconds)) * width;
-            ctx.save();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
-            ctx.lineWidth = 1.5;
-            ctx.beginPath();
-            ctx.moveTo(playheadX, 0);
-            ctx.lineTo(playheadX, height);
-            ctx.stroke();
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.moveTo(playheadX - 5, 0);
-            ctx.lineTo(playheadX + 5, 0);
-            ctx.lineTo(playheadX, 8);
-            ctx.closePath();
-            ctx.fill();
-            ctx.restore();
+            const playheadX = xForTime(this.playbackOffsetSeconds);
+            if (playheadX >= 0 && playheadX <= width) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(playheadX, 0);
+                ctx.lineTo(playheadX, height);
+                ctx.stroke();
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.moveTo(playheadX - 5, 0);
+                ctx.lineTo(playheadX + 5, 0);
+                ctx.lineTo(playheadX, 8);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
         }
 
         if (this.inspector !== null) {
@@ -1463,6 +1607,8 @@ const ui = initialiseControlsUi(appContainer, {
     onSelectMedia: (id) => engine?.selectMedia(id),
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
     onPlayMediaAt: (xRatio) => engine?.playMediaAt(xRatio),
+    onFitSelection: () => engine?.fitSelection(),
+    onRestoreView: () => engine?.restoreView(),
     onSeekMedia: (seconds) => engine?.seekMedia(seconds),
     onRenameMedia: (id, name) => engine?.renameMedia(id, name),
     onSaveMedia: (id) => engine?.saveMedia(id),

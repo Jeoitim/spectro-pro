@@ -560,6 +560,7 @@ button.media-row {
     justify-content: center;
     min-width: 0;
     gap: 14px;
+    flex-wrap: wrap;
 }
 
 .mode-switch {
@@ -717,6 +718,30 @@ button.media-row {
     background: rgba(255, 79, 114, 0.13);
 }
 
+.selection-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.selection-actions button,
+.reset-tab-button {
+    min-height: 30px;
+    padding: 0 9px;
+    border: 1px solid rgba(105, 174, 255, 0.28);
+    border-radius: 7px;
+    color: #a9cdfc;
+    font-size: 10px;
+    background: rgba(37, 136, 255, 0.07);
+    cursor: pointer;
+}
+
+.selection-actions button:last-child {
+    color: #aeb9ca;
+    border-color: var(--line-strong);
+    background: rgba(255, 255, 255, 0.025);
+}
+
 .praat-view {
     display: grid;
     grid-template-columns: 64px minmax(0, 1fr) 96px;
@@ -726,7 +751,7 @@ button.media-row {
 
 .plot-stack {
     display: grid;
-    grid-template-rows: minmax(500px, calc(100vh - 202px)) 32px 12px;
+    grid-template-rows: minmax(500px, calc(100vh - 208px)) 32px 18px;
     min-width: 0;
     padding-top: 15px;
 }
@@ -873,6 +898,18 @@ button.media-row {
     margin: 0;
     opacity: 0.5;
     accent-color: var(--blue);
+}
+
+.zoom-scrollbar {
+    width: 100%;
+    height: 6px;
+    margin: 3px 0 0;
+    opacity: 0.72;
+    accent-color: #7789a5;
+}
+
+.zoom-scrollbar:disabled {
+    opacity: 0.2;
 }
 
 .file-transport {
@@ -1360,6 +1397,12 @@ button.media-row {
     gap: 18px;
 }
 
+.reset-tab-button {
+    justify-self: end;
+    color: #9fbde4;
+    font-size: 11px;
+}
+
 .settings-panel.open {
     transform: translateX(0);
     opacity: 1;
@@ -1573,7 +1616,7 @@ button.media-row {
     }
 
     .plot-stack {
-        grid-template-rows: minmax(400px, calc(100vh - 232px)) 28px 12px;
+        grid-template-rows: minmax(400px, calc(100vh - 238px)) 28px 18px;
     }
 
     .spectrogram-stage {
