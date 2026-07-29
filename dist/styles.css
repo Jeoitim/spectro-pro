@@ -1782,7 +1782,7 @@ html[lang='en'] .settings-panel {
 
 .settings-tabs {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 3px;
     padding: 3px;
     border: 1px solid var(--line);
@@ -2010,6 +2010,7 @@ html.glass-effects .settings-panel {
 
 .palette-setting > div {
     display: flex;
+    flex-wrap: wrap;
     gap: 9px;
     margin-top: 10px;
 }
@@ -2036,6 +2037,16 @@ html.glass-effects .settings-panel {
     margin-top: 7px;
     color: #68758a;
     font-size: 11px;
+}
+
+.waveform-palette-setting button {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.waveform-palette-setting button > span {
+    display: block;
+    height: 100%;
 }
 
 .mode-explainer {
@@ -2261,6 +2272,32 @@ html.light-ui .panel-actions button:hover {
 
 html.light-ui .button.primary {
     color: #ffffff;
+    border-color: #1769c2;
+    background: linear-gradient(180deg, #287fdf, #1769c2);
+    box-shadow: 0 8px 22px rgba(23, 105, 194, 0.2);
+}
+
+html.light-ui .button.primary:hover {
+    color: #ffffff;
+    border-color: #0f5dad;
+    background: linear-gradient(180deg, #2074cf, #125fae);
+}
+
+html.light-ui .language-button,
+html.light-ui .theme-button {
+    color: #344054;
+    border-color: rgba(54, 68, 91, 0.2);
+    background: #ffffff;
+}
+
+html.light-ui .language-menu button {
+    color: #475467;
+}
+
+html.light-ui .language-menu button:hover,
+html.light-ui .language-menu button.active {
+    color: #1d4f91;
+    background: #e7f1ff;
 }
 
 html.light-ui .brand strong,
@@ -2375,6 +2412,25 @@ html.light-ui .select-row select {
 html.light-ui .palette-setting button.active {
     border-color: #344054;
     box-shadow: 0 0 0 2px rgba(37, 136, 255, 0.36);
+}
+
+html.light-ui .intensity-color {
+    color: #807000 !important;
+}
+
+html.light-ui .overlay-toggles .on.intensity i {
+    color: #8a7800;
+    box-shadow: 0 0 6px rgba(138, 120, 0, 0.38);
+}
+
+html.light-ui .microphone .media-kind {
+    color: #167a52;
+    background: rgba(22, 122, 82, 0.1);
+}
+
+html.light-ui .status-dot.playing {
+    background: #23835e;
+    box-shadow: 0 0 0 4px rgba(35, 131, 94, 0.12), 0 0 8px rgba(35, 131, 94, 0.26);
 }
 
 html.light-ui .setting-help {

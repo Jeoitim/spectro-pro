@@ -1,26 +1,36 @@
 import { clamp } from './math-util';
 
-export type WaveformThemeName = 'Aurora' | 'Praat';
+export type WaveformThemeName =
+    | 'Aurora'
+    | 'Praat'
+    | 'Ember'
+    | 'Ocean'
+    | 'Heated Metal'
+    | 'Audacity®'
+    | 'Spectrum'
+    | 'Black to White'
+    | 'White to Black';
 
 export const WAVEFORM_THEMES: {
     name: WaveformThemeName;
-    preview: string;
+    background: string;
+    waveform: string;
 }[] = [
-    {
-        name: 'Aurora',
-        preview: 'linear-gradient(135deg, #040712, #4a35b4 48%, #15cebe 78%, #d3f774)',
-    },
-    {
-        name: 'Praat',
-        preview: 'linear-gradient(135deg, #ffffff, #bdbdbd 52%, #111111)',
-    },
+    { name: 'Aurora', background: '#040712', waveform: '#15cebe' },
+    { name: 'Praat', background: '#ffffff', waveform: '#000000' },
+    { name: 'Ember', background: '#08080d', waveform: '#ff8030' },
+    { name: 'Ocean', background: '#030b16', waveform: '#5fe8d3' },
+    { name: 'Heated Metal', background: '#000000', waveform: '#ff0000' },
+    { name: 'Audacity®', background: '#bfbfbf', waveform: '#4c99ff' },
+    { name: 'Spectrum', background: '#000080', waveform: '#00be00' },
+    { name: 'Black to White', background: '#000000', waveform: '#ffffff' },
+    { name: 'White to Black', background: '#ffffff', waveform: '#000000' },
 ];
 
 const WAVEFORM_THEME_COLORS: Record<
     WaveformThemeName,
     {
         background: string;
-        backgroundAccent: string | null;
         waveform: string;
         zeroLine: string;
         selectionFill: string;
@@ -30,23 +40,83 @@ const WAVEFORM_THEME_COLORS: Record<
 > = {
     Aurora: {
         background: '#040712',
-        backgroundAccent: '#141644',
-        waveform: '#8ee8dc',
-        zeroLine: 'rgba(89, 202, 220, 0.48)',
+        waveform: '#15cebe',
+        zeroLine: 'rgba(21, 206, 190, 0.48)',
         selectionFill: 'rgba(104, 190, 255, 0.24)',
         selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#f7fff8',
     },
     Praat: {
-        background: '#f7f9fc',
-        backgroundAccent: null,
-        waveform: '#11151d',
+        background: '#ffffff',
+        waveform: '#000000',
         zeroLine: 'rgba(50, 132, 170, 0.55)',
         selectionFill: 'rgba(105, 188, 255, 0.24)',
         selectionStroke: 'rgba(52, 145, 210, 0.92)',
         playhead: '#1385ba',
     },
+    Ember: {
+        background: '#08080d',
+        waveform: '#ff8030',
+        zeroLine: 'rgba(255, 128, 48, 0.42)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#fff5ee',
+    },
+    Ocean: {
+        background: '#030b16',
+        waveform: '#5fe8d3',
+        zeroLine: 'rgba(95, 232, 211, 0.42)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#f4fcff',
+    },
+    'Heated Metal': {
+        background: '#000000',
+        waveform: '#ff0000',
+        zeroLine: 'rgba(255, 0, 0, 0.42)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#fff8ea',
+    },
+    'Audacity®': {
+        background: '#bfbfbf',
+        waveform: '#4c99ff',
+        zeroLine: 'rgba(76, 153, 255, 0.55)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#f6f9ff',
+    },
+    Spectrum: {
+        background: '#000080',
+        waveform: '#00be00',
+        zeroLine: 'rgba(0, 190, 0, 0.5)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#f4fff6',
+    },
+    'Black to White': {
+        background: '#000000',
+        waveform: '#ffffff',
+        zeroLine: 'rgba(255, 255, 255, 0.32)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#ffffff',
+    },
+    'White to Black': {
+        background: '#ffffff',
+        waveform: '#000000',
+        zeroLine: 'rgba(0, 0, 0, 0.28)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(52, 145, 210, 0.92)',
+        playhead: '#1385ba',
+    },
 };
+
+export interface WaveformDisplayOptions {
+    gain: number;
+    lineWidth: number;
+    showZeroLine: boolean;
+}
 
 export interface WaveformSelection {
     startSeconds: number;
@@ -176,6 +246,12 @@ export class WaveformRenderer {
 
     private themeName: WaveformThemeName = 'Aurora';
 
+    private displayOptions: WaveformDisplayOptions = {
+        gain: 1,
+        lineWidth: 1,
+        showZeroLine: true,
+    };
+
     constructor(canvas: HTMLCanvasElement) {
         const context = canvas.getContext('2d');
         if (context === null) {
@@ -194,6 +270,13 @@ export class WaveformRenderer {
 
     setTheme(themeName: WaveformThemeName) {
         this.themeName = themeName;
+    }
+
+    updateDisplay(parameters: Partial<WaveformDisplayOptions>) {
+        this.displayOptions = {
+            ...this.displayOptions,
+            ...parameters,
+        };
     }
 
     setOfflineSamples(samples: Float32Array, sampleRate: number) {
@@ -251,21 +334,15 @@ export class WaveformRenderer {
         const theme = WAVEFORM_THEME_COLORS[this.themeName];
         ctx.fillStyle = theme.background;
         ctx.fillRect(0, 0, width, height);
-        if (theme.backgroundAccent !== null) {
-            const background = ctx.createLinearGradient(0, 0, width, height);
-            background.addColorStop(0, theme.background);
-            background.addColorStop(0.55, theme.backgroundAccent);
-            background.addColorStop(1, theme.background);
-            ctx.fillStyle = background;
-            ctx.fillRect(0, 0, width, height);
-        }
 
-        ctx.strokeStyle = theme.zeroLine;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, height / 2 + 0.5);
-        ctx.lineTo(width, height / 2 + 0.5);
-        ctx.stroke();
+        if (this.displayOptions.showZeroLine) {
+            ctx.strokeStyle = theme.zeroLine;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, height / 2 + 0.5);
+            ctx.lineTo(width, height / 2 + 0.5);
+            ctx.stroke();
+        }
 
         const duration = Math.max(1e-9, viewEndSeconds - viewStartSeconds);
         if (this.envelope.length !== width * 2) {
@@ -284,10 +361,11 @@ export class WaveformRenderer {
 
         const amplitude = Math.max(0.01, Math.min(1, visiblePeak * 1.08));
         const yForAmplitude = (value: number) =>
-            height / 2 - (clamp(value, -amplitude, amplitude) / amplitude) * (height * 0.46);
+            height / 2 -
+            clamp((value / amplitude) * this.displayOptions.gain, -1, 1) * (height * 0.46);
 
         ctx.strokeStyle = theme.waveform;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = this.displayOptions.lineWidth;
         ctx.beginPath();
         for (let x = 0; x < width; x += 1) {
             const low = envelope[x * 2];

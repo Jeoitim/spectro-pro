@@ -30,7 +30,7 @@ import {
     offThreadAnalyzeEntireFile,
     offThreadGenerateSpectrogram,
 } from './worker-util';
-import { WaveformRenderer, WaveformThemeName } from './waveform-render';
+import { WaveformDisplayOptions, WaveformRenderer, WaveformThemeName } from './waveform-render';
 
 const AUDIO_CHUNK_SIZE = 1024;
 const SPECTROGRAM_HEIGHT = 512;
@@ -476,6 +476,11 @@ class SpectroEngine {
     setPlotThemes(spectrogramThemeName: string, waveformThemeName: WaveformThemeName) {
         this.spectrogramThemeName = spectrogramThemeName;
         this.waveformRenderer.setTheme(waveformThemeName);
+        this.overlayDirty = true;
+    }
+
+    updateWaveformDisplay(parameters: Partial<WaveformDisplayOptions>) {
+        this.waveformRenderer.updateDisplay(parameters);
         this.overlayDirty = true;
     }
 
@@ -2052,6 +2057,7 @@ const ui = initialiseControlsUi(appContainer, {
         engine?.setPlotVisibility(waveform, spectrogram),
     onPlotThemeChange: (spectrogramThemeName, waveformThemeName) =>
         engine?.setPlotThemes(spectrogramThemeName, waveformThemeName),
+    onWaveformDisplayChange: (parameters) => engine?.updateWaveformDisplay(parameters),
     onInspect: (x, y) => engine?.inspect(x, y),
     onSelectRange: (xStart, xEnd) => engine?.selectRange(xStart, xEnd),
     onNavigate: (amount) => engine?.navigate(amount),

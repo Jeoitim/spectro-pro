@@ -32,7 +32,7 @@ import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
 import { frequencyToScale } from '../math-util';
 import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
-import { WAVEFORM_THEMES, WaveformThemeName } from '../waveform-render';
+import { WAVEFORM_THEMES, WaveformDisplayOptions, WaveformThemeName } from '../waveform-render';
 
 export type SpectrogramMode = 'broadband' | 'narrowband' | 'custom';
 export type PlayState = 'stopped' | 'loading-file' | 'loading-mic' | 'playing';
@@ -45,7 +45,7 @@ export interface PerformanceSettings {
     renderPixelRatio: number;
     analysisPrecision: RealtimeAnalysisPrecision;
 }
-type SettingsTab = 'spectrogram' | 'pitch' | 'formants' | 'intensity' | 'performance';
+type SettingsTab = 'spectrogram' | 'waveform' | 'pitch' | 'formants' | 'intensity' | 'performance';
 type MetricSelection =
     | 'pitch'
     | 'intensity'
@@ -120,6 +120,7 @@ export interface AppCallbacks {
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onPlotVisibilityChange: (waveform: boolean, spectrogram: boolean) => void;
     onPlotThemeChange: (spectrogramThemeName: string, waveformThemeName: WaveformThemeName) => void;
+    onWaveformDisplayChange: (parameters: Partial<WaveformDisplayOptions>) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onSelectRange: (xStartRatio: number, xEndRatio: number) => void;
     onNavigate: (amount: number) => void;
@@ -228,6 +229,9 @@ interface SavedSettings {
     spectrogramVisible: boolean;
     waveformShare: number;
     waveformThemeName: WaveformThemeName;
+    waveformGain: number;
+    waveformLineWidth: number;
+    waveformZeroLine: boolean;
     uiTheme: UiTheme;
     sensitivity: number;
     contrast: number;
@@ -306,6 +310,7 @@ export default function App({
     onOverlayChange,
     onPlotVisibilityChange,
     onPlotThemeChange,
+    onWaveformDisplayChange,
     onInspect,
     onSelectRange,
     onNavigate,
@@ -346,6 +351,9 @@ export default function App({
     const [waveformThemeName, setWaveformThemeName] = useState<WaveformThemeName>(
         saved.waveformThemeName || 'Aurora'
     );
+    const [waveformGain, setWaveformGain] = useState(saved.waveformGain ?? 1);
+    const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
+    const [waveformZeroLine, setWaveformZeroLine] = useState(saved.waveformZeroLine ?? true);
     const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
@@ -520,6 +528,9 @@ export default function App({
             spectrogramVisible,
             waveformShare,
             waveformThemeName,
+            waveformGain,
+            waveformLineWidth,
+            waveformZeroLine,
             uiTheme,
             sensitivity,
             contrast,
@@ -568,6 +579,9 @@ export default function App({
         spectrogramVisible,
         waveformShare,
         waveformThemeName,
+        waveformGain,
+        waveformLineWidth,
+        waveformZeroLine,
         uiTheme,
         sensitivity,
         contrast,
@@ -763,6 +777,14 @@ export default function App({
     useEffect(() => {
         onPlotThemeChange(gradientName, waveformThemeName);
     }, [gradientName, waveformThemeName, onPlotThemeChange]);
+
+    useEffect(() => {
+        onWaveformDisplayChange({
+            gain: waveformGain,
+            lineWidth: waveformLineWidth,
+            showZeroLine: waveformZeroLine,
+        });
+    }, [waveformGain, waveformLineWidth, waveformZeroLine, onWaveformDisplayChange]);
 
     useEffect(() => {
         const timeout = window.setTimeout(
@@ -988,7 +1010,13 @@ export default function App({
                     setCustomScale('linear');
                 }
                 setGradientName('Aurora');
+                return;
+            }
+            if (tab === 'waveform') {
                 setWaveformThemeName('Aurora');
+                setWaveformGain(1);
+                setWaveformLineWidth(1);
+                setWaveformZeroLine(true);
                 return;
             }
             if (tab === 'pitch') {
@@ -2000,6 +2028,7 @@ export default function App({
                 <div className="settings-tabs" role="tablist">
                     {[
                         ['spectrogram', tr('语谱图')],
+                        ['waveform', tr('波形')],
                         ['pitch', tr('基频')],
                         ['formants', tr('共振峰')],
                         ['intensity', tr('音强')],
@@ -2151,7 +2180,7 @@ export default function App({
                             <div className="palette-setting">
                                 <span>{tr('语谱主题')}</span>
                                 <div>
-                                    {GRADIENTS.slice(0, 6).map((item) => (
+                                    {GRADIENTS.map((item) => (
                                         <button
                                             key={item.name}
                                             aria-label={item.name}
@@ -2173,7 +2202,69 @@ export default function App({
                                 </div>
                                 <small>{selectedGradient?.name}</small>
                             </div>
-                            <div className="palette-setting">
+                            <p className="setting-help">
+                                {tr(
+                                    mode === 'broadband'
+                                        ? '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。'
+                                        : mode === 'narrowband'
+                                        ? '专业语音建议：窄带使用 30 ms，适合分辨基频与谐波；需要观察共振峰运动时请切换宽带。'
+                                        : '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。'
+                                )}
+                            </p>
+                        </>
+                    )}
+
+                    {settingsTab === 'waveform' && (
+                        <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('waveform')}
+                            >
+                                <RestoreIcon aria-hidden="true" />
+                                <span>{tr('恢复本页默认参数')}</span>
+                            </button>
+                            <label className="setting">
+                                <span>
+                                    {tr('波形垂直缩放')} <em>{Math.round(waveformGain * 100)}%</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0.5}
+                                    max={2}
+                                    step={0.05}
+                                    value={waveformGain}
+                                    onChange={(event) =>
+                                        setWaveformGain(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="setting">
+                                <span>
+                                    {tr('波形粗细')} <em>{waveformLineWidth.toFixed(1)} px</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0.5}
+                                    max={4}
+                                    step={0.1}
+                                    value={waveformLineWidth}
+                                    onChange={(event) =>
+                                        setWaveformLineWidth(Number(event.target.value))
+                                    }
+                                />
+                            </label>
+                            <label className="effect-toggle">
+                                <span>
+                                    <strong>{tr('显示零线')}</strong>
+                                    <small>{tr('在波形中心显示振幅基准线')}</small>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={waveformZeroLine}
+                                    onChange={(event) => setWaveformZeroLine(event.target.checked)}
+                                />
+                            </label>
+                            <div className="palette-setting waveform-palette-setting">
                                 <span>{tr('波形主题')}</span>
                                 <div>
                                     {WAVEFORM_THEMES.map((item) => (
@@ -2184,20 +2275,18 @@ export default function App({
                                             className={
                                                 waveformThemeName === item.name ? 'active' : ''
                                             }
-                                            style={{ background: item.preview }}
                                             onClick={() => setWaveformThemeName(item.name)}
-                                        />
+                                        >
+                                            <span style={{ background: item.background }} />
+                                            <span style={{ background: item.waveform }} />
+                                        </button>
                                     ))}
                                 </div>
                                 <small>{waveformThemeName}</small>
                             </div>
                             <p className="setting-help">
                                 {tr(
-                                    mode === 'broadband'
-                                        ? '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。'
-                                        : mode === 'narrowband'
-                                        ? '专业语音建议：窄带使用 30 ms，适合分辨基频与谐波；需要观察共振峰运动时请切换宽带。'
-                                        : '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。'
+                                    '波形主题仅改变纯色背景和波形颜色，不影响语谱主题或整体界面模式。'
                                 )}
                             </p>
                         </>

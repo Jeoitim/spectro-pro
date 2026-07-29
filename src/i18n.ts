@@ -69,6 +69,12 @@ const ENGLISH: { [key: string]: string } = {
     归一化振幅: 'Normalized amplitude',
     语谱主题: 'Spectrogram theme',
     波形主题: 'Waveform theme',
+    波形垂直缩放: 'Waveform vertical scale',
+    波形粗细: 'Waveform line width',
+    显示零线: 'Show zero line',
+    在波形中心显示振幅基准线: 'Show an amplitude reference at the waveform center',
+    '波形主题仅改变纯色背景和波形颜色，不影响语谱主题或整体界面模式。':
+        'Waveform themes only change the solid background and waveform colors, without affecting the spectrogram theme or interface mode.',
     切换到浅色模式: 'Switch to light mode',
     切换到深色模式: 'Switch to dark mode',
     性能: 'Performance',
