@@ -1119,6 +1119,15 @@ export default function App({
         maximumTimeOffset <= 0
             ? 0
             : (1 - timeOffset / maximumTimeOffset) * (100 - scrollbarThumbWidth);
+    const playheadRatio =
+        transport.activeId === null || transport.viewEndSeconds <= transport.viewStartSeconds
+            ? null
+            : (transport.currentSeconds - transport.viewStartSeconds) /
+              (transport.viewEndSeconds - transport.viewStartSeconds);
+    const playheadStyle =
+        playheadRatio !== null && playheadRatio >= 0 && playheadRatio <= 1
+            ? { left: `${playheadRatio * 100}%` }
+            : undefined;
     const navigateScrollbar = useCallback(
         (clientX: number, track: HTMLDivElement) => {
             if (zoom <= 1 || maximumTimeOffset <= 0) {
@@ -1657,6 +1666,13 @@ export default function App({
                                             onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
                                         }}
                                     />
+                                    {playheadStyle && (
+                                        <div
+                                            className="inverted-playhead"
+                                            style={playheadStyle}
+                                            aria-hidden="true"
+                                        />
+                                    )}
                                 </div>
                                 {waveformVisible && spectrogramVisible && (
                                     <div
@@ -1691,6 +1707,13 @@ export default function App({
                                             onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
                                         }}
                                     />
+                                    {playheadStyle && (
+                                        <div
+                                            className="inverted-playhead"
+                                            style={playheadStyle}
+                                            aria-hidden="true"
+                                        />
+                                    )}
                                     <div className="plot-grid" aria-hidden="true">
                                         <i />
                                         <i />

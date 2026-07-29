@@ -23,7 +23,7 @@ import {
 } from './controls-ui/App';
 import { t } from './i18n';
 import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
-import { drawPlotPlayhead, getPlotSelectionTheme } from './plot-theme';
+import { getPlotSelectionTheme } from './plot-theme';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import {
@@ -994,6 +994,23 @@ class SpectroEngine {
             ctx.drawImage(this.canvas, 0, y, width, spectrogramHeight);
             ctx.drawImage(this.overlay, 0, y, width, spectrogramHeight);
         }
+        const activeMedia = this.activeMedia();
+        const visibleTime = this.visibleTimeRange();
+        if (
+            activeMedia !== null &&
+            this.playbackOffsetSeconds >= visibleTime.startSeconds &&
+            this.playbackOffsetSeconds <= visibleTime.endSeconds
+        ) {
+            const playheadX =
+                ((this.playbackOffsetSeconds - visibleTime.startSeconds) /
+                    Math.max(1e-9, visibleTime.endSeconds - visibleTime.startSeconds)) *
+                width;
+            ctx.save();
+            ctx.globalCompositeOperation = 'difference';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(playheadX - 1.5, 0, 3, height);
+            ctx.restore();
+        }
         ctx.fillStyle = 'rgba(4, 7, 18, 0.72)';
         ctx.fillRect(18, 18, 280, 90);
         ctx.fillStyle = '#ffffff';
@@ -1694,8 +1711,6 @@ class SpectroEngine {
                     viewStartSeconds: visible.startSeconds,
                     viewEndSeconds: visible.endSeconds,
                     selection: this.selection,
-                    playheadSeconds:
-                        this.activeMedia() === null ? null : this.playbackOffsetSeconds,
                 });
             }
         }
@@ -1871,8 +1886,6 @@ class SpectroEngine {
             );
         }
 
-        const activeMedia = this.activeMedia();
-
         if (this.selection !== null) {
             const rawSelectionLeft = xForTime(this.selection.startSeconds);
             const rawSelectionRight = xForTime(this.selection.endSeconds);
@@ -1892,13 +1905,6 @@ class SpectroEngine {
                 ctx.lineTo(selectionRight, height);
                 ctx.stroke();
                 ctx.restore();
-            }
-        }
-
-        if (activeMedia !== null) {
-            const playheadX = xForTime(this.playbackOffsetSeconds);
-            if (playheadX >= 0 && playheadX <= width) {
-                drawPlotPlayhead(ctx, playheadX, height, this.spectrogramThemeName);
             }
         }
 

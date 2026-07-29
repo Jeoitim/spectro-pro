@@ -1076,6 +1076,18 @@ button.media-row {
     z-index: 3;
 }
 
+.inverted-playhead {
+    position: absolute;
+    z-index: 4;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #ffffff;
+    mix-blend-mode: difference;
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+
 .plot-grid {
     z-index: 2;
     display: grid;

@@ -1,5 +1,5 @@
 import { clamp } from './math-util';
-import { drawPlotPlayhead, getPlotSelectionTheme } from './plot-theme';
+import { getPlotSelectionTheme } from './plot-theme';
 
 export type WaveformThemeName =
     | 'Aurora'
@@ -91,7 +91,6 @@ export interface WaveformRenderParameters {
     viewStartSeconds: number;
     viewEndSeconds: number;
     selection: WaveformSelection | null;
-    playheadSeconds: number | null;
 }
 
 interface PeakLevel {
@@ -281,12 +280,7 @@ export class WaveformRenderer {
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
-    render({
-        viewStartSeconds,
-        viewEndSeconds,
-        selection,
-        playheadSeconds,
-    }: WaveformRenderParameters) {
+    render({ viewStartSeconds, viewEndSeconds, selection }: WaveformRenderParameters) {
         const { context: ctx, canvas } = this;
         const width = canvas.width;
         const height = canvas.height;
@@ -359,13 +353,6 @@ export class WaveformRenderer {
                 ctx.lineTo(right, height);
                 ctx.stroke();
                 ctx.setLineDash([]);
-            }
-        }
-
-        if (playheadSeconds !== null) {
-            const x = xForTime(playheadSeconds);
-            if (x >= 0 && x <= width) {
-                drawPlotPlayhead(ctx, x, height, this.themeName);
             }
         }
     }
