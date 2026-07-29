@@ -1884,7 +1884,7 @@ export default function App({
                     <strong>{formatTime(snapshot.elapsedSeconds)}</strong>
                 </div>
 
-                <div className="top-actions">
+                <div className={`top-actions ${transport.activeId !== null ? 'has-playback' : ''}`}>
                     <input
                         ref={fileRef}
                         type="file"
@@ -1899,14 +1899,14 @@ export default function App({
                         disabled={playState !== 'stopped'}
                     >
                         <CloudUploadIcon aria-hidden="true" />
-                        {tr('导入音频')}
+                        <span className="button-label">{tr('导入音频')}</span>
                     </button>
                     <button
                         className={`button secondary ${playlistOpen ? 'active' : ''}`}
                         onClick={() => setPlaylistOpen(!playlistOpen)}
                     >
                         <QueueMusicIcon aria-hidden="true" />
-                        {tr('播放列表')}
+                        <span className="button-label">{tr('播放列表')}</span>
                     </button>
                     <button
                         className={`button secondary ${metricsOpen ? 'active' : ''}`}
@@ -1917,7 +1917,7 @@ export default function App({
                         aria-pressed={metricsOpen}
                     >
                         <AssessmentOutlinedIcon aria-hidden="true" />
-                        {tr('声学概览')}
+                        <span className="button-label">{tr('声学概览')}</span>
                     </button>
                     {playState === 'playing' && transport.activeId === null ? (
                         <button className="button danger" onClick={stop}>
@@ -1934,7 +1934,30 @@ export default function App({
                             disabled={playState !== 'stopped'}
                         >
                             <span className="record-icon" />
-                            {tr('麦克风')}
+                            <span className="button-label">{tr('麦克风')}</span>
+                        </button>
+                    )}
+                    {transport.activeId !== null && (
+                        <button
+                            className={`button playback-button ${
+                                transport.isPlaying ? 'pause' : 'play'
+                            }`}
+                            onClick={onToggleMediaPlayback}
+                            aria-label={tr(transport.isPlaying ? '暂停' : '播放')}
+                            title={tr(transport.isPlaying ? '暂停' : '播放')}
+                        >
+                            {transport.isPlaying ? (
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                                </svg>
+                            ) : (
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M8 5v14l11-7z" />
+                                </svg>
+                            )}
+                            <span className="button-label">
+                                {tr(transport.isPlaying ? '暂停' : '播放')}
+                            </span>
                         </button>
                     )}
                     <button
@@ -2163,7 +2186,7 @@ export default function App({
                                     aria-pressed={waveformVisible}
                                     title={tr('显示或隐藏波形')}
                                 >
-                                    <i /> {tr('波形')}
+                                    <i /> <span className="toggle-label">{tr('波形')}</span>
                                 </button>
                                 <button
                                     className={spectrogramVisible ? 'on spectrogram' : ''}
@@ -2175,7 +2198,7 @@ export default function App({
                                     aria-pressed={spectrogramVisible}
                                     title={tr('显示或隐藏语谱图')}
                                 >
-                                    <i /> {tr('语谱图')}
+                                    <i /> <span className="toggle-label">{tr('语谱图')}</span>
                                 </button>
                             </div>
                             <div className="overlay-toggles">
@@ -2183,41 +2206,21 @@ export default function App({
                                     className={pitchVisible ? 'on pitch' : ''}
                                     onClick={() => setPitchVisible(!pitchVisible)}
                                 >
-                                    <i /> {tr('基频')}
+                                    <i /> <span className="toggle-label">{tr('基频')}</span>
                                 </button>
                                 <button
                                     className={formantsVisible ? 'on formants' : ''}
                                     onClick={() => setFormantsVisible(!formantsVisible)}
                                 >
-                                    <i /> {tr('共振峰')}
+                                    <i /> <span className="toggle-label">{tr('共振峰')}</span>
                                 </button>
                                 <button
                                     className={intensityVisible ? 'on intensity' : ''}
                                     onClick={() => setIntensityVisible(!intensityVisible)}
                                 >
-                                    <i /> {tr('音强')}
+                                    <i /> <span className="toggle-label">{tr('音强')}</span>
                                 </button>
                             </div>
-                            {transport.activeId !== null && (
-                                <button
-                                    className={`transport-control ${
-                                        transport.isPlaying ? 'pause' : 'play'
-                                    }`}
-                                    onClick={onToggleMediaPlayback}
-                                    aria-label={tr(transport.isPlaying ? '暂停' : '播放')}
-                                    title={tr(transport.isPlaying ? '暂停' : '播放')}
-                                >
-                                    {transport.isPlaying ? (
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
-                                        </svg>
-                                    ) : (
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M8 5v14l11-7z" />
-                                        </svg>
-                                    )}
-                                </button>
-                            )}
                         </div>
 
                         <div className="view-actions">

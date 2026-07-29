@@ -278,6 +278,15 @@ select:focus-visible {
     flex: 0 0 auto;
 }
 
+.button-label,
+.toggle-label {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .button:hover,
 .icon-button:hover,
 .view-actions button:hover,
@@ -295,6 +304,28 @@ select:focus-visible {
     border-color: #277ee0;
     background: linear-gradient(180deg, #338eff, #176dd4);
     box-shadow: 0 8px 24px rgba(37, 136, 255, 0.18);
+}
+
+.button.playback-button {
+    color: #ffffff;
+}
+
+.button.playback-button svg {
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+}
+
+.button.playback-button.play {
+    border-color: #25a96c;
+    background: linear-gradient(180deg, #39c984, #209e63);
+    box-shadow: 0 8px 24px rgba(32, 158, 99, 0.18);
+}
+
+.button.playback-button.pause {
+    border-color: #dc4967;
+    background: linear-gradient(180deg, #f0627e, #cf3e5c);
+    box-shadow: 0 8px 24px rgba(207, 62, 92, 0.18);
 }
 
 .button.danger {
@@ -2296,7 +2327,7 @@ html.glass-effects .settings-panel {
 
     .top-actions {
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
+        grid-template-columns: repeat(12, minmax(0, 1fr));
         width: 100%;
         padding-left: 0;
         gap: 4px;
@@ -2304,7 +2335,7 @@ html.glass-effects .settings-panel {
 
     .top-actions .button.secondary {
         display: inline-flex;
-        grid-column: span 2;
+        grid-column: span 4;
     }
 
     .top-actions .button {
@@ -2314,11 +2345,24 @@ html.glass-effects .settings-panel {
         gap: 4px;
         font-size: 11px;
         white-space: nowrap;
+        overflow: hidden;
     }
 
     .top-actions .button.primary,
-    .top-actions .button.danger {
+    .top-actions .button.danger,
+    .top-actions .button.playback-button {
         grid-column: span 3;
+    }
+
+    .top-actions:not(.has-playback) .button.primary,
+    .top-actions:not(.has-playback) .button.danger {
+        grid-column: span 6;
+    }
+
+    .top-actions > .icon-button,
+    .top-actions > .language-control {
+        grid-column: span 2;
+        min-width: 0;
     }
 
     .top-actions .button > svg {
@@ -2362,17 +2406,14 @@ html.glass-effects .settings-panel {
 
     .toolbar-center .plot-toggles button,
     .toolbar-center .overlay-toggles button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
         min-width: 0;
         min-height: 29px;
         padding: 0 2px;
         font-size: 10px;
         white-space: nowrap;
-    }
-
-    .toolbar-center > .transport-control {
-        grid-column: 1 / -1;
-        width: 100%;
-        height: 28px;
     }
 
     .view-actions {
@@ -2393,7 +2434,10 @@ html.glass-effects .settings-panel {
     }
 
     .mode-switch strong {
+        max-width: 100%;
+        overflow: hidden;
         font-size: 11px;
+        text-overflow: ellipsis;
     }
 
     .mode-switch span {
@@ -2406,6 +2450,16 @@ html.glass-effects .settings-panel {
 
     .view-actions > .zoom-readout {
         min-width: 34px;
+    }
+
+    .view-actions .view-level-action {
+        width: 28px;
+        min-width: 28px;
+        padding: 0;
+    }
+
+    .view-actions .view-level-action span {
+        display: none;
     }
 
     .praat-view {
