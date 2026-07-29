@@ -1,5 +1,6 @@
 import {
     analyzeAcousticFrame,
+    analysisCadenceForPrecision,
     analyzeFormantFrames,
     analyzeFormantsAtTimes,
     analyzePitchAndIntensityFrame,
@@ -181,6 +182,22 @@ function testIntensity() {
         throw new Error(`disabled pitch layer: expected null, received ${disabledLayers.pitchHz}`);
     }
     assertNear('disabled intensity layer', disabledLayers.intensityDbSpl, 0, 0);
+}
+
+function testRealtimeAnalysisPrecision() {
+    const accurate = analysisCadenceForPrecision('accurate');
+    const balanced = analysisCadenceForPrecision('balanced');
+    const smooth = analysisCadenceForPrecision('smooth');
+    if (
+        accurate.pitchStride !== 1 ||
+        accurate.formantStride !== 1 ||
+        balanced.pitchStride !== 2 ||
+        balanced.formantStride !== 4 ||
+        smooth.pitchStride !== 4 ||
+        smooth.formantStride !== 8
+    ) {
+        throw new Error('unexpected real-time analysis cadence');
+    }
 }
 
 function testFormants() {
@@ -374,6 +391,9 @@ function testLocalization() {
     if (translate('导入音频', 'zh') !== '导入音频') {
         throw new Error('Chinese localization did not preserve its source label');
     }
+    if (translate('实时分析精度', 'en') !== 'Real-time analysis precision') {
+        throw new Error('Performance settings localization is incomplete');
+    }
     if (translate('user-audio.wav', 'en') !== 'user-audio.wav') {
         throw new Error('Localization changed an unknown user-provided label');
     }
@@ -382,6 +402,7 @@ function testLocalization() {
 testPitch('yin');
 testPitch('autocorrelation');
 testIntensity();
+testRealtimeAnalysisPrecision();
 testFormants();
 testSpectrogramDisplayPreEmphasis();
 testFrequencyScales();

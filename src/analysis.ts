@@ -23,6 +23,25 @@ export interface AnalysisLayerSelection {
     intensity: boolean;
 }
 
+export type RealtimeAnalysisPrecision = 'accurate' | 'balanced' | 'smooth';
+
+export interface AnalysisComputationCadence {
+    pitchStride: number;
+    formantStride: number;
+}
+
+export function analysisCadenceForPrecision(
+    precision: RealtimeAnalysisPrecision
+): AnalysisComputationCadence {
+    if (precision === 'balanced') {
+        return { pitchStride: 2, formantStride: 4 };
+    }
+    if (precision === 'smooth') {
+        return { pitchStride: 4, formantStride: 8 };
+    }
+    return { pitchStride: 1, formantStride: 1 };
+}
+
 export interface AcousticAnalysis {
     pitchHz: number | null;
     pitchConfidence: number;

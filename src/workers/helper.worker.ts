@@ -1,5 +1,6 @@
 import {
     AcousticAnalysis,
+    AnalysisComputationCadence,
     AnalysisLayerSelection,
     analyzeFormantsAtTimes,
     analyzePitchAndIntensityFrame,
@@ -28,26 +29,46 @@ function analyzeAtCentres(
         pitch: true,
         formants: true,
         intensity: true,
+    },
+    cadence: AnalysisComputationCadence = {
+        pitchStride: 1,
+        formantStride: 1,
     }
 ) {
+    const pitchStride = Math.max(1, Math.round(cadence.pitchStride));
+    const formantStride = Math.max(1, Math.round(cadence.formantStride));
+    const formantCentreSamples = centreSamples.filter((_, index) => index % formantStride === 0);
     const formantFrames = layers.formants
         ? analyzeFormantsAtTimes(
               samples,
               sampleRate,
-              centreSamples.map((centreSample) => centreSample / sampleRate),
+              formantCentreSamples.map((centreSample) => centreSample / sampleRate),
               analysisOptions
           )
         : [];
+    let recentPitchHz: number | null = null;
+    let recentPitchConfidence = 0;
     return centreSamples.map(
         (centreSample, centreIndex): AcousticAnalysis => {
+            const calculatePitch = layers.pitch && centreIndex % pitchStride === 0;
             const pitchAndIntensity = analyzePitchAndIntensityFrame(
                 samples,
                 sampleRate,
                 analysisOptions,
                 centreSample,
-                layers
+                {
+                    pitch: calculatePitch,
+                    intensity: layers.intensity,
+                }
             );
-            const formants = formantFrames[centreIndex];
+            if (calculatePitch) {
+                recentPitchHz = pitchAndIntensity.pitchHz;
+                recentPitchConfidence = pitchAndIntensity.pitchConfidence;
+            } else if (layers.pitch) {
+                pitchAndIntensity.pitchHz = recentPitchHz;
+                pitchAndIntensity.pitchConfidence = recentPitchConfidence;
+            }
+            const formants = formantFrames[Math.floor(centreIndex / formantStride)];
             return {
                 ...pitchAndIntensity,
                 formantsHz:
@@ -57,7 +78,10 @@ function analyzeAtCentres(
                     formants?.formantBandwidthsHz ||
                     new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
                 formantIntensity: formants?.formantIntensity || 0,
-                drawFormants: layers.formants && (formants?.formantIntensity || 0) > 0,
+                drawFormants:
+                    layers.formants &&
+                    centreIndex % formantStride === 0 &&
+                    (formants?.formantIntensity || 0) > 0,
             };
         }
     );
@@ -113,6 +137,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                 options,
                 analysisOptions,
                 analysisLayers,
+                analysisCadence,
             } = payload as ComputeSpectrogramMessage['request']['payload'];
 
             try {
@@ -135,7 +160,8 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     options.sampleRate,
                     centreSamples,
                     analysisOptions,
-                    analysisLayers
+                    analysisLayers,
+                    analysisCadence
                 );
 
                 const response: ComputeSpectrogramMessage['response'] = {

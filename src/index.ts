@@ -1,6 +1,12 @@
 import debounce from 'lodash.debounce';
 
-import { AcousticAnalysis, AnalysisOptions, PitchAlgorithm } from './analysis';
+import {
+    AcousticAnalysis,
+    analysisCadenceForPrecision,
+    AnalysisOptions,
+    PitchAlgorithm,
+    RealtimeAnalysisPrecision,
+} from './analysis';
 import { AURORA_GRADIENT } from './color-util';
 import initialiseControlsUi from './controls-ui';
 import {
@@ -218,6 +224,10 @@ class SpectroEngine {
 
     private renderPixelRatio = 1.5;
 
+    private realtimeAnalysisPrecision: RealtimeAnalysisPrecision = 'accurate';
+
+    private liveAnalysisBatchSequence = 0;
+
     private inspector: { x: number; y: number } | null = null;
 
     private selection: SelectionSnapshot | null = null;
@@ -415,6 +425,7 @@ class SpectroEngine {
     updatePerformance(settings: PerformanceSettings) {
         this.renderFramesPerSecond =
             settings.framesPerSecond <= 0 ? 0 : clamp(Math.round(settings.framesPerSecond), 15, 60);
+        this.realtimeAnalysisPrecision = settings.analysisPrecision;
         const nextPixelRatio = clamp(settings.renderPixelRatio, 0.5, 2);
         if (this.renderPixelRatio !== nextPixelRatio) {
             this.renderPixelRatio = nextPixelRatio;
@@ -1332,6 +1343,13 @@ class SpectroEngine {
             if (samplesStart < 0) {
                 return;
             }
+            const analysisBatchSequence = this.liveAnalysisBatchSequence;
+            this.liveAnalysisBatchSequence += 1;
+            const smoothPrecision = this.realtimeAnalysisPrecision === 'smooth';
+            const calculatePitch =
+                this.showPitch && (!smoothPrecision || analysisBatchSequence % 2 === 0);
+            const calculateFormants =
+                this.showFormants && (!smoothPrecision || analysisBatchSequence % 4 === 0);
             const result = await offThreadGenerateSpectrogram(
                 request.samples,
                 samplesStart,
@@ -1346,11 +1364,27 @@ class SpectroEngine {
                 },
                 this.analysisOptions,
                 {
-                    pitch: this.showPitch,
-                    formants: this.showFormants,
+                    pitch: calculatePitch,
+                    formants: calculateFormants,
                     intensity: this.showIntensity,
-                }
+                },
+                analysisCadenceForPrecision(this.realtimeAnalysisPrecision)
             );
+            const previousAnalysis = this.analysisHistory[this.analysisHistory.length - 1];
+            if (previousAnalysis !== undefined) {
+                for (const analysis of result.analyses) {
+                    if (this.showPitch && !calculatePitch) {
+                        analysis.pitchHz = previousAnalysis.pitchHz;
+                        analysis.pitchConfidence = previousAnalysis.pitchConfidence;
+                    }
+                    if (this.showFormants && !calculateFormants) {
+                        analysis.formantsHz = previousAnalysis.formantsHz;
+                        analysis.formantBandwidthsHz = previousAnalysis.formantBandwidthsHz;
+                        analysis.formantIntensity = previousAnalysis.formantIntensity;
+                        analysis.drawFormants = false;
+                    }
+                }
+            }
 
             this.renderer.updateParameters({
                 sampleRate: request.sampleRate,
@@ -1470,6 +1504,7 @@ class SpectroEngine {
 
     private resetSession() {
         this.statistics = emptyStatistics();
+        this.liveAnalysisBatchSequence = 0;
         this.sessionElapsedSeconds = 0;
         this.lastUiUpdate = 0;
         this.clearVisualHistory();
@@ -1520,8 +1555,7 @@ class SpectroEngine {
             this.lastRenderTime =
                 frameInterval === 0
                     ? timestamp
-                    : timestamp -
-                      ((timestamp - this.lastRenderTime) % frameInterval);
+                    : timestamp - ((timestamp - this.lastRenderTime) % frameInterval);
             this.renderer.render();
             if (this.overlayDirty) {
                 this.drawOverlay();

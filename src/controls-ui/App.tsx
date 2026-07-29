@@ -20,7 +20,7 @@ import RestoreIcon from '@material-ui/icons/Restore';
 import SaveAltIcon from '@material-ui/icons/SaveAlt';
 import StopIcon from '@material-ui/icons/Stop';
 
-import { AnalysisOptions, PitchAlgorithm } from '../analysis';
+import { AnalysisOptions, PitchAlgorithm, RealtimeAnalysisPrecision } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
 import { frequencyToScale } from '../math-util';
@@ -36,6 +36,7 @@ export interface SpectrogramAnalysisSettings {
 export interface PerformanceSettings {
     framesPerSecond: number;
     renderPixelRatio: number;
+    analysisPrecision: RealtimeAnalysisPrecision;
 }
 type SettingsTab = 'spectrogram' | 'pitch' | 'formants' | 'intensity' | 'performance';
 type MetricSelection =
@@ -243,6 +244,7 @@ interface SavedSettings {
     framesPerSecond: number;
     glassEffect: boolean;
     renderPixelRatio: number;
+    analysisPrecision: RealtimeAnalysisPrecision;
 }
 
 const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v2';
@@ -359,6 +361,9 @@ export default function App({
     const [framesPerSecond, setFramesPerSecond] = useState(saved.framesPerSecond ?? 30);
     const [glassEffect, setGlassEffect] = useState(saved.glassEffect ?? true);
     const [renderPixelRatio, setRenderPixelRatio] = useState(saved.renderPixelRatio ?? 1.5);
+    const [analysisPrecision, setAnalysisPrecision] = useState<RealtimeAnalysisPrecision>(
+        saved.analysisPrecision || 'accurate'
+    );
     const [timeOffset, setTimeOffset] = useState(0);
     const [playlistOpen, setPlaylistOpen] = useState(true);
     const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
@@ -510,6 +515,7 @@ export default function App({
             framesPerSecond,
             glassEffect,
             renderPixelRatio,
+            analysisPrecision,
         };
         try {
             window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -552,16 +558,72 @@ export default function App({
         framesPerSecond,
         glassEffect,
         renderPixelRatio,
+        analysisPrecision,
     ]);
 
     useEffect(() => {
-        onPerformanceChange({ framesPerSecond, renderPixelRatio });
-    }, [framesPerSecond, renderPixelRatio, onPerformanceChange]);
+        onPerformanceChange({
+            framesPerSecond,
+            renderPixelRatio,
+            analysisPrecision,
+        });
+    }, [framesPerSecond, renderPixelRatio, analysisPrecision, onPerformanceChange]);
 
     useEffect(() => {
         document.documentElement.classList.toggle('glass-effects', glassEffect);
         return () => document.documentElement.classList.remove('glass-effects');
     }, [glassEffect]);
+
+    useEffect(() => {
+        const handleKeyboardShortcut = (event: KeyboardEvent) => {
+            const target = event.target;
+            if (
+                event.ctrlKey ||
+                event.metaKey ||
+                (target instanceof HTMLElement &&
+                    (target.isContentEditable ||
+                        target.closest('input, select, textarea, button') !== null))
+            ) {
+                return;
+            }
+            if (
+                event.code === 'Space' &&
+                !event.repeat &&
+                activeMediaId !== null &&
+                transport.durationSeconds > 0
+            ) {
+                event.preventDefault();
+                onToggleMediaPlayback();
+                return;
+            }
+            if (
+                (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
+                activeMediaId !== null &&
+                transport.durationSeconds > 0
+            ) {
+                event.preventDefault();
+                const direction = event.key === 'ArrowLeft' ? -1 : 1;
+                const stepSeconds = event.shiftKey ? 5 : 1;
+                onSeekMedia(
+                    Math.max(
+                        0,
+                        Math.min(
+                            transport.durationSeconds,
+                            transport.currentSeconds + direction * stepSeconds
+                        )
+                    )
+                );
+            }
+        };
+        document.addEventListener('keydown', handleKeyboardShortcut);
+        return () => document.removeEventListener('keydown', handleKeyboardShortcut);
+    }, [
+        activeMediaId,
+        transport.currentSeconds,
+        transport.durationSeconds,
+        onToggleMediaPlayback,
+        onSeekMedia,
+    ]);
 
     useEffect(() => {
         const gradient = GRADIENTS.find((item) => item.name === gradientName);
@@ -866,6 +928,7 @@ export default function App({
                 setFramesPerSecond(30);
                 setGlassEffect(true);
                 setRenderPixelRatio(1.5);
+                setAnalysisPrecision('accurate');
                 return;
             }
             setIntensityPitchFloor(75);
@@ -2281,6 +2344,30 @@ export default function App({
                             </button>
                             <div className="select-row one">
                                 <label>
+                                    {tr('实时分析精度')}
+                                    <select
+                                        value={analysisPrecision}
+                                        onChange={(event) =>
+                                            setAnalysisPrecision(
+                                                event.target.value as RealtimeAnalysisPrecision
+                                            )
+                                        }
+                                    >
+                                        <option value="accurate">{tr('精确每帧分析')}</option>
+                                        <option value="balanced">
+                                            {tr('均衡降低全部分析频率')}
+                                        </option>
+                                        <option value="smooth">{tr('流畅大幅降低分析频率')}</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <p className="setting-help">
+                                {tr(
+                                    '只降低实时分析的时间采样密度，每个被分析帧仍使用完整算法；离线音频始终保持精确。'
+                                )}
+                            </p>
+                            <div className="select-row one">
+                                <label>
                                     {tr('渲染帧率')}
                                     <select
                                         value={framesPerSecond}
@@ -2326,6 +2413,11 @@ export default function App({
                                     onChange={(event) => setGlassEffect(event.target.checked)}
                                 />
                             </label>
+                            <p className="setting-help">
+                                {tr(
+                                    '快捷键：空格播放或暂停；左右方向键移动 1 秒，按住 Shift 时移动 5 秒。'
+                                )}
+                            </p>
                         </>
                     )}
                 </div>

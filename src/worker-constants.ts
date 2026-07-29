@@ -1,5 +1,6 @@
 import {
     AcousticAnalysis,
+    AnalysisComputationCadence,
     AnalysisLayerSelection,
     AnalysisOptions,
     TimedAcousticAnalysis,
@@ -30,6 +31,7 @@ export type ComputeSpectrogramMessage = MessageBase<
         options: SpectrogramOptions;
         analysisOptions: AnalysisOptions;
         analysisLayers: AnalysisLayerSelection;
+        analysisCadence: AnalysisComputationCadence;
     },
     {
         spectrogramWindowCount: number;

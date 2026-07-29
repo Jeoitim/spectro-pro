@@ -114,6 +114,14 @@ const ENGLISH: { [key: string]: string } = {
     毛玻璃效果: 'Glass effect',
     关闭后可降低动态图层的合成开销:
         'Turning this off reduces the compositing cost of dynamic layers.',
+    实时分析精度: 'Real-time analysis precision',
+    精确每帧分析: 'Accurate · analyze every frame',
+    均衡降低全部分析频率: 'Balanced · reduce all analysis cadence',
+    流畅大幅降低分析频率: 'Smooth · greatly reduce analysis cadence',
+    '只降低实时分析的时间采样密度，每个被分析帧仍使用完整算法；离线音频始终保持精确。':
+        'Only the real-time sampling cadence is reduced. Every analyzed frame still uses the full algorithm; offline audio always stays accurate.',
+    '快捷键：空格播放或暂停；左右方向键移动 1 秒，按住 Shift 时移动 5 秒。':
+        'Shortcuts: Space plays or pauses; Left/Right moves 1 second, or 5 seconds while holding Shift.',
     显示增益: 'Display gain',
     语谱窗口长度: 'Spectrogram window length',
     选择自定义模式后可调节窗口长度: 'Select Custom mode to adjust the window length.',
