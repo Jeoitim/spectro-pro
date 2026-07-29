@@ -1919,100 +1919,104 @@ export default function App({
                         <AssessmentOutlinedIcon aria-hidden="true" />
                         <span className="button-label">{tr('声学概览')}</span>
                     </button>
-                    {playState === 'playing' && transport.activeId === null ? (
-                        <button className="button danger" onClick={stop}>
-                            <StopIcon aria-hidden="true" />
-                            {tr('停止')}
-                        </button>
-                    ) : (
-                        <button
-                            className="button primary"
-                            onClick={() => {
-                                setPlayState('loading-mic');
-                                onStartMicrophone();
-                            }}
-                            disabled={playState !== 'stopped'}
-                        >
-                            <span className="record-icon" />
-                            <span className="button-label">{tr('麦克风')}</span>
-                        </button>
-                    )}
-                    {transport.activeId !== null && (
-                        <button
-                            className={`button playback-button ${
-                                transport.isPlaying ? 'pause' : 'play'
-                            }`}
-                            onClick={onToggleMediaPlayback}
-                            aria-label={tr(transport.isPlaying ? '暂停' : '播放')}
-                            title={tr(transport.isPlaying ? '暂停' : '播放')}
-                        >
-                            {transport.isPlaying ? (
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
-                                </svg>
-                            ) : (
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M8 5v14l11-7z" />
-                                </svg>
-                            )}
-                            <span className="button-label">
-                                {tr(transport.isPlaying ? '暂停' : '播放')}
-                            </span>
-                        </button>
-                    )}
-                    <button
-                        className="icon-button theme-button"
-                        onClick={() => setUiTheme(uiTheme === 'dark' ? 'light' : 'dark')}
-                        aria-label={tr(uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式')}
-                        title={tr(uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式')}
-                        aria-pressed={uiTheme === 'light'}
-                    >
-                        {uiTheme === 'dark' ? (
-                            <Brightness7Icon aria-hidden="true" />
+                    <div className="session-actions">
+                        {playState === 'playing' && transport.activeId === null ? (
+                            <button className="button danger" onClick={stop}>
+                                <StopIcon aria-hidden="true" />
+                                {tr('停止')}
+                            </button>
                         ) : (
-                            <Brightness4Icon aria-hidden="true" />
+                            <button
+                                className="button primary"
+                                onClick={() => {
+                                    setPlayState('loading-mic');
+                                    onStartMicrophone();
+                                }}
+                                disabled={playState !== 'stopped'}
+                            >
+                                <span className="record-icon" />
+                                <span className="button-label">{tr('麦克风')}</span>
+                            </button>
                         )}
-                    </button>
-                    <div className="language-control" ref={languageRef}>
+                        {transport.activeId !== null && (
+                            <button
+                                className={`button playback-button ${
+                                    transport.isPlaying ? 'pause' : 'play'
+                                }`}
+                                onClick={onToggleMediaPlayback}
+                                aria-label={tr(transport.isPlaying ? '暂停' : '播放')}
+                                title={tr(transport.isPlaying ? '暂停' : '播放')}
+                            >
+                                {transport.isPlaying ? (
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M7 5h4v14H7zM13 5h4v14h-4z" />
+                                    </svg>
+                                ) : (
+                                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                                        <path d="M8 5v14l11-7z" />
+                                    </svg>
+                                )}
+                                <span className="button-label">
+                                    {tr(transport.isPlaying ? '暂停' : '播放')}
+                                </span>
+                            </button>
+                        )}
                         <button
-                            className="icon-button language-button"
-                            onClick={() => setLanguageMenuOpen(!languageMenuOpen)}
-                            aria-label={tr('选择语言')}
-                            title={tr('选择语言')}
-                            aria-haspopup="menu"
-                            aria-expanded={languageMenuOpen}
+                            className="icon-button theme-button"
+                            onClick={() => setUiTheme(uiTheme === 'dark' ? 'light' : 'dark')}
+                            aria-label={tr(
+                                uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式'
+                            )}
+                            title={tr(uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式')}
+                            aria-pressed={uiTheme === 'light'}
                         >
-                            <LanguageIcon aria-hidden="true" />
+                            {uiTheme === 'dark' ? (
+                                <Brightness7Icon aria-hidden="true" />
+                            ) : (
+                                <Brightness4Icon aria-hidden="true" />
+                            )}
                         </button>
-                        {languageMenuOpen && (
-                            <div className="language-menu" role="menu">
-                                <button
-                                    role="menuitemradio"
-                                    aria-checked={locale === 'zh'}
-                                    className={locale === 'zh' ? 'active' : ''}
-                                    onClick={() => chooseLocale('zh')}
-                                >
-                                    中文
-                                </button>
-                                <button
-                                    role="menuitemradio"
-                                    aria-checked={locale === 'en'}
-                                    className={locale === 'en' ? 'active' : ''}
-                                    onClick={() => chooseLocale('en')}
-                                >
-                                    English
-                                </button>
-                            </div>
-                        )}
+                        <div className="language-control" ref={languageRef}>
+                            <button
+                                className="icon-button language-button"
+                                onClick={() => setLanguageMenuOpen(!languageMenuOpen)}
+                                aria-label={tr('选择语言')}
+                                title={tr('选择语言')}
+                                aria-haspopup="menu"
+                                aria-expanded={languageMenuOpen}
+                            >
+                                <LanguageIcon aria-hidden="true" />
+                            </button>
+                            {languageMenuOpen && (
+                                <div className="language-menu" role="menu">
+                                    <button
+                                        role="menuitemradio"
+                                        aria-checked={locale === 'zh'}
+                                        className={locale === 'zh' ? 'active' : ''}
+                                        onClick={() => chooseLocale('zh')}
+                                    >
+                                        中文
+                                    </button>
+                                    <button
+                                        role="menuitemradio"
+                                        aria-checked={locale === 'en'}
+                                        className={locale === 'en' ? 'active' : ''}
+                                        onClick={() => chooseLocale('en')}
+                                    >
+                                        English
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            className="icon-button"
+                            onClick={() => setSettingsOpen(!settingsOpen)}
+                            aria-label={tr('显示设置')}
+                            title={tr('显示设置')}
+                        >
+                            <span className="sliders-icon" />
+                        </button>
                     </div>
-                    <button
-                        className="icon-button"
-                        onClick={() => setSettingsOpen(!settingsOpen)}
-                        aria-label={tr('显示设置')}
-                        title={tr('显示设置')}
-                    >
-                        <span className="sliders-icon" />
-                    </button>
                 </div>
             </header>
 
@@ -2490,9 +2494,14 @@ export default function App({
                                             )}
                                             {selection && (
                                                 <span className="tooltip-selection">
-                                                    {selection.durationSeconds.toFixed(1)} s (
-                                                    {selection.startSeconds.toFixed(1)}–
-                                                    {selection.endSeconds.toFixed(1)} s)
+                                                    <span className="selection-duration">
+                                                        {selection.durationSeconds.toFixed(1)} s
+                                                    </span>
+                                                    <span className="selection-range">
+                                                        {' '}
+                                                        ({selection.startSeconds.toFixed(1)}–
+                                                        {selection.endSeconds.toFixed(1)} s)
+                                                    </span>
                                                 </span>
                                             )}
                                         </div>

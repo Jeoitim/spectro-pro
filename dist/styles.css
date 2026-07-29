@@ -248,6 +248,13 @@ select:focus-visible {
     justify-content: flex-end;
 }
 
+.session-actions {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
+}
+
 .button,
 .icon-button,
 .view-actions button,
@@ -278,9 +285,16 @@ select:focus-visible {
     flex: 0 0 auto;
 }
 
-.button-label,
-.toggle-label {
+.button-label {
     display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.toggle-label {
+    display: inline-block;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2333,6 +2347,10 @@ html.glass-effects .settings-panel {
         gap: 4px;
     }
 
+    .session-actions {
+        display: contents;
+    }
+
     .top-actions .button.secondary {
         display: inline-flex;
         grid-column: span 4;
@@ -2359,8 +2377,8 @@ html.glass-effects .settings-panel {
         grid-column: span 6;
     }
 
-    .top-actions > .icon-button,
-    .top-actions > .language-control {
+    .session-actions > .icon-button,
+    .session-actions > .language-control {
         grid-column: span 2;
         min-width: 0;
     }
@@ -2528,7 +2546,7 @@ html.glass-effects .settings-panel {
 
     .cursor-tooltip .tooltip-pitch,
     .cursor-tooltip .tooltip-intensity,
-    .cursor-tooltip .tooltip-selection {
+    .cursor-tooltip .selection-range {
         display: none;
     }
 
