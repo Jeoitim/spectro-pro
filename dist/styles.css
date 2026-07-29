@@ -317,6 +317,7 @@ select:focus-visible {
     width: 39px;
     height: 39px;
     place-items: center;
+    color: #aebbd0;
 }
 
 .icon-button > svg {
@@ -383,7 +384,7 @@ select:focus-visible {
     display: block;
     width: 15px;
     height: 1px;
-    background: #aeb9ca;
+    background: currentColor;
 }
 
 .sliders-icon::before,
@@ -2262,7 +2263,7 @@ html.glass-effects .settings-panel {
     .media-panel,
     .metrics-panel {
         z-index: 42;
-        top: 12px !important;
+        top: 12px;
         max-height: calc(100dvh - 24px);
     }
 
