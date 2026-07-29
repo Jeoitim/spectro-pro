@@ -1449,32 +1449,45 @@ export default function App({
                 return;
             }
             event.preventDefault();
+            const dragTarget = event.currentTarget;
+            dragTarget.setPointerCapture(event.pointerId);
             const bounds = panel.getBoundingClientRect();
             const startX = event.clientX;
             const startY = event.clientY;
             let moved = false;
             let latestLeft = bounds.left;
             let latestTop = bounds.top;
+            let frameId: number | null = null;
             panel.classList.add('dragging');
 
-            const move = (moveEvent: PointerEvent) => {
-                if (moveEvent.pointerId !== event.pointerId) {
-                    return;
-                }
-                const deltaX = moveEvent.clientX - startX;
-                const deltaY = moveEvent.clientY - startY;
+            const updatePosition = (clientX: number, clientY: number) => {
+                const deltaX = clientX - startX;
+                const deltaY = clientY - startY;
                 moved = moved || Math.abs(deltaX) + Math.abs(deltaY) > 3;
                 latestLeft = Math.min(
                     Math.max(8, bounds.left + deltaX),
                     Math.max(8, window.innerWidth - bounds.width - 8)
                 );
                 latestTop = Math.min(
-                    Math.max(76, bounds.top + deltaY),
-                    Math.max(76, window.innerHeight - bounds.height - 8)
+                    Math.max(8, bounds.top + deltaY),
+                    Math.max(8, window.innerHeight - bounds.height - 8)
                 );
+            };
+            const renderDragTransform = () => {
+                frameId = null;
                 panel.style.transform = `translate3d(${latestLeft - bounds.left}px, ${
                     latestTop - bounds.top
                 }px, 0)`;
+            };
+            const move = (moveEvent: PointerEvent) => {
+                if (moveEvent.pointerId !== event.pointerId) {
+                    return;
+                }
+                moveEvent.preventDefault();
+                updatePosition(moveEvent.clientX, moveEvent.clientY);
+                if (moved && frameId === null) {
+                    frameId = window.requestAnimationFrame(renderDragTransform);
+                }
             };
             const finish = (finishEvent: PointerEvent) => {
                 if (finishEvent.pointerId !== event.pointerId) {
@@ -1483,19 +1496,35 @@ export default function App({
                 document.removeEventListener('pointermove', move);
                 document.removeEventListener('pointerup', finish);
                 document.removeEventListener('pointercancel', finish);
-                panel.style.left = `${latestLeft}px`;
-                panel.style.top = `${latestTop}px`;
-                panel.style.right = 'auto';
-                panel.style.transform = '';
+                if (finishEvent.type !== 'pointercancel') {
+                    updatePosition(finishEvent.clientX, finishEvent.clientY);
+                }
+                if (frameId !== null) {
+                    window.cancelAnimationFrame(frameId);
+                    frameId = null;
+                }
                 if (moved) {
+                    renderDragTransform();
                     const nextPosition = { left: latestLeft, top: latestTop };
+                    panel.style.left = `${latestLeft}px`;
+                    panel.style.top = `${latestTop}px`;
+                    panel.style.right = 'auto';
+                    panel.style.transform = 'translate3d(0, 0, 0)';
                     if (panelName === 'playlist') {
                         setPlaylistPosition(nextPosition);
                     } else {
                         setMetricsPosition(nextPosition);
                     }
                 }
-                window.requestAnimationFrame(() => panel.classList.remove('dragging'));
+                if (dragTarget.hasPointerCapture(event.pointerId)) {
+                    dragTarget.releasePointerCapture(event.pointerId);
+                }
+                window.requestAnimationFrame(() => {
+                    panel.classList.remove('dragging');
+                    window.requestAnimationFrame(() => {
+                        panel.style.transform = '';
+                    });
+                });
                 draggedPanelRef.current = moved ? panelName : null;
             };
             document.addEventListener('pointermove', move);
