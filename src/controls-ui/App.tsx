@@ -8,6 +8,7 @@ import React, {
     useState,
 } from 'react';
 import AddIcon from '@material-ui/icons/Add';
+import AssessmentOutlinedIcon from '@material-ui/icons/AssessmentOutlined';
 import Brightness4Icon from '@material-ui/icons/Brightness4';
 import Brightness7Icon from '@material-ui/icons/Brightness7';
 import ClearAllIcon from '@material-ui/icons/ClearAll';
@@ -234,6 +235,7 @@ interface SavedSettings {
     waveformGain: number;
     waveformLineWidth: number;
     waveformZeroLine: boolean;
+    waveformPulses: boolean;
     uiTheme: UiTheme;
     sensitivity: number;
     contrast: number;
@@ -362,8 +364,10 @@ export default function App({
     const [waveformGain, setWaveformGain] = useState(saved.waveformGain ?? 1);
     const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
     const [waveformZeroLine, setWaveformZeroLine] = useState(saved.waveformZeroLine ?? true);
+    const [waveformPulses, setWaveformPulses] = useState(saved.waveformPulses ?? false);
     const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [metricsOpen, setMetricsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
     const [selectedMetric, setSelectedMetric] = useState<MetricSelection>('pitch');
     const [sensitivity, setSensitivity] = useState(saved.sensitivity ?? 0.42);
@@ -409,7 +413,7 @@ export default function App({
     );
     const [timeOffset, setTimeOffset] = useState(0);
     const [returnViewAvailable, setReturnViewAvailable] = useState(false);
-    const [playlistOpen, setPlaylistOpen] = useState(true);
+    const [playlistOpen, setPlaylistOpen] = useState(false);
     const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
     const [playlistPosition, setPlaylistPosition] = useState<{
         left: number;
@@ -432,6 +436,7 @@ export default function App({
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const dragStartRef = useRef<number | null>(null);
+    const touchPanRef = useRef<{ pointerId: number; lastX: number } | null>(null);
     const plotContainerRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
@@ -541,6 +546,7 @@ export default function App({
             waveformGain,
             waveformLineWidth,
             waveformZeroLine,
+            waveformPulses,
             uiTheme,
             sensitivity,
             contrast,
@@ -592,6 +598,7 @@ export default function App({
         waveformGain,
         waveformLineWidth,
         waveformZeroLine,
+        waveformPulses,
         uiTheme,
         sensitivity,
         contrast,
@@ -833,8 +840,15 @@ export default function App({
             gain: waveformGain,
             lineWidth: waveformLineWidth,
             showZeroLine: waveformZeroLine,
+            showPulses: waveformPulses,
         });
-    }, [waveformGain, waveformLineWidth, waveformZeroLine, onWaveformDisplayChange]);
+    }, [
+        waveformGain,
+        waveformLineWidth,
+        waveformZeroLine,
+        waveformPulses,
+        onWaveformDisplayChange,
+    ]);
 
     useEffect(() => {
         const timeout = window.setTimeout(
@@ -968,8 +982,50 @@ export default function App({
         [onPlayMediaAt, onSelectRange, pointerRatios, transport.activeId]
     );
 
+    const startPlotTouchPan = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (event.pointerType !== 'touch' || zoom <= 1) {
+                return;
+            }
+            event.preventDefault();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            touchPanRef.current = {
+                pointerId: event.pointerId,
+                lastX: event.clientX,
+            };
+            dragStartRef.current = null;
+            onInspect(-1, -1);
+        },
+        [onInspect, zoom]
+    );
+
+    const updatePlotTouchPan = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            const touchPan = touchPanRef.current;
+            if (touchPan === null || touchPan.pointerId !== event.pointerId) {
+                return;
+            }
+            event.preventDefault();
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const deltaX = event.clientX - touchPan.lastX;
+            touchPan.lastX = event.clientX;
+            onNavigate(deltaX / Math.max(1, bounds.width) / Math.max(1, zoom));
+        },
+        [onNavigate, zoom]
+    );
+
+    const finishPlotTouchPan = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
+        if (touchPanRef.current?.pointerId !== event.pointerId) {
+            return;
+        }
+        touchPanRef.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+    }, []);
+
     const beginFloatingDrag = useCallback(
-        (panelName: 'playlist' | 'metrics', event: ReactMouseEvent<HTMLElement>) => {
+        (panelName: 'playlist' | 'metrics', event: ReactPointerEvent<HTMLElement>) => {
             if (event.button !== 0) {
                 return;
             }
@@ -987,7 +1043,10 @@ export default function App({
             panel.classList.add('dragging');
             panel.style.transition = 'none';
 
-            const move = (moveEvent: MouseEvent) => {
+            const move = (moveEvent: PointerEvent) => {
+                if (moveEvent.pointerId !== event.pointerId) {
+                    return;
+                }
                 const deltaX = moveEvent.clientX - startX;
                 const deltaY = moveEvent.clientY - startY;
                 moved = moved || Math.abs(deltaX) + Math.abs(deltaY) > 3;
@@ -1003,9 +1062,13 @@ export default function App({
                     latestTop - bounds.top
                 }px, 0)`;
             };
-            const finish = () => {
-                document.removeEventListener('mousemove', move);
-                document.removeEventListener('mouseup', finish);
+            const finish = (finishEvent: PointerEvent) => {
+                if (finishEvent.pointerId !== event.pointerId) {
+                    return;
+                }
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', finish);
+                document.removeEventListener('pointercancel', finish);
                 panel.style.transform = '';
                 panel.style.left = `${latestLeft}px`;
                 panel.style.top = `${latestTop}px`;
@@ -1022,8 +1085,9 @@ export default function App({
                 }
                 draggedPanelRef.current = moved ? panelName : null;
             };
-            document.addEventListener('mousemove', move);
-            document.addEventListener('mouseup', finish);
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', finish);
+            document.addEventListener('pointercancel', finish);
         },
         []
     );
@@ -1067,6 +1131,7 @@ export default function App({
                 setWaveformGain(1);
                 setWaveformLineWidth(1);
                 setWaveformZeroLine(true);
+                setWaveformPulses(false);
                 return;
             }
             if (tab === 'pitch') {
@@ -1250,6 +1315,17 @@ export default function App({
                         <QueueMusicIcon aria-hidden="true" />
                         {tr('播放列表')}
                     </button>
+                    <button
+                        className={`button secondary ${metricsOpen ? 'active' : ''}`}
+                        onClick={() => {
+                            setMetricsOpen(!metricsOpen);
+                            setMetricsCollapsed(false);
+                        }}
+                        aria-pressed={metricsOpen}
+                    >
+                        <AssessmentOutlinedIcon aria-hidden="true" />
+                        {tr('声学概览')}
+                    </button>
                     {playState === 'playing' && transport.activeId === null ? (
                         <button className="button danger" onClick={stop}>
                             <StopIcon aria-hidden="true" />
@@ -1339,7 +1415,7 @@ export default function App({
                     <div className="media-panel-heading">
                         <div
                             className="panel-drag-handle"
-                            onMouseDown={(event) => beginFloatingDrag('playlist', event)}
+                            onPointerDown={(event) => beginFloatingDrag('playlist', event)}
                         >
                             <span className="eyebrow">MEDIA LIBRARY</span>
                             <strong>
@@ -1700,6 +1776,10 @@ export default function App({
                                     <canvas
                                         id="waveformInteraction"
                                         data-plot="waveform"
+                                        onPointerDown={startPlotTouchPan}
+                                        onPointerMove={updatePlotTouchPan}
+                                        onPointerUp={finishPlotTouchPan}
+                                        onPointerCancel={finishPlotTouchPan}
                                         onMouseDown={startPlotSelection}
                                         onMouseMove={updatePlotSelection}
                                         onMouseUp={finishPlotSelection}
@@ -1741,6 +1821,10 @@ export default function App({
                                     <canvas
                                         id="analysisOverlay"
                                         data-plot="spectrogram"
+                                        onPointerDown={startPlotTouchPan}
+                                        onPointerMove={updatePlotTouchPan}
+                                        onPointerUp={finishPlotTouchPan}
+                                        onPointerCancel={finishPlotTouchPan}
                                         onMouseDown={startPlotSelection}
                                         onMouseMove={updatePlotSelection}
                                         onMouseUp={finishPlotSelection}
@@ -1909,182 +1993,195 @@ export default function App({
                     </div>
                 </section>
 
-                <section
-                    ref={metricsRef}
-                    className={`metrics-panel ${metricsCollapsed ? 'bubble' : ''}`}
-                    style={
-                        metricsPosition
-                            ? {
-                                  left: metricsPosition.left,
-                                  right: 'auto',
-                                  top: metricsPosition.top,
-                              }
-                            : undefined
-                    }
-                >
-                    <button
-                        className={`collapsed-reading ${collapsedMetric.color}`}
-                        onMouseDown={(event) => beginFloatingDrag('metrics', event)}
-                        onClick={() => {
-                            if (draggedPanelRef.current === 'metrics') {
-                                draggedPanelRef.current = null;
-                                return;
-                            }
-                            setMetricsCollapsed(false);
-                        }}
-                        aria-label={`${collapsedMetric.label} ${formatNumber(
-                            collapsedMetric.value,
-                            collapsedMetric.digits
-                        )} ${collapsedMetric.unit}`}
-                        title={tr('展开声学概览')}
+                {metricsOpen && (
+                    <section
+                        ref={metricsRef}
+                        className={`metrics-panel ${metricsCollapsed ? 'bubble' : ''}`}
+                        style={
+                            metricsPosition
+                                ? {
+                                      left: metricsPosition.left,
+                                      right: 'auto',
+                                      top: metricsPosition.top,
+                                  }
+                                : undefined
+                        }
                     >
-                        <span>{collapsedMetric.label}</span>
-                        <strong>
-                            {formatNumber(collapsedMetric.value, collapsedMetric.digits)}
-                        </strong>
-                        <em>{collapsedMetric.unit}</em>
-                    </button>
-                    <div className="metrics-heading">
-                        <div
-                            className="metrics-drag-handle"
-                            onMouseDown={(event) => beginFloatingDrag('metrics', event)}
+                        <button
+                            className={`collapsed-reading ${collapsedMetric.color}`}
+                            onPointerDown={(event) => beginFloatingDrag('metrics', event)}
+                            onClick={() => {
+                                if (draggedPanelRef.current === 'metrics') {
+                                    draggedPanelRef.current = null;
+                                    return;
+                                }
+                                setMetricsCollapsed(false);
+                            }}
+                            aria-label={`${collapsedMetric.label} ${formatNumber(
+                                collapsedMetric.value,
+                                collapsedMetric.digits
+                            )} ${collapsedMetric.unit}`}
+                            title={tr('展开声学概览')}
                         >
-                            <span className="eyebrow">
-                                {tr(transport.activeId === null ? '实时读数' : '时刻线位置读数')}
-                            </span>
-                            <h2>{tr('声学概览')}</h2>
-                        </div>
-                        <div className="metrics-heading-actions">
-                            {transport.activeId !== null && (
-                                <span className="playhead-time">
-                                    {formatTime(transport.currentSeconds)}
-                                </span>
-                            )}
-                            <span className="sample-rate">
-                                {snapshot.sampleRate
-                                    ? `${(snapshot.sampleRate / 1000).toFixed(1)} kHz`
-                                    : '— kHz'}
-                            </span>
-                            <button
-                                onClick={() => setMetricsCollapsed(true)}
-                                aria-label={tr('收起声学概览')}
-                                title={tr('缩成气泡')}
+                            <span>{collapsedMetric.label}</span>
+                            <strong>
+                                {formatNumber(collapsedMetric.value, collapsedMetric.digits)}
+                            </strong>
+                            <em>{collapsedMetric.unit}</em>
+                        </button>
+                        <div className="metrics-heading">
+                            <div
+                                className="metrics-drag-handle"
+                                onPointerDown={(event) => beginFloatingDrag('metrics', event)}
                             >
-                                −
-                            </button>
+                                <span className="eyebrow">
+                                    {tr(
+                                        transport.activeId === null ? '实时读数' : '时刻线位置读数'
+                                    )}
+                                </span>
+                                <h2>{tr('声学概览')}</h2>
+                            </div>
+                            <div className="metrics-heading-actions">
+                                {transport.activeId !== null && (
+                                    <span className="playhead-time">
+                                        {formatTime(transport.currentSeconds)}
+                                    </span>
+                                )}
+                                <span className="sample-rate">
+                                    {snapshot.sampleRate
+                                        ? `${(snapshot.sampleRate / 1000).toFixed(1)} kHz`
+                                        : '— kHz'}
+                                </span>
+                                <button
+                                    onClick={() => setMetricsCollapsed(true)}
+                                    aria-label={tr('收起声学概览')}
+                                    title={tr('缩成气泡')}
+                                >
+                                    −
+                                </button>
+                                <button
+                                    onClick={() => setMetricsOpen(false)}
+                                    aria-label={tr('关闭声学概览')}
+                                    title={tr('关闭声学概览')}
+                                >
+                                    <CloseIcon aria-hidden="true" />
+                                </button>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="primary-metrics">
-                        <article
-                            className={`selectable-metric pitch ${
-                                selectedMetric === 'pitch' ? 'selected' : ''
-                            }`}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelectedMetric('pitch')}
-                            onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    setSelectedMetric('pitch');
-                                }
-                            }}
-                        >
-                            <span className="metric-label pitch-color">{tr('基频F0')}</span>
-                            <strong>{formatNumber(snapshot.pitchHz, 1)}</strong>
-                            <em>Hz</em>
-                            <small>{tr('YIN / 自相关实时估计')}</small>
-                        </article>
-                        <article
-                            className={`selectable-metric intensity ${
-                                selectedMetric === 'intensity' ? 'selected' : ''
-                            }`}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelectedMetric('intensity')}
-                            onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                    event.preventDefault();
-                                    setSelectedMetric('intensity');
-                                }
-                            }}
-                        >
-                            <span className="metric-label intensity-color">{tr('音强')}</span>
-                            <strong>{formatNumber(snapshot.intensityDbSpl, 1)}</strong>
-                            <em>dB SPL*</em>
-                            <small>{tr('参考声压 20 μPa')}</small>
-                        </article>
-                    </div>
-
-                    <div className="formant-metrics">
-                        {snapshot.formantsHz.map((value, index) => (
+                        <div className="primary-metrics">
                             <article
-                                key={index}
-                                className={`selectable-metric formant ${
-                                    selectedMetric === `formant${index + 1}` ? 'selected' : ''
+                                className={`selectable-metric pitch ${
+                                    selectedMetric === 'pitch' ? 'selected' : ''
                                 }`}
                                 role="button"
                                 tabIndex={0}
-                                onClick={() =>
-                                    setSelectedMetric(`formant${index + 1}` as MetricSelection)
-                                }
+                                onClick={() => setSelectedMetric('pitch')}
                                 onKeyDown={(event) => {
                                     if (event.key === 'Enter' || event.key === ' ') {
                                         event.preventDefault();
-                                        setSelectedMetric(`formant${index + 1}` as MetricSelection);
+                                        setSelectedMetric('pitch');
                                     }
                                 }}
                             >
-                                <span>F{index + 1}</span>
-                                <strong>{formatNumber(value)}</strong>
+                                <span className="metric-label pitch-color">{tr('基频F0')}</span>
+                                <strong>{formatNumber(snapshot.pitchHz, 1)}</strong>
                                 <em>Hz</em>
+                                <small>{tr('YIN / 自相关实时估计')}</small>
                             </article>
-                        ))}
-                    </div>
+                            <article
+                                className={`selectable-metric intensity ${
+                                    selectedMetric === 'intensity' ? 'selected' : ''
+                                }`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => setSelectedMetric('intensity')}
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        setSelectedMetric('intensity');
+                                    }
+                                }}
+                            >
+                                <span className="metric-label intensity-color">{tr('音强')}</span>
+                                <strong>{formatNumber(snapshot.intensityDbSpl, 1)}</strong>
+                                <em>dB SPL*</em>
+                                <small>{tr('参考声压 20 μPa')}</small>
+                            </article>
+                        </div>
 
-                    <div className="statistics">
-                        <div className="section-label">{tr('当前会话统计')}</div>
-                        <dl>
-                            <div>
-                                <dt>{tr('平均F0')}</dt>
-                                <dd>{formatNumber(snapshot.meanPitchHz, 1)} Hz</dd>
-                            </div>
-                            <div>
-                                <dt>{tr('F0范围')}</dt>
-                                <dd>
-                                    {formatNumber(snapshot.minPitchHz)}–
-                                    {formatNumber(snapshot.maxPitchHz)} Hz
-                                </dd>
-                            </div>
-                            <div>
-                                <dt>{tr('有声比例')}</dt>
-                                <dd>{snapshot.voicedPercent.toFixed(0)}%</dd>
-                            </div>
-                            <div>
-                                <dt>{tr('平均音强')}</dt>
-                                <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
-                            </div>
-                        </dl>
-                    </div>
+                        <div className="formant-metrics">
+                            {snapshot.formantsHz.map((value, index) => (
+                                <article
+                                    key={index}
+                                    className={`selectable-metric formant ${
+                                        selectedMetric === `formant${index + 1}` ? 'selected' : ''
+                                    }`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() =>
+                                        setSelectedMetric(`formant${index + 1}` as MetricSelection)
+                                    }
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            setSelectedMetric(
+                                                `formant${index + 1}` as MetricSelection
+                                            );
+                                        }
+                                    }}
+                                >
+                                    <span>F{index + 1}</span>
+                                    <strong>{formatNumber(value)}</strong>
+                                    <em>Hz</em>
+                                </article>
+                            ))}
+                        </div>
 
-                    <p className="calibration-note">
-                        *{' '}
-                        {tr(
-                            '浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1 Pa；绝对 SPL 仅作参考。'
-                        )}
-                    </p>
+                        <div className="statistics">
+                            <div className="section-label">{tr('当前会话统计')}</div>
+                            <dl>
+                                <div>
+                                    <dt>{tr('平均F0')}</dt>
+                                    <dd>{formatNumber(snapshot.meanPitchHz, 1)} Hz</dd>
+                                </div>
+                                <div>
+                                    <dt>{tr('F0范围')}</dt>
+                                    <dd>
+                                        {formatNumber(snapshot.minPitchHz)}–
+                                        {formatNumber(snapshot.maxPitchHz)} Hz
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>{tr('有声比例')}</dt>
+                                    <dd>{snapshot.voicedPercent.toFixed(0)}%</dd>
+                                </div>
+                                <div>
+                                    <dt>{tr('平均音强')}</dt>
+                                    <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
+                                </div>
+                            </dl>
+                        </div>
 
-                    <div className="panel-actions">
-                        <button onClick={onClear}>
-                            <ClearAllIcon aria-hidden="true" />
-                            {tr('清空会话')}
-                        </button>
-                        <button onClick={onExport}>
-                            <ImageOutlinedIcon aria-hidden="true" />
-                            {tr('保存当前画面')}
-                        </button>
-                    </div>
-                </section>
+                        <p className="calibration-note">
+                            *{' '}
+                            {tr(
+                                '浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1 Pa；绝对 SPL 仅作参考。'
+                            )}
+                        </p>
+
+                        <div className="panel-actions">
+                            <button onClick={onClear}>
+                                <ClearAllIcon aria-hidden="true" />
+                                {tr('清空会话')}
+                            </button>
+                            <button onClick={onExport}>
+                                <ImageOutlinedIcon aria-hidden="true" />
+                                {tr('保存当前画面')}
+                            </button>
+                        </div>
+                    </section>
+                )}
             </main>
 
             <aside className={`settings-panel ${settingsOpen ? 'open' : ''}`}>
@@ -2335,6 +2432,17 @@ export default function App({
                                     type="checkbox"
                                     checked={waveformZeroLine}
                                     onChange={(event) => setWaveformZeroLine(event.target.checked)}
+                                />
+                            </label>
+                            <label className="effect-toggle">
+                                <span>
+                                    <strong>{tr('显示脉冲')}</strong>
+                                    <small>{tr('在有声区显示周期同步的声门脉冲时刻')}</small>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={waveformPulses}
+                                    onChange={(event) => setWaveformPulses(event.target.checked)}
                                 />
                             </label>
                             <div className="palette-setting waveform-palette-setting">

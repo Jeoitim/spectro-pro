@@ -73,6 +73,9 @@ const ENGLISH: { [key: string]: string } = {
     波形粗细: 'Waveform line width',
     显示零线: 'Show zero line',
     在波形中心显示振幅基准线: 'Show an amplitude reference at the waveform center',
+    显示脉冲: 'Show pulses',
+    在有声区显示周期同步的声门脉冲时刻:
+        'Show pitch-synchronous glottal pulse times in voiced regions',
     '波形主题仅改变纯色背景和波形颜色，不影响语谱主题或整体界面模式。':
         'Waveform themes only change the solid background and waveform colors, without affecting the spectrogram theme or interface mode.',
     切换到浅色模式: 'Switch to light mode',
@@ -106,6 +109,7 @@ const ENGLISH: { [key: string]: string } = {
     时刻线位置读数: 'Readings at the playhead',
     声学概览: 'Acoustic overview',
     收起声学概览: 'Collapse acoustic overview',
+    关闭声学概览: 'Close acoustic overview',
     缩成气泡: 'Collapse to bubble',
     基频F0: 'Pitch F0',
     'YIN / 自相关实时估计': 'Live YIN / autocorrelation estimate',

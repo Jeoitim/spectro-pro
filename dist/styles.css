@@ -48,8 +48,10 @@ html,
 body,
 #app {
     min-width: 320px;
-    min-height: 100%;
+    width: 100%;
+    height: 100%;
     margin: 0;
+    overflow: hidden;
 }
 
 body {
@@ -78,7 +80,13 @@ select:focus-visible {
 }
 
 .app-shell {
-    min-height: 100vh;
+    display: flex;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .topbar {
@@ -89,6 +97,7 @@ select:focus-visible {
     grid-template-columns: auto minmax(200px, 1fr) auto auto;
     align-items: center;
     min-height: 76px;
+    flex: 0 0 auto;
     padding: 12px 24px;
     border-bottom: 1px solid var(--line);
     background: rgba(7, 10, 18, 0.97);
@@ -235,6 +244,8 @@ select:focus-visible {
     align-items: center;
     gap: 8px;
     padding-left: 18px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
 }
 
 .button,
@@ -393,8 +404,11 @@ select:focus-visible {
     position: relative;
     display: block;
     width: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
     margin: 0 auto;
     padding: 0;
+    overflow: hidden;
 }
 
 .media-panel {
@@ -437,6 +451,7 @@ select:focus-visible {
     flex: 1;
     gap: 3px;
     cursor: move;
+    touch-action: none;
     user-select: none;
 }
 
@@ -663,8 +678,12 @@ button.media-row {
 }
 
 .visualizer-card {
+    display: flex;
+    width: 100%;
+    height: 100%;
     min-width: 0;
-    min-height: calc(100vh - 76px);
+    min-height: 0;
+    flex-direction: column;
     border: 0;
     border-radius: 0;
     overflow: hidden;
@@ -677,6 +696,7 @@ button.media-row {
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     min-height: 67px;
+    flex: 0 0 auto;
     gap: 18px;
     padding: 10px 14px;
     border-bottom: 1px solid var(--line);
@@ -939,21 +959,25 @@ button.media-row {
 .praat-view {
     display: grid;
     grid-template-columns: 64px minmax(0, 1fr) 96px;
-    min-height: calc(100vh - 143px);
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
     background: #05070d;
 }
 
 .plot-stack {
     display: grid;
-    grid-template-rows: minmax(500px, calc(100vh - 176px)) 18px;
+    grid-template-rows: minmax(0, 1fr) 18px;
     min-width: 0;
+    min-height: 0;
     padding-top: 15px;
 }
 
 .axis-stack {
     display: grid;
-    grid-template-rows: minmax(500px, calc(100vh - 176px)) 18px;
+    grid-template-rows: minmax(0, 1fr) 18px;
     min-width: 0;
+    min-height: 0;
     padding-top: 15px;
 }
 
@@ -999,6 +1023,11 @@ button.media-row {
 
 #waveformInteraction {
     z-index: 2;
+}
+
+#waveformInteraction,
+#analysisOverlay {
+    touch-action: none;
 }
 
 .plot-divider {
@@ -1463,7 +1492,13 @@ button.media-row {
 .metrics-drag-handle {
     flex: 1;
     cursor: move;
+    touch-action: none;
     user-select: none;
+}
+
+.metrics-heading-actions button svg {
+    width: 14px;
+    height: 14px;
 }
 
 .media-panel.dragging,
@@ -1511,6 +1546,7 @@ button.media-row {
     color: #eef6ff;
     background: transparent;
     cursor: move;
+    touch-action: none;
 }
 
 .collapsed-reading span,
@@ -2129,9 +2165,11 @@ html.glass-effects .settings-panel {
 
 @media (max-width: 760px) {
     .topbar {
-        grid-template-columns: 1fr auto;
-        min-height: 66px;
-        padding: 10px 13px;
+        position: relative;
+        grid-template-columns: 1fr;
+        min-height: 0;
+        gap: 8px;
+        padding: 8px 10px;
     }
 
     .source-status {
@@ -2142,12 +2180,32 @@ html.glass-effects .settings-panel {
         min-width: 0;
     }
 
+    .brand-mark {
+        width: 32px;
+        height: 32px;
+        border-radius: 9px;
+    }
+
     .top-actions {
+        width: 100%;
         padding-left: 0;
+        gap: 6px;
+        justify-content: flex-start;
     }
 
     .top-actions .button.secondary {
-        display: none;
+        display: inline-flex;
+    }
+
+    .top-actions .button {
+        min-height: 34px;
+        padding: 0 10px;
+    }
+
+    .top-actions .icon-button,
+    .top-actions .language-button {
+        width: 34px;
+        height: 34px;
     }
 
     .workspace {
@@ -2156,6 +2214,9 @@ html.glass-effects .settings-panel {
 
     .visualizer-toolbar {
         grid-template-columns: minmax(0, 1fr) auto;
+        min-height: 0;
+        gap: 8px;
+        padding: 7px 8px;
     }
 
     .mode-switch {
@@ -2179,15 +2240,29 @@ html.glass-effects .settings-panel {
 
     .praat-view {
         grid-template-columns: 44px minmax(0, 1fr) 65px;
-        min-height: calc(100vh - 175px);
+        min-height: 0;
     }
 
     .plot-stack {
-        grid-template-rows: minmax(400px, calc(100vh - 206px)) 18px;
+        grid-template-rows: minmax(0, 1fr) 18px;
+        padding-top: 7px;
     }
 
     .axis-stack {
-        grid-template-rows: minmax(400px, calc(100vh - 206px)) 18px;
+        grid-template-rows: minmax(0, 1fr) 18px;
+        padding-top: 7px;
+    }
+
+    .media-panel,
+    .metrics-panel {
+        top: 12px !important;
+        max-height: calc(100dvh - 24px);
+    }
+
+    .metrics-panel {
+        right: 12px;
+        width: min(296px, calc(100vw - 24px));
+        min-width: min(258px, calc(100vw - 24px));
     }
 
     .axis-right .spl-top,

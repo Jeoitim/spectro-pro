@@ -7,6 +7,7 @@ import {
     AnalysisOptions,
     TimedAcousticAnalysis,
 } from '../analysis';
+import { detectPulseTimes } from '../pulse-analysis';
 import { generateSpectrogram } from '../spectrogram';
 import {
     ACTION_ANALYZE_ACOUSTICS,
@@ -114,10 +115,15 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                         intensity: true,
                     }
                 );
+                const timedPitch = analyses.map((analysis, index) => ({
+                    ...analysis,
+                    timeSeconds: centreSamples[index] / sampleRate,
+                }));
                 const response: AnalyzeAcousticsMessage['response'] = {
                     payload: {
                         inputBuffer: samples.buffer,
                         analyses,
+                        pulseTimes: detectPulseTimes(samples, sampleRate, timedPitch),
                     },
                 };
                 workerScope.postMessage(response, [samples.buffer as ArrayBuffer]);
@@ -163,6 +169,10 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     analysisLayers,
                     analysisCadence
                 );
+                const timedPitch = analyses.map((analysis, index) => ({
+                    ...analysis,
+                    timeSeconds: centreSamples[index] / options.sampleRate,
+                }));
 
                 const response: ComputeSpectrogramMessage['response'] = {
                     payload: {
@@ -171,6 +181,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                         spectrogramBuffer: spectrogram.buffer,
                         inputBuffer: samples.buffer,
                         analyses,
+                        pulseTimes: detectPulseTimes(samples, options.sampleRate, timedPitch),
                     },
                 };
                 workerScope.postMessage(response, [
@@ -211,6 +222,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     ...analysis,
                     timeSeconds: centreSamples[index] / options.sampleRate,
                 }));
+                const pulseTimes = detectPulseTimes(samples, options.sampleRate, analyses);
 
                 const response: AnalyzeOfflineMessage['response'] = {
                     payload: {
@@ -219,6 +231,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                         spectrogramBuffer: result.spectrogram.buffer,
                         inputBuffer: samples.buffer,
                         analyses,
+                        pulseTimes,
                     },
                 };
                 workerScope.postMessage(response, [

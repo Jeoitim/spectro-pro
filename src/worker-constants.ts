@@ -39,6 +39,7 @@ export type ComputeSpectrogramMessage = MessageBase<
         spectrogramBuffer: ArrayBufferLike;
         inputBuffer: ArrayBufferLike;
         analyses: AcousticAnalysis[];
+        pulseTimes: number[];
     }
 >;
 
@@ -55,6 +56,7 @@ export type AnalyzeOfflineMessage = MessageBase<
         spectrogramBuffer: ArrayBufferLike;
         inputBuffer: ArrayBufferLike;
         analyses: TimedAcousticAnalysis[];
+        pulseTimes: number[];
     }
 >;
 
@@ -70,6 +72,7 @@ export type AnalyzeAcousticsMessage = MessageBase<
     {
         inputBuffer: ArrayBufferLike;
         analyses: AcousticAnalysis[];
+        pulseTimes: number[];
     }
 >;
 

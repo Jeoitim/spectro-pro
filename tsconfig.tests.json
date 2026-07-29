@@ -1,19 +1,20 @@
 {
-  "compilerOptions": {
-    "esModuleInterop": true,
-    "module": "commonjs",
-    "outDir": ".test-dist",
-    "skipLibCheck": true,
-    "strict": true,
-    "target": "es2019",
-    "typeRoots": ["src/types", "node_modules/@types"]
-  },
-  "include": [
-    "src/analysis.ts",
-    "src/i18n.ts",
-    "src/math-util.ts",
-    "src/spectrogram.ts",
-    "src/types/jsfft*.d.ts",
-    "tests/synthetic-analysis.ts"
-  ]
+    "compilerOptions": {
+        "esModuleInterop": true,
+        "module": "commonjs",
+        "outDir": ".test-dist",
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "es2019",
+        "typeRoots": ["src/types", "node_modules/@types"]
+    },
+    "include": [
+        "src/analysis.ts",
+        "src/i18n.ts",
+        "src/math-util.ts",
+        "src/pulse-analysis.ts",
+        "src/spectrogram.ts",
+        "src/types/jsfft*.d.ts",
+        "tests/synthetic-analysis.ts"
+    ]
 }

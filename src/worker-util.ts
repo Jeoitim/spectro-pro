@@ -95,13 +95,16 @@ export async function offThreadGenerateSpectrogram(
     analysisOptions: AnalysisOptions,
     analysisLayers: AnalysisLayerSelection,
     analysisCadence: AnalysisComputationCadence
-): Promise<SpectrogramResult & { input: Float32Array; analyses: AcousticAnalysis[] }> {
+): Promise<
+    SpectrogramResult & { input: Float32Array; analyses: AcousticAnalysis[]; pulseTimes: number[] }
+> {
     const {
         spectrogramWindowCount,
         spectrogramOptions,
         spectrogramBuffer,
         inputBuffer,
         analyses,
+        pulseTimes,
     } = await queueTask<ComputeSpectrogramMessage>(
         ACTION_COMPUTE_SPECTROGRAM,
         {
@@ -122,6 +125,7 @@ export async function offThreadGenerateSpectrogram(
         spectrogram: new Float32Array(spectrogramBuffer),
         input: new Float32Array(inputBuffer),
         analyses,
+        pulseTimes,
     };
 }
 
@@ -133,6 +137,7 @@ export async function offThreadAnalyzeEntireFile(
     SpectrogramResult & {
         input: Float32Array;
         analyses: TimedAcousticAnalysis[];
+        pulseTimes: number[];
     }
 > {
     const {
@@ -141,6 +146,7 @@ export async function offThreadAnalyzeEntireFile(
         spectrogramBuffer,
         inputBuffer,
         analyses,
+        pulseTimes,
     } = await queueTask<AnalyzeOfflineMessage>(
         ACTION_ANALYZE_OFFLINE,
         {
@@ -157,6 +163,7 @@ export async function offThreadAnalyzeEntireFile(
         spectrogram: new Float32Array(spectrogramBuffer),
         input: new Float32Array(inputBuffer),
         analyses,
+        pulseTimes,
     };
 }
 
@@ -166,8 +173,8 @@ export async function offThreadAnalyzeAcoustics(
     centreSamples: number[],
     analysisOptions: AnalysisOptions,
     includeFormants: boolean
-): Promise<{ input: Float32Array; analyses: AcousticAnalysis[] }> {
-    const { inputBuffer, analyses } = await queueTask<AnalyzeAcousticsMessage>(
+): Promise<{ input: Float32Array; analyses: AcousticAnalysis[]; pulseTimes: number[] }> {
+    const { inputBuffer, analyses, pulseTimes } = await queueTask<AnalyzeAcousticsMessage>(
         ACTION_ANALYZE_ACOUSTICS,
         {
             samplesBuffer: samples.buffer,
@@ -182,5 +189,6 @@ export async function offThreadAnalyzeAcoustics(
     return {
         input: new Float32Array(inputBuffer),
         analyses,
+        pulseTimes,
     };
 }

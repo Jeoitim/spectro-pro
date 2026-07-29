@@ -32,47 +32,56 @@ const WAVEFORM_THEME_COLORS: Record<
         background: string;
         waveform: string;
         zeroLine: string;
+        pulses: string;
     }
 > = {
     Aurora: {
         background: '#040712',
         waveform: '#15cebe',
         zeroLine: 'rgba(21, 206, 190, 0.48)',
+        pulses: '#ff4d6d',
     },
     Praat: {
         background: '#ffffff',
         waveform: '#000000',
         zeroLine: 'rgba(50, 132, 170, 0.55)',
+        pulses: '#0033b5',
     },
     Ember: {
         background: '#08080d',
         waveform: '#ff8030',
         zeroLine: 'rgba(255, 128, 48, 0.42)',
+        pulses: '#35bfff',
     },
     Ocean: {
         background: '#030b16',
         waveform: '#5fe8d3',
         zeroLine: 'rgba(95, 232, 211, 0.42)',
+        pulses: '#ffc247',
     },
     'Heated Metal': {
         background: '#000000',
         waveform: '#ff0000',
         zeroLine: 'rgba(255, 0, 0, 0.42)',
+        pulses: '#00cfff',
     },
     'Audacity®': {
         background: '#bfbfbf',
         waveform: '#4c99ff',
         zeroLine: 'rgba(76, 153, 255, 0.55)',
+        pulses: '#6d1299',
     },
     Spectrum: {
         background: '#000080',
         waveform: '#00be00',
         zeroLine: 'rgba(0, 190, 0, 0.5)',
+        pulses: '#ffd400',
     },
     'Black to White': {
         background: '#000000',
         waveform: '#ffffff',
         zeroLine: 'rgba(255, 255, 255, 0.32)',
+        pulses: '#00bfff',
     },
 };
 
@@ -80,6 +89,7 @@ export interface WaveformDisplayOptions {
     gain: number;
     lineWidth: number;
     showZeroLine: boolean;
+    showPulses: boolean;
 }
 
 export interface WaveformSelection {
@@ -193,6 +203,8 @@ export class WaveformRenderer {
 
     private offlinePeaks: WaveformPeakCache | null = null;
 
+    private offlinePulseTimes: number[] = [];
+
     private liveSamples = new Float32Array(1);
 
     private liveSampleRate = 48000;
@@ -202,6 +214,8 @@ export class WaveformRenderer {
     private liveLength = 0;
 
     private liveEndTimeSeconds = 0;
+
+    private livePulseTimes: number[] = [];
 
     private source: 'none' | 'offline' | 'live' = 'none';
 
@@ -213,6 +227,7 @@ export class WaveformRenderer {
         gain: 1,
         lineWidth: 1,
         showZeroLine: true,
+        showPulses: false,
     };
 
     constructor(canvas: HTMLCanvasElement) {
@@ -251,12 +266,17 @@ export class WaveformRenderer {
         this.source = 'offline';
     }
 
+    setOfflinePulseTimes(pulseTimes: number[]) {
+        this.offlinePulseTimes = pulseTimes;
+    }
+
     startLive(sampleRate: number, historySeconds: number) {
         this.liveSampleRate = sampleRate;
         this.liveSamples = new Float32Array(Math.max(1, Math.ceil(sampleRate * historySeconds)));
         this.liveWriteIndex = 0;
         this.liveLength = 0;
         this.liveEndTimeSeconds = 0;
+        this.livePulseTimes = [];
         this.source = 'live';
     }
 
@@ -272,11 +292,26 @@ export class WaveformRenderer {
         this.liveEndTimeSeconds = endTimeSeconds;
     }
 
+    appendLivePulseTimes(pulseTimes: number[]) {
+        const oldestTime = this.liveEndTimeSeconds - this.liveSamples.length / this.liveSampleRate;
+        for (const time of pulseTimes) {
+            const previous = this.livePulseTimes[this.livePulseTimes.length - 1];
+            if (time >= oldestTime && (previous === undefined || time - previous > 0.0001)) {
+                this.livePulseTimes.push(time);
+            }
+        }
+        while (this.livePulseTimes.length > 0 && this.livePulseTimes[0] < oldestTime) {
+            this.livePulseTimes.shift();
+        }
+    }
+
     clear() {
         this.source = 'none';
         this.offlineSamples = null;
         this.offlinePeaks = null;
+        this.offlinePulseTimes = [];
         this.liveLength = 0;
+        this.livePulseTimes = [];
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
@@ -334,6 +369,30 @@ export class WaveformRenderer {
         ctx.stroke();
 
         const xForTime = (seconds: number) => ((seconds - viewStartSeconds) / duration) * width;
+        if (this.displayOptions.showPulses) {
+            const pulseTimes =
+                this.source === 'offline' ? this.offlinePulseTimes : this.livePulseTimes;
+            ctx.strokeStyle = theme.pulses;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            let previousPixel = -1;
+            for (const time of pulseTimes) {
+                if (time < viewStartSeconds || time > viewEndSeconds) {
+                    continue;
+                }
+                const pixel = Math.round(xForTime(time));
+                if (pixel === previousPixel) {
+                    continue;
+                }
+                const x = pixel + 0.5;
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                previousPixel = pixel;
+            }
+            ctx.stroke();
+        }
+
         if (selection !== null) {
             const selectionTheme = getPlotSelectionTheme(this.themeName);
             const left = clamp(xForTime(selection.startSeconds), 0, width);

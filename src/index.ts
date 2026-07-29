@@ -63,6 +63,7 @@ interface ProcessRequest {
 interface OfflineModeCache {
     spectrogram: Float32Array;
     analyses: AnalysisPoint[];
+    pulseTimes: number[];
     windowCount: number;
     windowSize: number;
     windowStepSize: number;
@@ -1122,6 +1123,7 @@ class SpectroEngine {
             const cache: OfflineModeCache = {
                 spectrogram: result.spectrogram,
                 analyses: result.analyses,
+                pulseTimes: result.pulseTimes,
                 windowCount: result.windowCount,
                 windowSize: result.options.windowSize,
                 windowStepSize: result.options.windowStepSize,
@@ -1197,9 +1199,11 @@ class SpectroEngine {
                     timeSeconds: centreSamples[index] / item.sampleRate,
                 };
             });
+            cache.pulseTimes = result.pulseTimes;
             cache.analysisRevision = analysisRevision;
             if (this.activeMediaId === item.id && this.mode === mode) {
                 this.analysisHistory = cache.analyses;
+                this.waveformRenderer.setOfflinePulseTimes(cache.pulseTimes);
                 this.rebuildStatisticsFromHistory();
                 this.updateSnapshotAtPlaybackOffset(true);
                 this.overlayDirty = true;
@@ -1217,6 +1221,7 @@ class SpectroEngine {
         this.sampleRate = item.sampleRate;
         this.analysisHistory = cache.analyses;
         this.waveformRenderer.setOfflineSamples(item.samples, item.sampleRate);
+        this.waveformRenderer.setOfflinePulseTimes(cache.pulseTimes);
         this.spectrogramBuffer = new Circular2DBuffer(
             Float32Array,
             Math.max(2, cache.windowCount),
@@ -1565,6 +1570,11 @@ class SpectroEngine {
             });
             this.spectrogramBuffer.enqueue(result.spectrogram);
             this.renderer.updateSpectrogram(this.spectrogramBuffer);
+            const inputStartTimeSeconds =
+                request.endTimeSeconds - request.samples.length / request.sampleRate;
+            this.waveformRenderer.appendLivePulseTimes(
+                result.pulseTimes.map((time) => inputStartTimeSeconds + time)
+            );
             const firstCentreSample = samplesStart + config.windowSize / 2;
             const firstTimeSeconds =
                 request.endTimeSeconds -

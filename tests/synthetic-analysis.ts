@@ -10,6 +10,7 @@ import {
 } from '../src/analysis';
 import { translate } from '../src/i18n';
 import { frequencyToScale, scaleToFrequency } from '../src/math-util';
+import { detectPulseTimes } from '../src/pulse-analysis';
 import { generateSpectrogram, Scale, SpectrogramWindowFunction } from '../src/spectrogram';
 
 const SAMPLE_RATE = 48000;
@@ -41,6 +42,37 @@ function deterministicNoise(length: number) {
         result[i] = (state / 0xffffffff) * 2 - 1;
     }
     return result;
+}
+
+function testPitchSynchronousPulses() {
+    const frequencyHz = 120;
+    const durationSeconds = 1;
+    const samples = new Float32Array(SAMPLE_RATE * durationSeconds);
+    for (let index = 0; index < samples.length; index += 1) {
+        const time = index / SAMPLE_RATE;
+        samples[index] =
+            0.65 * Math.sin(2 * Math.PI * frequencyHz * time) +
+            0.18 * Math.sin(4 * Math.PI * frequencyHz * time + 0.2);
+    }
+    const pitchPoints = new Array(97).fill(0).map((_, index) => ({
+        timeSeconds: 0.02 + index * 0.01,
+        pitchHz: frequencyHz,
+        pitchConfidence: 0.95,
+    }));
+    const pulses = detectPulseTimes(samples, SAMPLE_RATE, pitchPoints);
+    if (pulses.length < 110 || pulses.length > 125) {
+        throw new Error(`pulse count: expected about 120, received ${pulses.length}`);
+    }
+    const periods = pulses.slice(1).map((time, index) => time - pulses[index]);
+    const meanPeriod = periods.reduce((sum, period) => sum + period, 0) / periods.length;
+    assertNear('pulse period', 1 / meanPeriod, frequencyHz, 0.5);
+
+    const noPulses = detectPulseTimes(samples, SAMPLE_RATE, [
+        { timeSeconds: 0.5, pitchHz: null, pitchConfidence: 0 },
+    ]);
+    if (noPulses.length !== 0) {
+        throw new Error(`unvoiced pulse suppression: expected 0, received ${noPulses.length}`);
+    }
 }
 
 function applyResonator(
@@ -412,6 +444,7 @@ function testLocalization() {
 
 testPitch('yin');
 testPitch('autocorrelation');
+testPitchSynchronousPulses();
 testIntensity();
 testRealtimeAnalysisPrecision();
 testFormants();
