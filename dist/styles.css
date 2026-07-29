@@ -687,7 +687,7 @@ button.media-row {
     flex-direction: column;
     border: 0;
     border-radius: 0;
-    overflow: hidden;
+    overflow-y: auto;
     background: #05070d;
     box-shadow: none;
 }
@@ -1819,12 +1819,14 @@ button.media-row {
     z-index: 60;
     top: 88px;
     right: 18px;
-    display: grid;
+    bottom: 18px;
+    display: flex;
     width: min(460px, calc(100vw - 36px));
-    max-height: calc(100vh - 106px);
+    min-height: 0;
     gap: 17px;
+    flex-direction: column;
     padding: 22px;
-    overflow-y: auto;
+    overflow: hidden;
     transform: translateX(calc(100% + 30px));
     opacity: 0;
     transition: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -2271,6 +2273,14 @@ html.glass-effects .settings-panel {
         right: 12px;
         width: min(296px, calc(100vw - 24px));
         min-width: min(258px, calc(100vw - 24px));
+    }
+
+    .settings-panel {
+        top: max(12px, env(safe-area-inset-top));
+        right: 12px;
+        bottom: max(12px, env(safe-area-inset-bottom));
+        width: calc(100vw - 24px);
+        padding: 16px;
     }
 
     .axis-right .spl-top,
