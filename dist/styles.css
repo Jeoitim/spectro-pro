@@ -1209,9 +1209,14 @@ button.media-row {
     position: absolute;
     z-index: 5;
     display: grid;
-    min-width: 126px;
+    min-width: min(126px, calc(100% - 16px));
+    max-width: calc(100% - 16px);
+    max-height: calc(100% - 16px);
+    box-sizing: border-box;
     gap: 3px;
     padding: 9px 11px;
+    overflow: auto;
+    overflow-wrap: anywhere;
     border: 1px solid rgba(162, 180, 211, 0.25);
     border-radius: 8px;
     color: #cbd5e4;
@@ -2373,6 +2378,24 @@ html.glass-effects .settings-panel {
 
     .axis {
         font-size: 9px;
+    }
+
+    .axis-cursor-value {
+        padding: 2px 4px;
+        font-size: 11px;
+    }
+
+    .cursor-tooltip {
+        gap: 2px;
+        padding: 7px 9px;
+    }
+
+    .cursor-tooltip strong {
+        font-size: 12px;
+    }
+
+    .cursor-tooltip span {
+        font-size: 10px;
     }
 
     .axis-title {

@@ -595,6 +595,7 @@ export default function App({
     });
     const plotContainerRef = useRef<HTMLDivElement | null>(null);
     const axisViewRef = useRef<HTMLDivElement | null>(null);
+    const cursorTooltipRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
@@ -1707,6 +1708,51 @@ export default function App({
         playheadRatio !== null && playheadRatio >= 0 && playheadRatio <= 1
             ? { left: `${playheadRatio * 100}%` }
             : undefined;
+    useLayoutEffect(() => {
+        const tooltip = cursorTooltipRef.current;
+        if (cursor === null || tooltip === null) {
+            return undefined;
+        }
+        const stage = tooltip.parentElement;
+        if (stage === null) {
+            return undefined;
+        }
+
+        const positionTooltip = () => {
+            const edge = 8;
+            const gap = 12;
+            const stageWidth = stage.clientWidth;
+            const stageHeight = stage.clientHeight;
+            const tooltipWidth = tooltip.offsetWidth;
+            const tooltipHeight = tooltip.offsetHeight;
+            const anchorX = cursor.x * stageWidth;
+            const anchorY = cursor.y * stageHeight;
+            const preferredLeft = anchorX + gap;
+            const preferredTop = anchorY + gap;
+            const left =
+                preferredLeft + tooltipWidth <= stageWidth - edge
+                    ? preferredLeft
+                    : anchorX - tooltipWidth - gap;
+            const top =
+                preferredTop + tooltipHeight <= stageHeight - edge
+                    ? preferredTop
+                    : anchorY - tooltipHeight - gap;
+            tooltip.style.left = `${Math.min(
+                Math.max(edge, left),
+                Math.max(edge, stageWidth - tooltipWidth - edge)
+            )}px`;
+            tooltip.style.top = `${Math.min(
+                Math.max(edge, top),
+                Math.max(edge, stageHeight - tooltipHeight - edge)
+            )}px`;
+        };
+
+        positionTooltip();
+        const observer = new ResizeObserver(positionTooltip);
+        observer.observe(stage);
+        observer.observe(tooltip);
+        return () => observer.disconnect();
+    }, [cursor, locale, selection]);
     const navigateScrollbar = useCallback(
         (clientX: number, track: HTMLDivElement) => {
             if (zoom <= 1 || maximumTimeOffset <= 0) {
@@ -2423,17 +2469,9 @@ export default function App({
                                     </div>
                                     {cursor && (
                                         <div
+                                            ref={cursorTooltipRef}
                                             className="cursor-tooltip"
-                                            style={{
-                                                left: `${Math.min(
-                                                    78,
-                                                    Math.max(2, cursor.x * 100)
-                                                )}%`,
-                                                top: `${Math.min(
-                                                    72,
-                                                    Math.max(2, cursor.y * 100)
-                                                )}%`,
-                                            }}
+                                            style={{ left: 8, top: 8 }}
                                         >
                                             <strong>{cursor.timeSeconds.toFixed(3)} s</strong>
                                             <span>{cursor.frequencyHz.toFixed(0)} Hz</span>
