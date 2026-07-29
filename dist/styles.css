@@ -1826,7 +1826,10 @@ button.media-row {
     gap: 17px;
     flex-direction: column;
     padding: 22px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     transform: translateX(calc(100% + 30px));
     opacity: 0;
     transition: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
