@@ -1307,14 +1307,12 @@ export default function App({
                                 >
                                     <i /> {tr('基频')}
                                 </button>
-                                {mode !== 'narrowband' && (
-                                    <button
-                                        className={formantsVisible ? 'on formants' : ''}
-                                        onClick={() => setFormantsVisible(!formantsVisible)}
-                                    >
-                                        <i /> {tr('共振峰')}
-                                    </button>
-                                )}
+                                <button
+                                    className={formantsVisible ? 'on formants' : ''}
+                                    onClick={() => setFormantsVisible(!formantsVisible)}
+                                >
+                                    <i /> {tr('共振峰')}
+                                </button>
                                 <button
                                     className={intensityVisible ? 'on intensity' : ''}
                                     onClick={() => setIntensityVisible(!intensityVisible)}
@@ -1766,35 +1764,31 @@ export default function App({
                         </article>
                     </div>
 
-                    {mode !== 'narrowband' && (
-                        <div className="formant-metrics">
-                            {snapshot.formantsHz.map((value, index) => (
-                                <article
-                                    key={index}
-                                    className={`selectable-metric formant ${
-                                        selectedMetric === `formant${index + 1}` ? 'selected' : ''
-                                    }`}
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={() =>
-                                        setSelectedMetric(`formant${index + 1}` as MetricSelection)
+                    <div className="formant-metrics">
+                        {snapshot.formantsHz.map((value, index) => (
+                            <article
+                                key={index}
+                                className={`selectable-metric formant ${
+                                    selectedMetric === `formant${index + 1}` ? 'selected' : ''
+                                }`}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() =>
+                                    setSelectedMetric(`formant${index + 1}` as MetricSelection)
+                                }
+                                onKeyDown={(event) => {
+                                    if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        setSelectedMetric(`formant${index + 1}` as MetricSelection);
                                     }
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Enter' || event.key === ' ') {
-                                            event.preventDefault();
-                                            setSelectedMetric(
-                                                `formant${index + 1}` as MetricSelection
-                                            );
-                                        }
-                                    }}
-                                >
-                                    <span>F{index + 1}</span>
-                                    <strong>{formatNumber(value)}</strong>
-                                    <em>Hz</em>
-                                </article>
-                            ))}
-                        </div>
-                    )}
+                                }}
+                            >
+                                <span>F{index + 1}</span>
+                                <strong>{formatNumber(value)}</strong>
+                                <em>Hz</em>
+                            </article>
+                        ))}
+                    </div>
 
                     <div className="statistics">
                         <div className="section-label">{tr('当前会话统计')}</div>
