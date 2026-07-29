@@ -10,11 +10,18 @@ module.exports = {
     },
     resolve: {
         extensions: ['.ts', '.tsx', '.js', '.json'],
+        alias: {
+            'helper-worker$': path.resolve(__dirname, 'src/workers/helper.worker.ts'),
+            'ml-matrix$': path.resolve(__dirname, 'node_modules/ml-matrix/matrix.js'),
+        },
     },
     devServer: {
-        contentBase: path.join(__dirname, 'dist'),
-        compress: true,
+        compress: false,
+        host: '127.0.0.1',
         port: 9000,
+        static: {
+            directory: path.join(__dirname, 'dist'),
+        },
     },
     module: {
         rules: [

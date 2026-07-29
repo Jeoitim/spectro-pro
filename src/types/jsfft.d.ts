@@ -11,7 +11,7 @@ declare module 'jsfft' {
         | Float64Array;
 
     // eslint-disable-next-line import/no-unresolved
-    import ComplexArrayBase, { ComplexNumber } from 'jsfft/complex_array';
+    import { ComplexNumber } from 'jsfft/complex_array';
 
     export function FFT<T extends TypedArray = Float32Array>(
         input: ComplexArray<T> | Iterable<number>
@@ -24,7 +24,13 @@ declare module 'jsfft' {
         filterer: (value: ComplexNumber, i: number, n: number) => void
     ): ComplexArray<T>;
 
-    export class ComplexArray<T extends TypedArray> extends ComplexArrayBase<T> {
+    export class ComplexArray<T extends TypedArray> {
+        public readonly real: T;
+
+        public readonly imag: T;
+
+        public readonly length: number;
+
         FFT(): ComplexArray<T>;
 
         InvFFT(): ComplexArray<T>;

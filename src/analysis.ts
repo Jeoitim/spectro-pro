@@ -1,4 +1,6 @@
+import { FFT, InvFFT } from 'jsfft';
 import { clamp } from './math-util';
+import { EigenvalueDecomposition, Matrix } from 'ml-matrix';
 
 export type PitchAlgorithm = 'autocorrelation' | 'yin';
 
@@ -21,6 +23,8 @@ export interface AcousticAnalysis {
     intensityDbSpl: number;
     formantsHz: (number | null)[];
     formantBandwidthsHz: (number | null)[];
+    formantIntensity: number;
+    drawFormants: boolean;
 }
 
 export interface TimedAcousticAnalysis extends AcousticAnalysis {
@@ -30,6 +34,20 @@ export interface TimedAcousticAnalysis extends AcousticAnalysis {
 interface Complex {
     re: number;
     im: number;
+}
+
+export interface FormantFrameAnalysis {
+    timeSeconds: number;
+    formantsHz: (number | null)[];
+    formantBandwidthsHz: (number | null)[];
+    formantIntensity: number;
+}
+
+interface PreparedFormantSignal {
+    samples: Float64Array;
+    sampleRate: number;
+    firstSampleTimeSeconds: number;
+    durationSeconds: number;
 }
 
 const DEFAULT_OPTIONS: AnalysisOptions = {
@@ -247,73 +265,50 @@ function detectPitchYin(
     };
 }
 
-function complexAdd(a: Complex, b: Complex): Complex {
-    return { re: a.re + b.re, im: a.im + b.im };
-}
-
-function complexMultiply(a: Complex, b: Complex): Complex {
-    return { re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re };
-}
-
-function complexDivide(a: Complex, b: Complex): Complex {
-    const denominator = b.re * b.re + b.im * b.im + 1e-18;
-    return {
-        re: (a.re * b.re + a.im * b.im) / denominator,
-        im: (a.im * b.re - a.re * b.im) / denominator,
-    };
-}
-
-function evaluatePolynomial(coefficients: Float64Array, x: Complex): Complex {
-    let result = { re: coefficients[0], im: 0 };
-    for (let i = 1; i < coefficients.length; i += 1) {
-        result = complexAdd(complexMultiply(result, x), { re: coefficients[i], im: 0 });
-    }
-    return result;
-}
-
-function polynomialRoots(coefficients: Float64Array): Complex[] {
-    const degree = coefficients.length - 1;
-    const roots: Complex[] = [];
-    const radius = 0.96;
-    for (let i = 0; i < degree; i += 1) {
-        const angle = (2 * Math.PI * i) / degree + 0.17;
-        roots.push({ re: radius * Math.cos(angle), im: radius * Math.sin(angle) });
-    }
-
-    for (let iteration = 0; iteration < 180; iteration += 1) {
-        let maximumChange = 0;
-        for (let i = 0; i < degree; i += 1) {
-            let denominator = { re: 1, im: 0 };
-            for (let j = 0; j < degree; j += 1) {
-                if (i !== j) {
-                    denominator = complexMultiply(denominator, {
-                        re: roots[i].re - roots[j].re,
-                        im: roots[i].im - roots[j].im,
-                    });
-                }
-            }
-            const correction = complexDivide(
-                evaluatePolynomial(coefficients, roots[i]),
-                denominator
-            );
-            roots[i] = {
-                re: roots[i].re - correction.re,
-                im: roots[i].im - correction.im,
-            };
-            maximumChange = Math.max(
-                maximumChange,
-                Math.sqrt(correction.re ** 2 + correction.im ** 2)
-            );
-        }
-        if (maximumChange < 1e-7) {
-            break;
-        }
-    }
-    return roots;
-}
-
 function sinc(value: number) {
     return Math.abs(value) < 1e-12 ? 1 : Math.sin(Math.PI * value) / (Math.PI * value);
+}
+
+function praatAntiAliasFilter(samples: Float32Array, sampleRateFactor: number) {
+    const padding = 1000;
+    let fftSize = 1;
+    while (fftSize < samples.length + 2 * padding) {
+        fftSize *= 2;
+    }
+    const padded = new Float64Array(fftSize);
+    padded.set(samples, padding);
+    const spectrum = FFT<Float64Array>(padded);
+    const firstDiscardedBin = Math.ceil((Math.floor(sampleRateFactor * fftSize) - 1) / 2);
+    for (let bin = firstDiscardedBin; bin <= fftSize - firstDiscardedBin; bin += 1) {
+        spectrum.real[bin] = 0;
+        spectrum.imag[bin] = 0;
+    }
+    return InvFFT(spectrum).real.subarray(padding, padding + samples.length);
+}
+
+function praatSincInterpolate(samples: Float64Array, oneBasedIndex: number, maximumDepth: number) {
+    if (oneBasedIndex < 1) {
+        return samples[0];
+    }
+    if (oneBasedIndex > samples.length) {
+        return samples[samples.length - 1];
+    }
+    const middleLeft = Math.floor(oneBasedIndex);
+    if (oneBasedIndex === middleLeft) {
+        return samples[middleLeft - 1];
+    }
+    const middleRight = middleLeft + 1;
+    const depth = Math.min(maximumDepth, middleRight - 1, samples.length - middleLeft);
+    const left = middleRight - depth;
+    const right = middleLeft + depth;
+    const windowDepth = depth + 0.5;
+    let result = 0;
+    for (let sampleIndex = left; sampleIndex <= right; sampleIndex += 1) {
+        const distance = sampleIndex - oneBasedIndex;
+        const window = 0.5 + 0.5 * Math.cos((Math.PI * distance) / windowDepth);
+        result += samples[sampleIndex - 1] * sinc(distance) * window;
+    }
+    return result;
 }
 
 export function resampleForFormants(
@@ -325,113 +320,233 @@ export function resampleForFormants(
         return new Float64Array(samples);
     }
 
-    const ratio = sampleRate / targetSampleRate;
-    const outputLength = Math.max(1, Math.floor(samples.length / ratio));
+    const inputSamplePeriod = 1 / sampleRate;
+    const durationSeconds = samples.length * inputSamplePeriod;
+    const outputLength = Math.max(1, Math.round(durationSeconds * targetSampleRate));
     const output = new Float64Array(outputLength);
-    const halfTaps = 32;
-    const cutoff = Math.min(1, targetSampleRate / sampleRate) * 0.94;
+    const inputFirstSampleTime = 0.5 * inputSamplePeriod;
+    const outputFirstSampleTime = 0.5 * (durationSeconds - (outputLength - 1) / targetSampleRate);
+    const interpolationDepth = 50;
+    const sampleRateFactor = targetSampleRate / sampleRate;
+    const filtered =
+        sampleRateFactor < 1
+            ? praatAntiAliasFilter(samples, sampleRateFactor)
+            : new Float64Array(samples);
 
     for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
-        const centre = outputIndex * ratio;
-        const first = Math.max(0, Math.floor(centre) - halfTaps + 1);
-        const last = Math.min(samples.length - 1, Math.floor(centre) + halfTaps);
-        let sum = 0;
-        let weightSum = 0;
-        for (let inputIndex = first; inputIndex <= last; inputIndex += 1) {
-            const distance = inputIndex - centre;
-            const normalizedDistance = distance / halfTaps;
-            const window =
-                0.42 +
-                0.5 * Math.cos(Math.PI * normalizedDistance) +
-                0.08 * Math.cos(2 * Math.PI * normalizedDistance);
-            const weight = cutoff * sinc(cutoff * distance) * window;
-            sum += samples[inputIndex] * weight;
-            weightSum += weight;
-        }
-        output[outputIndex] = sum / Math.max(1e-12, weightSum);
+        const outputTime = outputFirstSampleTime + outputIndex / targetSampleRate;
+        const oneBasedIndex = (outputTime - inputFirstSampleTime) / inputSamplePeriod + 1;
+        output[outputIndex] = praatSincInterpolate(filtered, oneBasedIndex, interpolationDepth);
     }
     return output;
 }
 
-function burgLpc(signal: Float64Array, order: number) {
-    const coefficients = new Float64Array(order + 1);
-    coefficients[0] = 1;
+function praatBurgCoefficients(signal: Float64Array, order: number) {
+    const coefficients = new Float64Array(order);
     if (signal.length <= order + 1) {
-        return coefficients;
+        return null;
     }
 
-    let forward = new Float64Array(signal);
-    let backward = new Float64Array(signal);
+    const forward = new Float64Array(signal.length);
+    const backward = new Float64Array(signal.length);
+    const previousCoefficients = new Float64Array(order);
+    forward[0] = signal[0];
+    backward[signal.length - 2] = signal[signal.length - 1];
+    for (let index = 1; index <= signal.length - 2; index += 1) {
+        forward[index] = signal[index];
+        backward[index - 1] = signal[index];
+    }
 
-    for (let currentOrder = 1; currentOrder <= order; currentOrder += 1) {
+    for (let currentOrder = 0; currentOrder < order; currentOrder += 1) {
         let numerator = 0;
         let denominator = 0;
-        for (let i = currentOrder; i < signal.length; i += 1) {
-            numerator += forward[i] * backward[i - 1];
-            denominator += forward[i] * forward[i] + backward[i - 1] * backward[i - 1];
+        for (let index = 0; index < signal.length - currentOrder - 1; index += 1) {
+            numerator += forward[index] * backward[index];
+            denominator += forward[index] * forward[index] + backward[index] * backward[index];
         }
-        const reflection = (-2 * numerator) / Math.max(1e-18, denominator);
-        const previousCoefficients = new Float64Array(coefficients);
-        coefficients[currentOrder] = reflection;
-        for (let i = 1; i < currentOrder; i += 1) {
-            coefficients[i] =
-                previousCoefficients[i] + reflection * previousCoefficients[currentOrder - i];
+        if (!(denominator > 0) || !Number.isFinite(denominator)) {
+            return null;
         }
 
-        const nextForward = new Float64Array(forward);
-        const nextBackward = new Float64Array(backward);
-        for (let i = currentOrder; i < signal.length; i += 1) {
-            nextForward[i] = forward[i] + reflection * backward[i - 1];
-            nextBackward[i - 1] = backward[i - 1] + reflection * forward[i];
+        coefficients[currentOrder] = (2 * numerator) / denominator;
+        if (!Number.isFinite(coefficients[currentOrder])) {
+            return null;
         }
-        forward = nextForward;
-        backward = nextBackward;
+        for (let index = 0; index < currentOrder; index += 1) {
+            coefficients[index] =
+                previousCoefficients[index] -
+                coefficients[currentOrder] * previousCoefficients[currentOrder - index - 1];
+        }
+
+        if (currentOrder + 1 < order) {
+            previousCoefficients.set(coefficients);
+            for (let index = 0; index < signal.length - currentOrder - 2; index += 1) {
+                forward[index] -= coefficients[currentOrder] * backward[index];
+                backward[index] =
+                    backward[index + 1] - coefficients[currentOrder] * forward[index + 1];
+            }
+        }
     }
     return coefficients;
 }
 
-function estimateFormants(
+function evaluatePolynomialAndDerivative(coefficients: Float64Array, root: Complex) {
+    let value = { re: coefficients[0], im: 0 };
+    let derivative = { re: 0, im: 0 };
+    for (let index = 1; index < coefficients.length; index += 1) {
+        derivative = {
+            re: derivative.re * root.re - derivative.im * root.im + value.re,
+            im: derivative.re * root.im + derivative.im * root.re + value.im,
+        };
+        value = {
+            re: value.re * root.re - value.im * root.im + coefficients[index],
+            im: value.re * root.im + value.im * root.re,
+        };
+    }
+    return { value, derivative };
+}
+
+function polishAndValidateRoot(coefficients: Float64Array, initialRoot: Complex) {
+    let root = initialRoot;
+    for (let iteration = 0; iteration < 12; iteration += 1) {
+        const { value, derivative } = evaluatePolynomialAndDerivative(coefficients, root);
+        const denominator = derivative.re * derivative.re + derivative.im * derivative.im;
+        if (!(denominator > 1e-28)) {
+            break;
+        }
+        const correction = {
+            re: (value.re * derivative.re + value.im * derivative.im) / denominator,
+            im: (value.im * derivative.re - value.re * derivative.im) / denominator,
+        };
+        root = { re: root.re - correction.re, im: root.im - correction.im };
+        if (Math.hypot(correction.re, correction.im) < 1e-12 * (1 + Math.hypot(root.re, root.im))) {
+            break;
+        }
+    }
+
+    const { value } = evaluatePolynomialAndDerivative(coefficients, root);
+    const magnitude = Math.hypot(root.re, root.im);
+    let scale = 0;
+    for (let index = 0; index < coefficients.length; index += 1) {
+        scale += Math.abs(coefficients[index]) * magnitude ** (coefficients.length - index - 1);
+    }
+    const relativeResidual = Math.hypot(value.re, value.im) / Math.max(1e-30, scale);
+    return Number.isFinite(relativeResidual) && relativeResidual <= 1e-8 ? root : null;
+}
+
+function polynomialRoots(coefficients: Float64Array) {
+    const degree = coefficients.length - 1;
+    const ascending = new Float64Array(coefficients).reverse();
+    const companion = Matrix.zeros(degree, degree);
+    for (let row = 0; row < degree; row += 1) {
+        companion.set(row, degree - 1, -ascending[row] / ascending[degree]);
+        if (row > 0) {
+            companion.set(row, row - 1, 1);
+        }
+    }
+    const decomposition = new EigenvalueDecomposition(companion);
+    const real = decomposition.realEigenvalues;
+    const imaginary = decomposition.imaginaryEigenvalues;
+    const roots: Complex[] = [];
+    for (let index = 0; index < degree; index += 1) {
+        const root = polishAndValidateRoot(coefficients, {
+            re: real[index],
+            im: imaginary[index],
+        });
+        if (root !== null) {
+            roots.push(root);
+        }
+    }
+    return roots;
+}
+
+function prepareFormantSignal(
     samples: Float32Array,
     sampleRate: number,
     options: AnalysisOptions
-): { frequencies: (number | null)[]; bandwidths: (number | null)[] } {
+): PreparedFormantSignal {
+    const targetSampleRate = Math.min(sampleRate, Math.max(2000, options.formantCeilingHz * 2));
+    const resampled = resampleForFormants(samples, sampleRate, targetSampleRate);
+    const emphasis = Math.exp((-2 * Math.PI * options.preEmphasisFromHz) / targetSampleRate);
+    for (let index = resampled.length - 1; index >= 1; index -= 1) {
+        resampled[index] -= emphasis * resampled[index - 1];
+    }
+    const sourceDurationSeconds = samples.length * (1 / sampleRate);
+    return {
+        samples: resampled,
+        sampleRate: targetSampleRate,
+        firstSampleTimeSeconds:
+            0.5 * (sourceDurationSeconds - (resampled.length - 1) / targetSampleRate),
+        durationSeconds: resampled.length * (1 / targetSampleRate),
+    };
+}
+
+function estimatePreparedFormants(
+    prepared: PreparedFormantSignal,
+    centreTimeSeconds: number,
+    options: AnalysisOptions
+): FormantFrameAnalysis {
     const maximumFormants = clamp(Math.round(options.maximumFormants * 2) / 2, 1, 8);
     const poleCount = Math.max(2, Math.round(maximumFormants * 2));
     const empty = () => new Array(Math.ceil(maximumFormants)).fill(null);
-    if (samples.length < 64) {
-        return { frequencies: empty(), bandwidths: empty() };
+    const emptyResult = (intensity = 0): FormantFrameAnalysis => ({
+        timeSeconds: centreTimeSeconds,
+        formantsHz: empty(),
+        formantBandwidthsHz: empty(),
+        formantIntensity: intensity,
+    });
+    if (prepared.samples.length < poleCount + 1) {
+        return emptyResult();
     }
 
     const actualWindowSeconds = options.formantWindowLengthSeconds * 2;
-    const sourceWindowLength = Math.min(
-        samples.length,
-        Math.max(64, Math.round(actualWindowSeconds * sampleRate))
+    const nominalWindowLength = Math.max(
+        poleCount + 1,
+        Math.floor(actualWindowSeconds / (1 / prepared.sampleRate))
     );
-    const sourceWindow = samples.subarray(samples.length - sourceWindowLength);
-    const formantSampleRate = Math.min(sampleRate, Math.max(2000, options.formantCeilingHz * 2));
-    const resampled = resampleForFormants(sourceWindow, sampleRate, formantSampleRate);
-
-    const preEmphasisCoefficient = Math.exp(
-        (-2 * Math.PI * options.preEmphasisFromHz) / formantSampleRate
+    const halfWindowLength = Math.floor(nominalWindowLength / 2);
+    const lowIndex = Math.floor(
+        (centreTimeSeconds - prepared.firstSampleTimeSeconds) / (1 / prepared.sampleRate)
     );
-    const signal = new Float64Array(resampled.length);
-    let energy = 0;
-    for (let i = 0; i < resampled.length; i += 1) {
-        const previous = i === 0 ? 0 : resampled[i - 1];
-        const emphasized = resampled[i] - preEmphasisCoefficient * previous;
-        const position =
-            resampled.length === 1 ? 0 : (i - (resampled.length - 1) / 2) / (resampled.length - 1);
-        const gaussianLikeWindow = Math.exp(-48 * position * position);
-        signal[i] = emphasized * gaussianLikeWindow;
-        energy += signal[i] * signal[i];
-    }
-    if (Math.sqrt(energy / Math.max(1, signal.length)) < 0.00008) {
-        return { frequencies: empty(), bandwidths: empty() };
+    const startIndex = Math.max(0, lowIndex + 1 - halfWindowLength);
+    const endIndex = Math.min(prepared.samples.length - 1, lowIndex + halfWindowLength);
+    const actualWindowLength = endIndex - startIndex + 1;
+    if (actualWindowLength < poleCount + 1) {
+        return emptyResult();
     }
 
-    const lpc = burgLpc(signal, poleCount);
+    const signal = new Float64Array(actualWindowLength);
+    const midpoint = 0.5 * (nominalWindowLength + 1);
+    const edge = Math.exp(-12);
+    let maximumIntensity = 0;
+    for (let index = 0; index < actualWindowLength; index += 1) {
+        const sample = prepared.samples[startIndex + index];
+        maximumIntensity = Math.max(maximumIntensity, sample * sample);
+        const praatIndex = index + 1;
+        const window =
+            (Math.exp(
+                (-48 * (praatIndex - midpoint) * (praatIndex - midpoint)) /
+                    ((nominalWindowLength + 1) * (nominalWindowLength + 1))
+            ) -
+                edge) /
+            (1 - edge);
+        signal[index] = sample * window;
+    }
+    if (!(maximumIntensity > 0)) {
+        return emptyResult();
+    }
 
-    const candidates = polynomialRoots(lpc)
+    const predictorCoefficients = praatBurgCoefficients(signal, poleCount);
+    if (predictorCoefficients === null) {
+        return emptyResult(maximumIntensity);
+    }
+    const polynomial = new Float64Array(poleCount + 1);
+    polynomial[0] = 1;
+    for (let index = 0; index < poleCount; index += 1) {
+        polynomial[index + 1] = -predictorCoefficients[index];
+    }
+
+    const candidates = polynomialRoots(polynomial)
         .map((root) => {
             const magnitudeSquared = root.re * root.re + root.im * root.im;
             return magnitudeSquared > 1
@@ -441,13 +556,14 @@ function estimateFormants(
                   }
                 : root;
         })
-        .filter((root) => root.im > 0)
+        .filter((root) => root.im >= 0)
         .map((root) => {
             const angle = Math.atan2(root.im, root.re);
-            const frequency = (angle * formantSampleRate) / (2 * Math.PI);
+            const frequency = (Math.abs(angle) * prepared.sampleRate) / (2 * Math.PI);
             const magnitude = Math.sqrt(root.re * root.re + root.im * root.im);
             const bandwidth =
-                (-formantSampleRate * Math.log(Math.max(1e-9, Math.min(1, magnitude)))) / Math.PI;
+                (-prepared.sampleRate * Math.log(Math.max(1e-15, Math.min(1, magnitude)))) /
+                Math.PI;
             return { frequency, bandwidth };
         })
         .filter(
@@ -462,12 +578,77 @@ function estimateFormants(
 
     const resultLength = Math.ceil(maximumFormants);
     return {
-        frequencies: new Array(resultLength)
+        timeSeconds: centreTimeSeconds,
+        formantsHz: new Array(resultLength)
             .fill(null)
             .map((_, index) => (candidates[index] ? candidates[index].frequency : null)),
-        bandwidths: new Array(resultLength)
+        formantBandwidthsHz: new Array(resultLength)
             .fill(null)
             .map((_, index) => (candidates[index] ? candidates[index].bandwidth : null)),
+        formantIntensity: maximumIntensity,
+    };
+}
+
+export function analyzeFormantFrames(
+    samples: Float32Array,
+    sampleRate: number,
+    partialOptions: Partial<AnalysisOptions> = {}
+) {
+    const options = { ...DEFAULT_OPTIONS, ...partialOptions };
+    const prepared = prepareFormantSignal(samples, sampleRate, options);
+    const actualWindowSeconds = options.formantWindowLengthSeconds * 2;
+    const timeStepSeconds = options.formantWindowLengthSeconds / 4;
+    let frameCount =
+        1 + Math.floor((prepared.durationSeconds - actualWindowSeconds) / timeStepSeconds);
+    let firstFrameTime =
+        prepared.firstSampleTimeSeconds +
+        0.5 *
+            (prepared.durationSeconds -
+                1 / prepared.sampleRate -
+                (frameCount - 1) * timeStepSeconds);
+    if (frameCount < 1) {
+        frameCount = 1;
+        firstFrameTime = prepared.firstSampleTimeSeconds + 0.5 * prepared.durationSeconds;
+    }
+    const frames: FormantFrameAnalysis[] = [];
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+        frames.push(
+            estimatePreparedFormants(
+                prepared,
+                firstFrameTime + frameIndex * timeStepSeconds,
+                options
+            )
+        );
+    }
+    return frames;
+}
+
+export function analyzePitchAndIntensityFrame(
+    samples: Float32Array,
+    sampleRate: number,
+    partialOptions: Partial<AnalysisOptions> = {}
+) {
+    const options = { ...DEFAULT_OPTIONS, ...partialOptions };
+    const intensityDbSpl = calculateIntensityDbSpl(
+        samples,
+        sampleRate,
+        options.intensityPitchFloorHz,
+        options.splCalibrationDb
+    );
+    const pitch =
+        options.pitchAlgorithm === 'autocorrelation'
+            ? detectPitchAutocorrelation(
+                  samples,
+                  sampleRate,
+                  options.minPitchHz,
+                  options.maxPitchHz
+              )
+            : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
+    const voiced = pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
+    return {
+        pitchHz: voiced ? pitch.pitchHz : null,
+        pitchConfidence: pitch.confidence,
+        intensityDbSpl,
     };
 }
 
@@ -479,30 +660,20 @@ export function analyzeAcousticFrame(
     const options = { ...DEFAULT_OPTIONS, ...partialOptions };
     // Browser microphone samples are unitless, so the default follows Praat's
     // Sound convention of interpreting one sample unit as one Pascal.
-    const intensityDbSpl = calculateIntensityDbSpl(
-        samples,
-        sampleRate,
-        options.intensityPitchFloorHz,
-        options.splCalibrationDb
-    );
-
-    const pitch =
-        options.pitchAlgorithm === 'autocorrelation'
-            ? detectPitchAutocorrelation(
-                  samples,
-                  sampleRate,
-                  options.minPitchHz,
-                  options.maxPitchHz
-              )
-            : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
-
-    const voiced = pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
-    const formants = estimateFormants(samples, sampleRate, options);
+    const pitchAndIntensity = analyzePitchAndIntensityFrame(samples, sampleRate, options);
+    const formantFrames = analyzeFormantFrames(samples, sampleRate, options);
+    const formants =
+        formantFrames[Math.floor(formantFrames.length / 2)] ||
+        ({
+            formantsHz: new Array(Math.ceil(options.maximumFormants)).fill(null),
+            formantBandwidthsHz: new Array(Math.ceil(options.maximumFormants)).fill(null),
+            formantIntensity: 0,
+        } as FormantFrameAnalysis);
     return {
-        pitchHz: voiced ? pitch.pitchHz : null,
-        pitchConfidence: pitch.confidence,
-        intensityDbSpl,
-        formantsHz: formants.frequencies,
-        formantBandwidthsHz: formants.bandwidths,
+        ...pitchAndIntensity,
+        formantsHz: formants.formantsHz,
+        formantBandwidthsHz: formants.formantBandwidthsHz,
+        formantIntensity: formants.formantIntensity,
+        drawFormants: true,
     };
 }

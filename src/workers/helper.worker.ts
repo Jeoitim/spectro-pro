@@ -1,4 +1,11 @@
-import { analyzeAcousticFrame, AnalysisOptions, TimedAcousticAnalysis } from '../analysis';
+import {
+    AcousticAnalysis,
+    analyzeFormantFrames,
+    analyzePitchAndIntensityFrame,
+    AnalysisOptions,
+    FormantFrameAnalysis,
+    TimedAcousticAnalysis,
+} from '../analysis';
 import { generateSpectrogram } from '../spectrogram';
 import {
     ACTION_ANALYZE_OFFLINE,
@@ -8,7 +15,92 @@ import {
     Message,
 } from '../worker-constants';
 
-self.addEventListener('message', (event: { data: Message['request'] }) => {
+const workerScope = (self as unknown) as DedicatedWorkerGlobalScope;
+
+function nearestFormantFrame(
+    frames: FormantFrameAnalysis[],
+    timeSeconds: number
+): FormantFrameAnalysis | null {
+    if (frames.length === 0) {
+        return null;
+    }
+    if (frames.length === 1) {
+        return frames[0];
+    }
+    const step = frames[1].timeSeconds - frames[0].timeSeconds;
+    const index = Math.max(
+        0,
+        Math.min(frames.length - 1, Math.round((timeSeconds - frames[0].timeSeconds) / step))
+    );
+    return frames[index];
+}
+
+function analyzeAtCentres(
+    samples: Float32Array,
+    sampleRate: number,
+    centreSamples: number[],
+    analysisOptions: AnalysisOptions
+) {
+    const formantFrames = analyzeFormantFrames(samples, sampleRate, analysisOptions);
+    const analysisWindowLength = Math.max(64, Math.round(sampleRate * 0.085));
+    const analyses: AcousticAnalysis[] = centreSamples.map((centreSample) => {
+        const analysisStart = Math.max(0, Math.round(centreSample - analysisWindowLength / 2));
+        const analysisEnd = Math.min(
+            samples.length,
+            Math.round(centreSample + analysisWindowLength / 2)
+        );
+        const pitchAndIntensity = analyzePitchAndIntensityFrame(
+            samples.subarray(analysisStart, Math.max(analysisStart + 1, analysisEnd)),
+            sampleRate,
+            analysisOptions
+        );
+        const formants = nearestFormantFrame(formantFrames, centreSample / sampleRate);
+        return {
+            ...pitchAndIntensity,
+            formantsHz:
+                formants?.formantsHz ||
+                new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
+            formantBandwidthsHz:
+                formants?.formantBandwidthsHz ||
+                new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
+            formantIntensity: formants?.formantIntensity || 0,
+            drawFormants: false,
+        };
+    });
+
+    if (centreSamples.length > 0) {
+        const firstCentre = centreSamples[0];
+        const centreStep =
+            centreSamples.length > 1
+                ? centreSamples[1] - centreSamples[0]
+                : Math.max(
+                      1,
+                      Math.round((analysisOptions.formantWindowLengthSeconds / 4) * sampleRate)
+                  );
+        for (const frame of formantFrames) {
+            const nearestAnalysisIndex = Math.round(
+                (frame.timeSeconds * sampleRate - firstCentre) / centreStep
+            );
+            if (
+                nearestAnalysisIndex >= 0 &&
+                nearestAnalysisIndex < analyses.length &&
+                Math.abs(centreSamples[nearestAnalysisIndex] - frame.timeSeconds * sampleRate) <=
+                    centreStep / 2 + 1
+            ) {
+                analyses[nearestAnalysisIndex] = {
+                    ...analyses[nearestAnalysisIndex],
+                    formantsHz: frame.formantsHz,
+                    formantBandwidthsHz: frame.formantBandwidthsHz,
+                    formantIntensity: frame.formantIntensity,
+                    drawFormants: true,
+                };
+            }
+        }
+    }
+    return analyses;
+}
+
+workerScope.addEventListener('message', (event: { data: Message['request'] }) => {
     const {
         data: { action, payload },
     } = event;
@@ -20,8 +112,6 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                 samplesStart,
                 samplesLength,
                 options,
-                analysisSamplesStart,
-                analysisSamplesLength,
                 analysisOptions,
             } = payload as ComputeSpectrogramMessage['request']['payload'];
 
@@ -32,12 +122,18 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                     options: spectrogramOptions,
                     spectrogram,
                 } = generateSpectrogram(samples, samplesStart, samplesLength, options);
-                const analysis = analyzeAcousticFrame(
-                    samples.subarray(
-                        analysisSamplesStart,
-                        analysisSamplesStart + analysisSamplesLength
-                    ),
+                const centreSamples = new Array(spectrogramWindowCount)
+                    .fill(0)
+                    .map(
+                        (_, windowIndex) =>
+                            samplesStart +
+                            windowIndex * spectrogramOptions.windowStepSize +
+                            spectrogramOptions.windowSize / 2
+                    );
+                const analyses = analyzeAtCentres(
+                    samples,
                     options.sampleRate,
+                    centreSamples,
                     analysisOptions
                 );
 
@@ -47,13 +143,18 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                         spectrogramOptions,
                         spectrogramBuffer: spectrogram.buffer,
                         inputBuffer: samples.buffer,
-                        analysis,
+                        analyses,
                     },
                 };
-                self.postMessage(response, [spectrogram.buffer, samples.buffer]);
+                workerScope.postMessage(response, [
+                    spectrogram.buffer as ArrayBuffer,
+                    samples.buffer as ArrayBuffer,
+                ]);
             } catch (error) {
-                const response: ComputeSpectrogramMessage['response'] = { error };
-                self.postMessage(response);
+                const response: ComputeSpectrogramMessage['response'] = {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                };
+                workerScope.postMessage(response);
             }
 
             break;
@@ -67,28 +168,22 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
             try {
                 const samples = new Float32Array(samplesBuffer);
                 const result = generateSpectrogram(samples, 0, samples.length, options);
-                const analysisWindowLength = Math.max(64, Math.round(options.sampleRate * 0.085));
-                const analyses: TimedAcousticAnalysis[] = [];
-                for (let windowIndex = 0; windowIndex < result.windowCount; windowIndex += 1) {
-                    const centreSample =
-                        windowIndex * result.options.windowStepSize + result.options.windowSize / 2;
-                    const analysisStart = Math.max(
-                        0,
-                        Math.round(centreSample - analysisWindowLength / 2)
+                const centreSamples = new Array(result.windowCount)
+                    .fill(0)
+                    .map(
+                        (_, windowIndex) =>
+                            windowIndex * result.options.windowStepSize +
+                            result.options.windowSize / 2
                     );
-                    const analysisEnd = Math.min(
-                        samples.length,
-                        analysisStart + analysisWindowLength
-                    );
-                    analyses.push({
-                        ...analyzeAcousticFrame(
-                            samples.subarray(analysisStart, analysisEnd),
-                            options.sampleRate,
-                            analysisOptions
-                        ),
-                        timeSeconds: centreSample / options.sampleRate,
-                    });
-                }
+                const analyses: TimedAcousticAnalysis[] = analyzeAtCentres(
+                    samples,
+                    options.sampleRate,
+                    centreSamples,
+                    analysisOptions
+                ).map((analysis, index) => ({
+                    ...analysis,
+                    timeSeconds: centreSamples[index] / options.sampleRate,
+                }));
 
                 const response: AnalyzeOfflineMessage['response'] = {
                     payload: {
@@ -99,15 +194,20 @@ self.addEventListener('message', (event: { data: Message['request'] }) => {
                         analyses,
                     },
                 };
-                self.postMessage(response, [result.spectrogram.buffer, samples.buffer]);
+                workerScope.postMessage(response, [
+                    result.spectrogram.buffer as ArrayBuffer,
+                    samples.buffer as ArrayBuffer,
+                ]);
             } catch (error) {
-                const response: AnalyzeOfflineMessage['response'] = { error };
-                self.postMessage(response);
+                const response: AnalyzeOfflineMessage['response'] = {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                };
+                workerScope.postMessage(response);
             }
             break;
         }
         default:
-            self.postMessage({
+            workerScope.postMessage({
                 error: new Error('Unknown action'),
             });
             break;

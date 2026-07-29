@@ -6,6 +6,14 @@ declare module '*.worker.ts' {
     export default WebpackWorker;
 }
 
+declare module 'helper-worker' {
+    class WebpackWorker extends Worker {
+        constructor();
+    }
+
+    export default WebpackWorker;
+}
+
 declare module '*.glsl' {
     import { GlslShader } from 'webpack-glsl-minify';
 

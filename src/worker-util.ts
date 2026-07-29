@@ -7,8 +7,7 @@ import {
     ComputeSpectrogramMessage,
     Message,
 } from './worker-constants';
-// eslint-disable-next-line import/extensions
-import HelperWorker from './workers/helper.worker.ts';
+import HelperWorker from 'helper-worker';
 
 const WORKER_QUEUE: ((worker: HelperWorker) => void)[] = [];
 const WORKER_POOL: { worker: HelperWorker; busy: boolean }[] = [];
@@ -85,16 +84,14 @@ export async function offThreadGenerateSpectrogram(
     samplesStart: number,
     samplesLength: number,
     options: SpectrogramOptions,
-    analysisSamplesStart: number,
-    analysisSamplesLength: number,
     analysisOptions: AnalysisOptions
-): Promise<SpectrogramResult & { input: Float32Array; analysis: AcousticAnalysis }> {
+): Promise<SpectrogramResult & { input: Float32Array; analyses: AcousticAnalysis[] }> {
     const {
         spectrogramWindowCount,
         spectrogramOptions,
         spectrogramBuffer,
         inputBuffer,
-        analysis,
+        analyses,
     } = await queueTask<ComputeSpectrogramMessage>(
         ACTION_COMPUTE_SPECTROGRAM,
         {
@@ -102,8 +99,6 @@ export async function offThreadGenerateSpectrogram(
             samplesStart,
             samplesLength,
             options,
-            analysisSamplesStart,
-            analysisSamplesLength,
             analysisOptions,
         },
         [samples.buffer]
@@ -114,7 +109,7 @@ export async function offThreadGenerateSpectrogram(
         options: spectrogramOptions,
         spectrogram: new Float32Array(spectrogramBuffer),
         input: new Float32Array(inputBuffer),
-        analysis,
+        analyses,
     };
 }
 

@@ -5,10 +5,10 @@
   "scripts": {
     "test": "npm run test:analysis",
     "test:analysis": "tsc -p tsconfig.tests.json && node .test-dist/tests/synthetic-analysis.js",
-    "build": "node --openssl-legacy-provider node_modules/webpack/bin/webpack.js --mode=production",
-    "start": "node --openssl-legacy-provider node_modules/webpack-cli/bin/cli.js serve --mode=development",
+    "build": "webpack --mode=production",
+    "start": "webpack serve --mode=development",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'",
-    "type-check": "tsc"
+    "type-check": "tsc -p tsconfig.json && tsc -p src/workers/tsconfig.json"
   },
   "author": "Spectro Pro contributors; based on Spectro by Caleb Joseph",
   "license": "MIT",
@@ -23,9 +23,9 @@
     "@material-ui/icons": "^4.11.2",
     "@types/lodash.debounce": "^4.0.6",
     "@types/react-dom": "^17.0.2",
-    "@types/webpack": "^4.41.26",
     "jsfft": "0.0.4",
     "lodash.debounce": "^4.0.8",
+    "ml-matrix": "^5.3.0",
     "react": "^17.0.1",
     "react-dom": "^17.0.1"
   },
@@ -48,10 +48,10 @@
     "eslint-plugin-react-hooks": "^4.2.0",
     "eslint-restricted-globals": "^0.2.0",
     "prettier": "^2.2.1",
-    "typescript": "^3.7.7",
-    "webpack": "^4.46.0",
-    "webpack-cli": "^4.5.0",
-    "webpack-dev-server": "^3.11.2",
+    "typescript": "^5.9.3",
+    "webpack": "^5.109.2",
+    "webpack-cli": "^7.2.2",
+    "webpack-dev-server": "^6.0.0",
     "webpack-glsl-minify": "^1.4.2",
     "worker-loader": "^3.0.8"
   }

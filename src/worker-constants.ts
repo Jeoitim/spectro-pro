@@ -22,8 +22,6 @@ export type ComputeSpectrogramMessage = MessageBase<
         samplesStart: number;
         samplesLength: number;
         options: SpectrogramOptions;
-        analysisSamplesStart: number;
-        analysisSamplesLength: number;
         analysisOptions: AnalysisOptions;
     },
     {
@@ -31,7 +29,7 @@ export type ComputeSpectrogramMessage = MessageBase<
         spectrogramOptions: Required<SpectrogramOptions>;
         spectrogramBuffer: ArrayBufferLike;
         inputBuffer: ArrayBufferLike;
-        analysis: AcousticAnalysis;
+        analyses: AcousticAnalysis[];
     }
 >;
 

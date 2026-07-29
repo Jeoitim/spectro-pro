@@ -1,5 +1,6 @@
 import {
     analyzeAcousticFrame,
+    analyzeFormantFrames,
     AnalysisOptions,
     PitchAlgorithm,
     resampleForFormants,
@@ -58,16 +59,11 @@ function applyResonator(
     return output;
 }
 
-function syntheticAllPoleVowel() {
-    const expected = [500, 1500, 2500, 3500, 4500];
-    let workingSignal = deterministicNoise(Math.round(FORMANT_SAMPLE_RATE * 0.5));
-    expected.forEach((frequency, index) => {
-        workingSignal = applyResonator(
-            workingSignal,
-            frequency,
-            70 + index * 20,
-            FORMANT_SAMPLE_RATE
-        );
+function syntheticAllPoleVowel(sampleRate = FORMANT_SAMPLE_RATE, quantizeToPcm16 = false) {
+    const resonances = [500, 1500, 2500, 3500, 4500];
+    let workingSignal = deterministicNoise(Math.round(sampleRate * 0.5));
+    resonances.forEach((frequency, index) => {
+        workingSignal = applyResonator(workingSignal, frequency, 70 + index * 20, sampleRate);
     });
     let peak = 0;
     for (let i = 0; i < workingSignal.length; i += 1) {
@@ -75,9 +71,10 @@ function syntheticAllPoleVowel() {
     }
     const signal = new Float32Array(workingSignal.length);
     for (let i = 0; i < workingSignal.length; i += 1) {
-        signal[i] = (0.35 * workingSignal[i]) / peak;
+        const sample = (0.35 * workingSignal[i]) / peak;
+        signal[i] = quantizeToPcm16 ? Math.round(sample * 32767) / 32768 : sample;
     }
-    return { signal, expected };
+    return signal;
 }
 
 function syntheticTone(frequencyHz: number, rmsPascals: number, seconds = 0.1) {
@@ -111,15 +108,71 @@ function testFormants() {
         }
     }
     assertNear('resampler frequency', crossings / (resampledTone.length / 11000), 1500, 10);
-    const { signal, expected } = syntheticAllPoleVowel();
-    const result = analyzeAcousticFrame(signal, FORMANT_SAMPLE_RATE, DEFAULT_OPTIONS);
-    expected.forEach((frequency, index) => {
+    const signal = syntheticAllPoleVowel(FORMANT_SAMPLE_RATE, true);
+    const frames = analyzeFormantFrames(signal, FORMANT_SAMPLE_RATE, DEFAULT_OPTIONS);
+    if (frames.length !== 72) {
+        throw new Error(`Praat frame count: expected 72, received ${frames.length}`);
+    }
+
+    // Generated with official Praat 6.6.30, Sound: To Formant (burg), using the
+    // same deterministic PCM16 signal and the options above. Tight tolerances
+    // catch frame-centre, Gaussian-window, Burg-sign and root-solver regressions.
+    const praatReference = [
+        [513.937191648, 1509.492099167, 2589.004347864, 3476.164739598, 4528.605165554],
+        [528.347458685, 1522.659629405, 2574.712531792, 3488.181198395, 4507.934004596],
+        [567.717734392, 1506.942436441, 2489.491837332, 3507.174331971, 4510.796682795],
+        [651.972547928, 1524.645321546, 2519.066970126, 3538.61751964, 4556.710100399],
+        [576.501617674, 1496.834428503, 2570.068198232, 3549.254298302, 4569.31263075],
+        [1497.002437715, 2497.292007516, 3536.117926418, 4505.039454271],
+    ];
+    praatReference.forEach((expectedFormants, referenceIndex) => {
+        const frame = frames[33 + referenceIndex];
         assertNear(
-            `F${index + 1}`,
-            result.formantsHz[index],
-            frequency,
-            Math.max(120, frequency * 0.08)
+            `Praat frame ${34 + referenceIndex} time`,
+            frame.timeSeconds,
+            0.234375 + referenceIndex * 0.00625,
+            1e-12
         );
+        expectedFormants.forEach((frequency, formantIndex) => {
+            assertNear(
+                `Praat frame ${34 + referenceIndex} F${formantIndex + 1}`,
+                frame.formantsHz[formantIndex],
+                frequency,
+                1e-4
+            );
+        });
+        if (!(frame.formantIntensity > 0) || !Number.isFinite(frame.formantIntensity)) {
+            throw new Error(`invalid formant intensity at frame ${34 + referenceIndex}`);
+        }
+    });
+
+    const result = analyzeAcousticFrame(signal, FORMANT_SAMPLE_RATE, DEFAULT_OPTIONS);
+    praatReference[3].forEach((frequency, index) => {
+        assertNear(`single-frame F${index + 1}`, result.formantsHz[index], frequency, 1e-4);
+    });
+
+    // This second official reference also exercises Praat's FFT anti-alias
+    // filter and depth-50 sinc interpolation from 48 kHz down to 11 kHz.
+    const signal48k = syntheticAllPoleVowel(SAMPLE_RATE, true);
+    const frames48k = analyzeFormantFrames(signal48k, SAMPLE_RATE, DEFAULT_OPTIONS);
+    const praat48kReference = [
+        [586.546153579, 1482.158913686, 2447.601353887, 3254.000812287, 3844.864007288],
+        [550.74608772, 1464.077431281, 2492.77680705, 3482.188099078, 3623.306282571],
+        [546.842152855, 1468.52212046, 2494.621071871, 3415.15275582, 3764.868958721],
+        [547.531588546, 1438.977280498, 2469.686189493, 3287.187260666, 3988.875012931],
+        [584.919579633, 1462.029100359, 2459.488323077, 3560.81236373, 3617.712278197],
+        [575.795762459, 1516.19076174, 2446.235166158, 3530.58508219, 3888.590985637],
+    ];
+    praat48kReference.forEach((expectedFormants, referenceIndex) => {
+        const frame = frames48k[33 + referenceIndex];
+        expectedFormants.forEach((frequency, formantIndex) => {
+            assertNear(
+                `Praat 48 kHz frame ${34 + referenceIndex} F${formantIndex + 1}`,
+                frame.formantsHz[formantIndex],
+                frequency,
+                0.004
+            );
+        });
     });
 }
 

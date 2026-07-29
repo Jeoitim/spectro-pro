@@ -208,8 +208,6 @@ class SpectroEngine {
 
     private playbackRange: { startSeconds: number; endSeconds: number } | null = null;
 
-    private maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
-
     private mediaItems: MediaItem[] = [];
 
     private activeMediaId: string | null = null;
@@ -1000,13 +998,8 @@ class SpectroEngine {
 
     private rebuildStatisticsFromHistory() {
         this.statistics = emptyStatistics();
-        this.maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
         for (const point of this.analysisHistory) {
             this.statistics.totalFrames += 1;
-            this.maximumSessionIntensityDbSpl = Math.max(
-                this.maximumSessionIntensityDbSpl,
-                point.intensityDbSpl
-            );
             this.statistics.intensityPowerSum += 10 ** (point.intensityDbSpl / 10);
             if (point.pitchHz !== null) {
                 this.statistics.voicedFrames += 1;
@@ -1026,7 +1019,7 @@ class SpectroEngine {
         this.stopMediaPlayback(false);
         const audioCtx = this.createAudioContext();
         const buffer = audioCtx.createBuffer(1, item.samples.length, item.sampleRate);
-        buffer.copyToChannel(item.samples, 0);
+        buffer.copyToChannel(new Float32Array(item.samples), 0);
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
         source.connect(audioCtx.destination);
@@ -1229,10 +1222,6 @@ class SpectroEngine {
             const frameCount = Math.max(1, Math.min(maximumFrames, availableFrames));
             const samplesLength = config.windowSize + (frameCount - 1) * config.hopSize;
             const samplesStart = request.samples.length - samplesLength;
-            const analysisLength = Math.min(
-                request.samples.length,
-                Math.round(request.sampleRate * 0.085)
-            );
             const result = await offThreadGenerateSpectrogram(
                 request.samples,
                 samplesStart,
@@ -1245,8 +1234,6 @@ class SpectroEngine {
                     scaleSize: SPECTROGRAM_HEIGHT,
                     windowFunction: this.windowFunction,
                 },
-                request.samples.length - analysisLength,
-                analysisLength,
                 this.analysisOptions
             );
 
@@ -1256,10 +1243,13 @@ class SpectroEngine {
             });
             this.spectrogramBuffer.enqueue(result.spectrogram);
             this.renderer.updateSpectrogram(this.spectrogramBuffer);
-            this.pushAnalysis(
-                result.analysis,
-                result.windowCount,
-                request.endTimeSeconds,
+            const firstCentreSample = samplesStart + config.windowSize / 2;
+            const firstTimeSeconds =
+                request.endTimeSeconds -
+                (request.samples.length - firstCentreSample) / request.sampleRate;
+            this.pushAnalyses(
+                result.analyses,
+                firstTimeSeconds,
                 config.hopSize,
                 request.sampleRate
             );
@@ -1276,17 +1266,16 @@ class SpectroEngine {
         }
     }
 
-    private pushAnalysis(
-        analysis: AcousticAnalysis,
-        count: number,
-        endTime: number,
+    private pushAnalyses(
+        analyses: AcousticAnalysis[],
+        firstTime: number,
         hopSize: number,
         sampleRate: number
     ) {
-        for (let i = count - 1; i >= 0; i -= 1) {
+        for (let index = 0; index < analyses.length; index += 1) {
             this.analysisHistory.push({
-                ...analysis,
-                timeSeconds: endTime - (i * hopSize) / sampleRate,
+                ...analyses[index],
+                timeSeconds: firstTime + (index * hopSize) / sampleRate,
             });
         }
         if (this.analysisHistory.length > this.spectrogramBuffer.width) {
@@ -1296,20 +1285,29 @@ class SpectroEngine {
             );
         }
 
-        this.statistics.totalFrames += 1;
-        this.maximumSessionIntensityDbSpl = Math.max(
-            this.maximumSessionIntensityDbSpl,
-            analysis.intensityDbSpl
-        );
-        this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
-        if (analysis.pitchHz !== null) {
-            this.statistics.voicedFrames += 1;
-            this.statistics.pitchSum += analysis.pitchHz;
-            this.statistics.pitchMin = Math.min(this.statistics.pitchMin, analysis.pitchHz);
-            this.statistics.pitchMax = Math.max(this.statistics.pitchMax, analysis.pitchHz);
+        const latestAnalysis = analyses[analyses.length - 1];
+        if (latestAnalysis === undefined) {
+            return;
         }
+        for (const analysis of analyses) {
+            this.statistics.totalFrames += 1;
+            this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
+            if (analysis.pitchHz !== null) {
+                this.statistics.voicedFrames += 1;
+                this.statistics.pitchSum += analysis.pitchHz;
+                this.statistics.pitchMin = Math.min(
+                    this.statistics.pitchMin,
+                    analysis.pitchHz
+                );
+                this.statistics.pitchMax = Math.max(
+                    this.statistics.pitchMax,
+                    analysis.pitchHz
+                );
+            }
+        }
+        this.sessionElapsedSeconds = firstTime + ((analyses.length - 1) * hopSize) / sampleRate;
         this.overlayDirty = true;
-        this.updateUiSnapshot(analysis);
+        this.updateUiSnapshot(latestAnalysis);
     }
 
     private updateUiSnapshot(analysis: AcousticAnalysis, force: boolean = false) {
@@ -1359,7 +1357,6 @@ class SpectroEngine {
         this.statistics = emptyStatistics();
         this.sessionElapsedSeconds = 0;
         this.lastUiUpdate = 0;
-        this.maximumSessionIntensityDbSpl = Number.NEGATIVE_INFINITY;
         this.clearVisualHistory();
         this.ui.updateSnapshot({
             elapsedSeconds: 0,
@@ -1451,19 +1448,37 @@ class SpectroEngine {
 
         if (this.showFormants && this.mode !== 'narrowband') {
             const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
+            let maximumVisibleFormantIntensity = 0;
+            for (let index = visible.start; index < visible.end; index += 1) {
+                if (this.analysisHistory[index].drawFormants) {
+                    maximumVisibleFormantIntensity = Math.max(
+                        maximumVisibleFormantIntensity,
+                        this.analysisHistory[index].formantIntensity
+                    );
+                }
+            }
+            const minimumVisibleFormantIntensity =
+                maximumVisibleFormantIntensity === 0 ||
+                this.layerDisplayOptions.formantDynamicRangeDb <= 0
+                    ? 0
+                    : maximumVisibleFormantIntensity /
+                      10 ** (this.layerDisplayOptions.formantDynamicRangeDb / 10);
             const formantCount = Math.min(
                 this.layerDisplayOptions.formantsToDisplay,
                 this.analysisHistory[visible.end - 1]?.formantsHz.length || 0
             );
             for (let formantIndex = 0; formantIndex < formantCount; formantIndex += 1) {
                 ctx.fillStyle = colors[formantIndex % colors.length];
-                for (let index = visible.start; index < visible.end; index += 2) {
+                for (let index = visible.start; index < visible.end; index += 1) {
                     const formant = this.analysisHistory[index].formantsHz[formantIndex];
                     const withinDynamicRange =
-                        this.analysisHistory[index].intensityDbSpl >=
-                        this.maximumSessionIntensityDbSpl -
-                            this.layerDisplayOptions.formantDynamicRangeDb;
-                    if (formant !== null && withinDynamicRange) {
+                        this.analysisHistory[index].formantIntensity >=
+                        minimumVisibleFormantIntensity;
+                    if (
+                        this.analysisHistory[index].drawFormants &&
+                        formant !== null &&
+                        withinDynamicRange
+                    ) {
                         const y = frequencyY(formant);
                         if (y >= 0 && y <= height) {
                             ctx.beginPath();
