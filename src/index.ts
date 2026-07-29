@@ -851,8 +851,12 @@ class SpectroEngine {
         const zoom = clamp(total / selectedColumns, 1, 64);
         const maximumOffset = Math.max(0, 1 - 1 / zoom);
         const offset = clamp((total - endIndex) / total, 0, maximumOffset);
+        const currentZoom = Math.max(1, this.renderParameters.zoom || 1);
+        if (Math.abs(currentZoom - zoom) < 1e-9 && Math.abs(this.timeOffset - offset) < 1e-9) {
+            return;
+        }
         this.returnView = {
-            zoom: Math.max(1, this.renderParameters.zoom || 1),
+            zoom: currentZoom,
             timeOffset: this.timeOffset,
         };
         this.ui.updateReturnViewAvailable(true);

@@ -399,6 +399,7 @@ export default function App({
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
+    const zoomInitializedRef = useRef(false);
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
     const scale =
         mode === 'broadband'
@@ -638,22 +639,20 @@ export default function App({
         onDisplayChange({
             sensitivity: 10 ** (2 + sensitivity * 2),
             contrast: 10 ** (0.5 + contrast * 3) - 1,
-            zoom,
             minFrequencyHz: minFrequency,
             maxFrequencyHz: maxFrequency,
             scale,
             gradient: gradient?.gradient,
         });
-    }, [
-        sensitivity,
-        contrast,
-        zoom,
-        minFrequency,
-        maxFrequency,
-        scale,
-        gradientName,
-        onDisplayChange,
-    ]);
+    }, [sensitivity, contrast, minFrequency, maxFrequency, scale, gradientName, onDisplayChange]);
+
+    useEffect(() => {
+        if (zoomInitializedRef.current) {
+            return;
+        }
+        zoomInitializedRef.current = true;
+        onDisplayChange({ zoom });
+    }, [onDisplayChange, zoom]);
 
     useEffect(() => {
         const timeout = window.setTimeout(
@@ -1352,14 +1351,22 @@ export default function App({
 
                         <div className="view-actions">
                             <button
-                                onClick={() => setZoom(Math.max(1, zoom - 0.5))}
+                                onClick={() => {
+                                    const nextZoom = Math.max(1, zoom - 0.5);
+                                    setZoom(nextZoom);
+                                    onDisplayChange({ zoom: nextZoom });
+                                }}
                                 aria-label={tr('缩小')}
                             >
                                 −
                             </button>
                             <span className="zoom-readout">{zoom.toFixed(1)}×</span>
                             <button
-                                onClick={() => setZoom(Math.min(64, zoom + 0.5))}
+                                onClick={() => {
+                                    const nextZoom = Math.min(64, zoom + 0.5);
+                                    setZoom(nextZoom);
+                                    onDisplayChange({ zoom: nextZoom });
+                                }}
                                 aria-label={tr('放大')}
                             >
                                 +
