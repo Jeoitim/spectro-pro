@@ -1475,9 +1475,7 @@ export default function App({
             };
             const renderDragTransform = () => {
                 frameId = null;
-                panel.style.transform = `translate3d(${latestLeft - bounds.left}px, ${
-                    latestTop - bounds.top
-                }px, 0)`;
+                panel.style.translate = `${latestLeft - bounds.left}px ${latestTop - bounds.top}px`;
             };
             const move = (moveEvent: PointerEvent) => {
                 if (moveEvent.pointerId !== event.pointerId) {
@@ -1509,7 +1507,7 @@ export default function App({
                     panel.style.left = `${latestLeft}px`;
                     panel.style.top = `${latestTop}px`;
                     panel.style.right = 'auto';
-                    panel.style.transform = 'translate3d(0, 0, 0)';
+                    panel.style.translate = '0 0';
                     if (panelName === 'playlist') {
                         setPlaylistPosition(nextPosition);
                     } else {
@@ -1522,7 +1520,7 @@ export default function App({
                 window.requestAnimationFrame(() => {
                     panel.classList.remove('dragging');
                     window.requestAnimationFrame(() => {
-                        panel.style.transform = '';
+                        panel.style.translate = '';
                     });
                 });
                 draggedPanelRef.current = moved ? panelName : null;

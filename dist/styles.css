@@ -459,7 +459,7 @@ select:focus-visible {
 
 .media-panel {
     position: fixed;
-    z-index: 32;
+    z-index: 42;
     top: 94px;
     left: 12px;
     display: grid;
@@ -475,7 +475,7 @@ select:focus-visible {
     transform: translateX(calc(-100% - 20px));
     pointer-events: none;
     will-change: transform;
-    transition: 180ms ease;
+    transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .media-panel.open {
@@ -1613,7 +1613,7 @@ button.media-row {
 
 .metrics-panel {
     position: fixed;
-    z-index: 18;
+    z-index: 42;
     top: 94px;
     right: 20px;
     display: flex;
@@ -1653,6 +1653,8 @@ button.media-row {
 
 .media-panel.dragging,
 .metrics-panel.dragging {
+    z-index: 44;
+    will-change: translate;
     transition: none !important;
 }
 
