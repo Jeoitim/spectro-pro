@@ -2480,13 +2480,24 @@ html.glass-effects .settings-panel {
     }
 
     .view-actions .view-level-action {
-        width: 28px;
-        min-width: 28px;
-        padding: 0;
+        width: auto;
+        min-width: 32px;
+        max-width: 76px;
+        flex: 0 1 auto;
+        gap: 3px;
+        padding: 0 6px;
+        overflow: hidden;
     }
 
     .view-actions .view-level-action span {
-        display: none;
+        display: block;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .view-actions .view-level-action svg {
+        flex: 0 0 auto;
     }
 
     .praat-view {
