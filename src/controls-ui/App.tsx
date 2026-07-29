@@ -667,7 +667,11 @@ export default function App({
             ) {
                 event.preventDefault();
                 const direction = event.key === 'ArrowLeft' ? -1 : 1;
-                const stepSeconds = event.shiftKey ? 5 : 1;
+                const visibleDurationSeconds = Math.max(
+                    0.001,
+                    transport.viewEndSeconds - transport.viewStartSeconds
+                );
+                const stepSeconds = visibleDurationSeconds * (event.shiftKey ? 0.05 : 0.01);
                 onSeekMedia(
                     Math.max(
                         0,
@@ -685,6 +689,8 @@ export default function App({
         activeMediaId,
         transport.currentSeconds,
         transport.durationSeconds,
+        transport.viewEndSeconds,
+        transport.viewStartSeconds,
         onToggleMediaPlayback,
         onSeekMedia,
     ]);
@@ -2704,7 +2710,7 @@ export default function App({
                             </label>
                             <p className="setting-help">
                                 {tr(
-                                    '快捷键：空格播放或暂停；左右方向键移动 1 秒，按住 Shift 时移动 5 秒。'
+                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动。'
                                 )}
                             </p>
                         </>
