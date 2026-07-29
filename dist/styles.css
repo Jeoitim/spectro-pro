@@ -980,6 +980,8 @@ button.media-row {
 }
 
 .axis-stack {
+    position: relative;
+    z-index: 6;
     display: grid;
     grid-template-rows: minmax(0, 1fr) 18px;
     min-width: 0;
@@ -1094,14 +1096,6 @@ button.media-row {
 
 .waveform-axis-left span {
     right: 6px;
-}
-
-.waveform-axis-left .waveform-label {
-    top: 50%;
-    right: 2px;
-    writing-mode: vertical-rl;
-    text-orientation: upright;
-    transform: translateY(calc(-100% - 8px));
 }
 
 .waveform-axis-right {
@@ -1411,12 +1405,12 @@ button.media-row {
 }
 
 .axis-left .axis-title {
-    top: 50%;
+    top: 22px;
     right: auto;
     left: calc(100% + 3px);
     z-index: 5;
     writing-mode: vertical-rl;
-    transform: translateY(calc(-100% - 8px));
+    transform: none;
 }
 
 .axis-left .top,
@@ -1467,19 +1461,19 @@ button.media-row {
 }
 
 .axis-right .intensity-axis-title {
-    top: 50%;
+    top: 22px;
     right: auto;
     left: -2px;
     writing-mode: vertical-rl;
-    transform: translateX(-100%) translateY(calc(-100% - 8px));
+    transform: translateX(-100%);
 }
 
 .axis-right .frequency-axis-title {
-    top: 50%;
+    top: 22px;
     right: auto;
     left: 2px;
     writing-mode: vertical-rl;
-    transform: translateY(calc(-100% - 8px));
+    transform: none;
 }
 
 .axis-right .top {
@@ -2427,6 +2421,23 @@ html.light-ui .praat-view {
 
 html.light-ui .visualizer-toolbar {
     border-bottom-color: rgba(54, 68, 91, 0.16);
+}
+
+html.light-ui .axis-cursor-value {
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(36, 50, 76, 0.18);
+}
+
+html.light-ui .axis-left .axis-cursor-value.pitch {
+    color: #0969c7;
+}
+
+html.light-ui .axis-right .axis-cursor-value.frequency {
+    color: #bc2947;
+}
+
+html.light-ui .axis-right .axis-cursor-value.intensity {
+    color: #6b7100;
 }
 
 html.light-ui .media-panel,

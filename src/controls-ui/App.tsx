@@ -2134,16 +2134,7 @@ export default function App({
                         <div className="axis-stack">
                             <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
                                 {waveformVisible && (
-                                    <div className="waveform-axis waveform-axis-left">
-                                        <span
-                                            className="waveform-label"
-                                            data-axis-title
-                                            data-axis-label
-                                            data-axis-priority="60"
-                                        >
-                                            {tr('波形')}
-                                        </span>
-                                    </div>
+                                    <div className="waveform-axis waveform-axis-left" />
                                 )}
                                 {waveformVisible && spectrogramVisible && (
                                     <div className="axis-divider-space" />
@@ -2155,9 +2146,6 @@ export default function App({
                                             data-axis-title
                                             data-axis-label
                                             data-axis-priority="60"
-                                            style={{
-                                                top: pitchAxisTop((pitchFloor + pitchCeiling) / 2),
-                                            }}
                                         >
                                             {tr('基频')}
                                         </span>
