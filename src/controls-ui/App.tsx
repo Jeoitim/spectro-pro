@@ -61,6 +61,46 @@ type MetricSelection =
     | 'formant4'
     | 'formant5';
 type UiTheme = 'dark' | 'light';
+type SourceProfileMode = 'live' | 'file';
+
+interface SourceSettingsProfile {
+    mode: SpectrogramMode;
+    pitchAlgorithm: PitchAlgorithm;
+    waveformScaleMode: WaveformScaleMode;
+    waveformGain: number;
+    waveformLineWidth: number;
+    waveformZeroLine: boolean;
+    waveformPulses: boolean;
+    sensitivity: number;
+    contrast: number;
+    minFrequency: number;
+    maxFrequency: number;
+    broadbandScale: Scale;
+    narrowbandScale: Scale;
+    customScale: Scale;
+    customWindowLengthMs: number;
+    windowFunction: SpectrogramWindowFunction;
+    pitchFloor: number;
+    pitchCeiling: number;
+    voicingThreshold: number;
+    pitchLineWidth: number;
+    narrowbandPitchFrequencyAligned: boolean;
+    maximumFormants: number;
+    formantsToDisplay: number;
+    formantCeiling: number;
+    formantWindowMs: number;
+    preEmphasisFrom: number;
+    formantDynamicRange: number;
+    formantDotSize: number;
+    intensityPitchFloor: number;
+    intensityFloor: number;
+    intensityCeiling: number;
+    intensityLineWidth: number;
+    splCalibration: number;
+    framesPerSecond: number;
+    renderPixelRatio: number;
+    analysisPrecision: RealtimeAnalysisPrecision;
+}
 
 export interface LiveSnapshot {
     elapsedSeconds: number;
@@ -229,6 +269,8 @@ const installSpectroFavicon = () => {
 };
 
 interface SavedSettings {
+    liveProfile?: SourceSettingsProfile;
+    fileProfile?: SourceSettingsProfile;
     mode: SpectrogramMode;
     pitchAlgorithm: PitchAlgorithm;
     pitchVisible: boolean;
@@ -349,6 +391,17 @@ export default function App({
         savedSettingsRef.current = loadSavedSettings();
     }
     const saved = savedSettingsRef.current || {};
+    const sourceProfilesRef = useRef<{
+        live?: SourceSettingsProfile;
+        file?: SourceSettingsProfile;
+    }>({
+        live: saved.liveProfile,
+        file: saved.fileProfile,
+    });
+    const sourceProfileModeRef = useRef<SourceProfileMode>('live');
+    const sourceProfileInitializedRef = useRef(false);
+    const sourceProfileSwitchingRef = useRef(false);
+    const currentSourceProfileRef = useRef<SourceSettingsProfile | null>(null);
     const legacyWaveformThemeName = WAVEFORM_THEMES.find(
         (item) => item.name === saved.waveformThemeName
     )?.name;
@@ -406,7 +459,7 @@ export default function App({
         [uiTheme]
     );
     const [waveformScaleMode, setWaveformScaleMode] = useState<WaveformScaleMode>(
-        saved.waveformScaleMode || 'dbfs'
+        saved.liveProfile?.waveformScaleMode || saved.waveformScaleMode || 'dbfs'
     );
     const [waveformGain, setWaveformGain] = useState(saved.waveformGain ?? 1);
     const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
@@ -470,7 +523,7 @@ export default function App({
     const [glassEffect, setGlassEffect] = useState(saved.glassEffect ?? true);
     const [renderPixelRatio, setRenderPixelRatio] = useState(saved.renderPixelRatio ?? 1.5);
     const [analysisPrecision, setAnalysisPrecision] = useState<RealtimeAnalysisPrecision>(
-        saved.analysisPrecision || 'accurate'
+        saved.liveProfile?.analysisPrecision || saved.analysisPrecision || 'balanced'
     );
     const [timeOffset, setTimeOffset] = useState(0);
     const [returnViewAvailable, setReturnViewAvailable] = useState(false);
@@ -522,6 +575,89 @@ export default function App({
         setActiveLocale(nextLocale);
         setLocale(nextLocale);
         setLanguageMenuOpen(false);
+    }, []);
+    const sourceProfileMode: SourceProfileMode =
+        playState === 'loading-mic'
+            ? 'live'
+            : playState === 'loading-file' || activeMediaId !== null
+            ? 'file'
+            : 'live';
+    const currentSourceProfile: SourceSettingsProfile = {
+        mode,
+        pitchAlgorithm,
+        waveformScaleMode,
+        waveformGain,
+        waveformLineWidth,
+        waveformZeroLine,
+        waveformPulses,
+        sensitivity,
+        contrast,
+        minFrequency,
+        maxFrequency,
+        broadbandScale,
+        narrowbandScale,
+        customScale,
+        customWindowLengthMs,
+        windowFunction,
+        pitchFloor,
+        pitchCeiling,
+        voicingThreshold,
+        pitchLineWidth,
+        narrowbandPitchFrequencyAligned,
+        maximumFormants,
+        formantsToDisplay,
+        formantCeiling,
+        formantWindowMs,
+        preEmphasisFrom,
+        formantDynamicRange,
+        formantDotSize,
+        intensityPitchFloor,
+        intensityFloor,
+        intensityCeiling,
+        intensityLineWidth,
+        splCalibration,
+        framesPerSecond,
+        renderPixelRatio,
+        analysisPrecision,
+    };
+    currentSourceProfileRef.current = currentSourceProfile;
+    const applySourceProfile = useCallback((profile: SourceSettingsProfile) => {
+        setMode(profile.mode);
+        setPitchAlgorithm(profile.pitchAlgorithm);
+        setWaveformScaleMode(profile.waveformScaleMode);
+        setWaveformGain(profile.waveformGain);
+        setWaveformLineWidth(profile.waveformLineWidth);
+        setWaveformZeroLine(profile.waveformZeroLine);
+        setWaveformPulses(profile.waveformPulses);
+        setSensitivity(profile.sensitivity);
+        setContrast(profile.contrast);
+        setMinFrequency(profile.minFrequency);
+        setMaxFrequency(profile.maxFrequency);
+        setBroadbandScale(profile.broadbandScale);
+        setNarrowbandScale(profile.narrowbandScale);
+        setCustomScale(profile.customScale);
+        setCustomWindowLengthMs(profile.customWindowLengthMs);
+        setWindowFunction(profile.windowFunction);
+        setPitchFloor(profile.pitchFloor);
+        setPitchCeiling(profile.pitchCeiling);
+        setVoicingThreshold(profile.voicingThreshold);
+        setPitchLineWidth(profile.pitchLineWidth);
+        setNarrowbandPitchFrequencyAligned(profile.narrowbandPitchFrequencyAligned);
+        setMaximumFormants(profile.maximumFormants);
+        setFormantsToDisplay(profile.formantsToDisplay);
+        setFormantCeiling(profile.formantCeiling);
+        setFormantWindowMs(profile.formantWindowMs);
+        setPreEmphasisFrom(profile.preEmphasisFrom);
+        setFormantDynamicRange(profile.formantDynamicRange);
+        setFormantDotSize(profile.formantDotSize);
+        setIntensityPitchFloor(profile.intensityPitchFloor);
+        setIntensityFloor(profile.intensityFloor);
+        setIntensityCeiling(profile.intensityCeiling);
+        setIntensityLineWidth(profile.intensityLineWidth);
+        setSplCalibration(profile.splCalibration);
+        setFramesPerSecond(profile.framesPerSecond);
+        setRenderPixelRatio(profile.renderPixelRatio);
+        setAnalysisPrecision(profile.analysisPrecision);
     }, []);
 
     useEffect(() => {
@@ -594,7 +730,57 @@ export default function App({
     }, []);
 
     useEffect(() => {
+        const current = currentSourceProfileRef.current;
+        if (current === null) {
+            return;
+        }
+        if (!sourceProfileInitializedRef.current) {
+            sourceProfileInitializedRef.current = true;
+            sourceProfileModeRef.current = sourceProfileMode;
+            const savedProfile = sourceProfilesRef.current[sourceProfileMode];
+            if (savedProfile !== undefined) {
+                sourceProfileSwitchingRef.current = true;
+                applySourceProfile(savedProfile);
+            }
+            return;
+        }
+        const previousMode = sourceProfileModeRef.current;
+        if (previousMode === sourceProfileMode) {
+            return;
+        }
+        sourceProfilesRef.current[previousMode] = current;
+        const target =
+            sourceProfilesRef.current[sourceProfileMode] ||
+            ({
+                ...current,
+                analysisPrecision: sourceProfileMode === 'live' ? 'balanced' : 'accurate',
+                waveformScaleMode: sourceProfileMode === 'live' ? 'dbfs' : 'normalized',
+            } as SourceSettingsProfile);
+        sourceProfilesRef.current[sourceProfileMode] = target;
+        sourceProfileModeRef.current = sourceProfileMode;
+        sourceProfileSwitchingRef.current = true;
+        applySourceProfile(target);
+    }, [applySourceProfile, sourceProfileMode]);
+
+    useEffect(() => {
+        if (sourceProfileSwitchingRef.current) {
+            sourceProfileSwitchingRef.current = false;
+            return;
+        }
+        sourceProfilesRef.current[sourceProfileMode] = currentSourceProfile;
         const settings: SavedSettings = {
+            liveProfile:
+                sourceProfilesRef.current.live || {
+                    ...currentSourceProfile,
+                    analysisPrecision: 'balanced',
+                    waveformScaleMode: 'dbfs',
+                },
+            fileProfile:
+                sourceProfilesRef.current.file || {
+                    ...currentSourceProfile,
+                    analysisPrecision: 'accurate',
+                    waveformScaleMode: 'normalized',
+                },
             mode,
             pitchAlgorithm,
             pitchVisible,
@@ -653,6 +839,7 @@ export default function App({
             // The visualizer remains usable when browser storage is unavailable.
         }
     }, [
+        sourceProfileMode,
         mode,
         pitchAlgorithm,
         pitchVisible,
@@ -1208,7 +1395,7 @@ export default function App({
             }
             if (tab === 'waveform') {
                 setWaveformThemeName(uiTheme === 'light' ? 'Praat' : 'Aurora');
-                setWaveformScaleMode('dbfs');
+                setWaveformScaleMode(sourceProfileMode === 'live' ? 'dbfs' : 'normalized');
                 setWaveformGain(1);
                 setWaveformLineWidth(1);
                 setWaveformZeroLine(true);
@@ -1238,7 +1425,7 @@ export default function App({
                 setFramesPerSecond(30);
                 setGlassEffect(true);
                 setRenderPixelRatio(1.5);
-                setAnalysisPrecision('accurate');
+                setAnalysisPrecision(sourceProfileMode === 'live' ? 'balanced' : 'accurate');
                 return;
             }
             setIntensityPitchFloor(75);
@@ -1247,7 +1434,7 @@ export default function App({
             setIntensityLineWidth(2.5);
             setSplCalibration(0);
         },
-        [mode, setGradientName, setWaveformThemeName, uiTheme]
+        [mode, setGradientName, setWaveformThemeName, sourceProfileMode, uiTheme]
     );
 
     const toggleFullscreen = useCallback(() => {
@@ -1448,7 +1635,10 @@ export default function App({
                     ) : (
                         <button
                             className="button primary"
-                            onClick={onStartMicrophone}
+                            onClick={() => {
+                                setPlayState('loading-mic');
+                                onStartMicrophone();
+                            }}
                             disabled={playState !== 'stopped'}
                         >
                             <span className="record-icon" />
@@ -1651,23 +1841,21 @@ export default function App({
                                 onClick={() => changeMode('broadband')}
                             >
                                 <strong>{tr('宽带')}</strong>
-                                <span>5 ms · {tr('共振峰')}</span>
+                                <span>5 ms</span>
                             </button>
                             <button
                                 className={mode === 'narrowband' ? 'active' : ''}
                                 onClick={() => changeMode('narrowband')}
                             >
                                 <strong>{tr('窄带')}</strong>
-                                <span>30 ms · {tr('谐波')}</span>
+                                <span>30 ms</span>
                             </button>
                             <button
                                 className={mode === 'custom' ? 'active' : ''}
                                 onClick={() => changeMode('custom')}
                             >
                                 <strong>{tr('自定义')}</strong>
-                                <span>
-                                    {customWindowLengthMs} ms · {tr('可调窗口')}
-                                </span>
+                                <span>{customWindowLengthMs} ms</span>
                             </button>
                         </div>
 
@@ -1839,19 +2027,19 @@ export default function App({
                                         <span
                                             className="axis-title pitch-color"
                                             style={{
-                                                top: `max(2px, calc(${pitchAxisTop(
+                                                top: pitchAxisTop(
                                                     (pitchFloor + pitchCeiling) / 2
-                                                )} - 24px))`,
+                                                ),
                                             }}
                                         >
-                                            {tr('基频Hz')}
+                                            {tr('基频')}
                                         </span>
                                         {cursor !== null && cursorPitchCoordinate !== null && (
                                             <span
                                                 className="axis-cursor-value pitch"
                                                 style={cursorPitchAxisTop}
                                             >
-                                                {cursorPitchCoordinate.toFixed(1)}
+                                                {cursorPitchCoordinate.toFixed(1)} Hz
                                             </span>
                                         )}
                                         <span
@@ -1864,7 +2052,7 @@ export default function App({
                                                     : undefined
                                             }
                                         >
-                                            {pitchCeiling}
+                                            {pitchCeiling} Hz
                                         </span>
                                         <span
                                             className={`spectral-pitch-mark pitch-color ${
@@ -1880,7 +2068,7 @@ export default function App({
                                                     : undefined
                                             }
                                         >
-                                            {Math.round((pitchFloor + pitchCeiling) / 2)}
+                                            {Math.round((pitchFloor + pitchCeiling) / 2)} Hz
                                         </span>
                                         <span
                                             className={`spectral-pitch-mark pitch-color ${
@@ -1892,7 +2080,7 @@ export default function App({
                                                     : undefined
                                             }
                                         >
-                                            {pitchFloor}
+                                            {pitchFloor} Hz
                                         </span>
                                     </div>
                                 )}

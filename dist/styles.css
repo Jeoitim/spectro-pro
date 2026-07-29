@@ -1371,6 +1371,7 @@ button.media-row {
 .axis {
     position: relative;
     min-width: 0;
+    container-type: size;
     color: #adb8c9;
     font-size: 11px;
     font-variant-numeric: tabular-nums;
@@ -1385,8 +1386,9 @@ button.media-row {
     top: 8px;
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.03em;
     text-transform: uppercase;
+    text-orientation: upright;
 }
 
 .axis-left {
@@ -1395,11 +1397,11 @@ button.media-row {
 }
 
 .axis-left .axis-title {
-    top: calc(50% - 24px);
-    right: 4px;
+    top: 50%;
+    right: 2px;
     left: auto;
-    writing-mode: horizontal-tb;
-    transform: none;
+    writing-mode: vertical-rl;
+    transform: translateY(calc(-100% - 8px));
 }
 
 .axis-left .top,
@@ -1450,19 +1452,19 @@ button.media-row {
 }
 
 .axis-right .intensity-axis-title {
-    top: calc(50% - 24px);
+    top: 50%;
     right: auto;
-    left: -4px;
-    writing-mode: horizontal-tb;
-    transform: translateX(-100%);
+    left: -2px;
+    writing-mode: vertical-rl;
+    transform: translateX(-100%) translateY(calc(-100% - 8px));
 }
 
 .axis-right .frequency-axis-title {
-    top: calc(50% - 24px);
+    top: 50%;
     right: auto;
-    left: 4px;
-    writing-mode: horizontal-tb;
-    transform: none;
+    left: 2px;
+    writing-mode: vertical-rl;
+    transform: translateY(calc(-100% - 8px));
 }
 
 .axis-right .top {
@@ -2353,31 +2355,14 @@ html.glass-effects .settings-panel {
         font-size: 8px;
     }
 
-    .axis-left .axis-title {
-        top: calc(50% - 20px);
-        right: 3px;
-        left: auto;
-        writing-mode: horizontal-tb;
-        transform: none;
-    }
-
-    .axis-right .frequency-axis-title {
-        top: calc(50% - 20px);
-        right: auto;
-        left: 3px;
-        writing-mode: horizontal-tb;
-        transform: none;
-    }
-
-    .axis-right .intensity-axis-title {
-        top: calc(50% - 20px);
-        left: -3px;
-        writing-mode: horizontal-tb;
-        transform: translateX(-100%);
-    }
-
     .primary-metrics strong {
         font-size: 26px;
+    }
+}
+
+@container (max-height: 220px) {
+    .axis-title {
+        display: none;
     }
 }
 
