@@ -1518,7 +1518,7 @@ export default function App({
         if (waveformScaleMode === 'normalized') {
             const edge = 1 / Math.max(1e-9, waveformGain);
             return {
-                title: tr('归一化'),
+                title: '',
                 top: edge.toFixed(2),
                 middle: '0',
                 bottom: `−${edge.toFixed(2)}`,
@@ -1586,30 +1586,36 @@ export default function App({
 
         let animationFrame = 0;
         const updateTitleVisibility = () => {
-            const titles = Array.from(root.querySelectorAll<HTMLElement>('[data-axis-title]'));
-            titles.forEach((title) => title.classList.remove('axis-title-hidden'));
-
-            const labels = Array.from(root.querySelectorAll<HTMLElement>('[data-axis-label]'));
-            const labelBoxes = labels.map((label) => ({
-                label,
-                box: label.getBoundingClientRect(),
-            }));
             const collisionGap = 3;
+            root.querySelectorAll<HTMLElement>('.axis, .waveform-axis').forEach((axis) => {
+                const labels = Array.from(axis.querySelectorAll<HTMLElement>('[data-axis-label]'));
+                labels.forEach((label) => label.classList.remove('axis-title-hidden'));
 
-            titles.forEach((title) => {
-                const titleBox = title.getBoundingClientRect();
-                const overlaps = labelBoxes.some(({ label, box }) => {
-                    if (label === title || label.closest('.axis') !== title.closest('.axis')) {
-                        return false;
-                    }
-                    return (
-                        titleBox.left < box.right + collisionGap &&
-                        titleBox.right + collisionGap > box.left &&
-                        titleBox.top < box.bottom + collisionGap &&
-                        titleBox.bottom + collisionGap > box.top
-                    );
-                });
-                title.classList.toggle('axis-title-hidden', overlaps);
+                const axisBox = axis.getBoundingClientRect();
+                const acceptedBoxes: DOMRect[] = [];
+                labels
+                    .sort(
+                        (left, right) =>
+                            Number(right.dataset.axisPriority || 0) -
+                            Number(left.dataset.axisPriority || 0)
+                    )
+                    .forEach((label) => {
+                        const labelBox = label.getBoundingClientRect();
+                        const outsideVertically =
+                            labelBox.top < axisBox.top - 1 || labelBox.bottom > axisBox.bottom + 1;
+                        const overlaps = acceptedBoxes.some(
+                            (box) =>
+                                labelBox.left < box.right + collisionGap &&
+                                labelBox.right + collisionGap > box.left &&
+                                labelBox.top < box.bottom + collisionGap &&
+                                labelBox.bottom + collisionGap > box.top
+                        );
+                        const hidden = outsideVertically || overlaps;
+                        label.classList.toggle('axis-title-hidden', hidden);
+                        if (!hidden) {
+                            acceptedBoxes.push(labelBox);
+                        }
+                    });
             });
         };
         const scheduleUpdate = () => {
@@ -1639,6 +1645,9 @@ export default function App({
         pitchCeiling,
         pitchFloor,
         pitchUsesFrequencyAxis,
+        cursor?.frequencyHz,
+        cursorPitchCoordinate,
+        scale,
         spectrogramVisible,
         waveformScaleMode,
         waveformShare,
@@ -2103,6 +2112,7 @@ export default function App({
                                             className="waveform-label"
                                             data-axis-title
                                             data-axis-label
+                                            data-axis-priority="60"
                                         >
                                             {tr('波形')}
                                         </span>
@@ -2117,6 +2127,7 @@ export default function App({
                                             className="axis-title pitch-color"
                                             data-axis-title
                                             data-axis-label
+                                            data-axis-priority="60"
                                             style={{
                                                 top: pitchAxisTop((pitchFloor + pitchCeiling) / 2),
                                             }}
@@ -2127,6 +2138,7 @@ export default function App({
                                             <span
                                                 className="axis-cursor-value pitch"
                                                 data-axis-label
+                                                data-axis-priority="100"
                                                 style={cursorPitchAxisTop}
                                             >
                                                 {cursorPitchCoordinate.toFixed(1)} Hz
@@ -2137,6 +2149,7 @@ export default function App({
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-top'
                                             }`}
                                             data-axis-label
+                                            data-axis-priority="80"
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? { top: pitchAxisTop(pitchCeiling) }
@@ -2150,6 +2163,7 @@ export default function App({
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-mid'
                                             }`}
                                             data-axis-label
+                                            data-axis-priority="20"
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? {
@@ -2167,6 +2181,7 @@ export default function App({
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-bottom'
                                             }`}
                                             data-axis-label
+                                            data-axis-priority="80"
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? { top: pitchAxisTop(pitchFloor) }
@@ -2372,16 +2387,34 @@ export default function App({
                             <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
                                 {waveformVisible && (
                                     <div className="waveform-axis waveform-axis-right">
-                                        <span className="waveform-axis-title">
-                                            {waveformAxis.title}
-                                        </span>
-                                        <span className="waveform-scale-mark scale-top">
+                                        {waveformAxis.title && (
+                                            <span
+                                                className="waveform-axis-title"
+                                                data-axis-label
+                                                data-axis-priority="90"
+                                            >
+                                                {waveformAxis.title}
+                                            </span>
+                                        )}
+                                        <span
+                                            className="waveform-scale-mark scale-top"
+                                            data-axis-label
+                                            data-axis-priority="80"
+                                        >
                                             {waveformAxis.top}
                                         </span>
-                                        <span className="waveform-scale-mark scale-mid">
+                                        <span
+                                            className="waveform-scale-mark scale-mid"
+                                            data-axis-label
+                                            data-axis-priority="20"
+                                        >
                                             {waveformAxis.middle}
                                         </span>
-                                        <span className="waveform-scale-mark scale-bottom">
+                                        <span
+                                            className="waveform-scale-mark scale-bottom"
+                                            data-axis-label
+                                            data-axis-priority="80"
+                                        >
                                             {waveformAxis.bottom}
                                         </span>
                                     </div>
@@ -2395,6 +2428,7 @@ export default function App({
                                             className="axis-title intensity-axis-title intensity-color"
                                             data-axis-title
                                             data-axis-label
+                                            data-axis-priority="60"
                                         >
                                             {tr('音强')}
                                         </span>
@@ -2402,6 +2436,7 @@ export default function App({
                                             className="axis-title frequency-axis-title"
                                             data-axis-title
                                             data-axis-label
+                                            data-axis-priority="60"
                                         >
                                             {tr('频率')}
                                         </span>
@@ -2409,33 +2444,45 @@ export default function App({
                                             <span
                                                 className="axis-cursor-value frequency"
                                                 data-axis-label
+                                                data-axis-priority="100"
                                                 style={cursorAxisTop}
                                             >
                                                 {cursor.frequencyHz.toFixed(1)} Hz
                                             </span>
                                         )}
-                                        <span className="top" data-axis-label>
+                                        <span
+                                            className="top"
+                                            data-axis-label
+                                            data-axis-priority="80"
+                                        >
                                             {maxFrequency} Hz
                                         </span>
                                         <span
                                             className="spl-top scale-top intensity-color"
                                             data-axis-label
+                                            data-axis-priority="80"
                                         >
                                             {intensityCeiling} dB SPL*
                                         </span>
                                         <span
                                             className="spl-mid scale-mid intensity-color"
                                             data-axis-label
+                                            data-axis-priority="20"
                                         >
                                             {Math.round((intensityFloor + intensityCeiling) / 2)} dB
                                         </span>
                                         <span
                                             className="spl-bottom scale-bottom intensity-color"
                                             data-axis-label
+                                            data-axis-priority="80"
                                         >
                                             {intensityFloor} dB SPL*
                                         </span>
-                                        <span className="bottom" data-axis-label>
+                                        <span
+                                            className="bottom"
+                                            data-axis-label
+                                            data-axis-priority="80"
+                                        >
                                             {minFrequency} Hz
                                         </span>
                                     </div>
