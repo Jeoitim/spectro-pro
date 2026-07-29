@@ -1074,6 +1074,7 @@ button.media-row {
 .waveform-axis {
     position: relative;
     min-height: 0;
+    clip-path: inset(0 -100vw);
     color: #7394aa;
     font-size: 9px;
     font-weight: 700;
@@ -1379,6 +1380,7 @@ button.media-row {
 .axis {
     position: relative;
     min-width: 0;
+    clip-path: inset(0 -100vw);
     container-type: size;
     color: #adb8c9;
     font-size: 11px;

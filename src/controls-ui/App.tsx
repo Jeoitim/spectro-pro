@@ -4,6 +4,7 @@ import React, {
     PointerEvent as ReactPointerEvent,
     useCallback,
     useEffect,
+    useLayoutEffect,
     useRef,
     useState,
 } from 'react';
@@ -679,7 +680,7 @@ export default function App({
         setAnalysisPrecision(profile.analysisPrecision);
     }, []);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         registerController({
             setPlayState: (state, source = sourceName, message = '') => {
                 setPlayState(state);
@@ -1623,13 +1624,15 @@ export default function App({
             animationFrame = window.requestAnimationFrame(updateTitleVisibility);
         };
         const resizeObserver =
-            typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleUpdate);
+            typeof ResizeObserver === 'undefined'
+                ? null
+                : new ResizeObserver(updateTitleVisibility);
         resizeObserver?.observe(root);
         root.querySelectorAll<HTMLElement>('.axis, .waveform-axis').forEach((axis) => {
             resizeObserver?.observe(axis);
         });
         window.addEventListener('resize', scheduleUpdate);
-        scheduleUpdate();
+        updateTitleVisibility();
 
         return () => {
             window.cancelAnimationFrame(animationFrame);
