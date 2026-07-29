@@ -809,9 +809,11 @@ button.media-row {
 
 .toolbar-center .plot-toggles button,
 .overlay-toggles button {
-    display: inline-flex;
+    display: inline-grid;
+    grid-template-columns: 6px minmax(0, 1fr);
     align-items: center;
     justify-content: center;
+    column-gap: 4px;
     min-height: 32px;
     padding: 0 10px;
     border: 1px solid var(--line);
@@ -842,12 +844,14 @@ button.media-row {
     width: 6px;
     height: 6px;
     flex: 0 0 auto;
-    margin-right: 4px;
+    margin-right: 0;
     border-radius: 50%;
     background: currentColor;
+    transform: translateY(-1px);
 }
 
 .toggle-label {
+    align-self: center;
     line-height: 1;
 }
 
