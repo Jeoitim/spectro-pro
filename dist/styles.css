@@ -1095,6 +1095,14 @@ button.media-row {
     right: 6px;
 }
 
+.waveform-axis-left .waveform-label {
+    top: 50%;
+    right: 2px;
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+    transform: translateY(calc(-100% - 8px));
+}
+
 .waveform-axis-right {
     border-left: 1px solid var(--line);
 }
@@ -1391,6 +1399,10 @@ button.media-row {
     text-orientation: upright;
 }
 
+.axis-title-hidden {
+    visibility: hidden;
+}
+
 .axis-left {
     border-right: 1px solid var(--line);
     text-align: right;
@@ -1398,8 +1410,9 @@ button.media-row {
 
 .axis-left .axis-title {
     top: 50%;
-    right: 2px;
-    left: auto;
+    right: auto;
+    left: calc(100% + 3px);
+    z-index: 5;
     writing-mode: vertical-rl;
     transform: translateY(calc(-100% - 8px));
 }
@@ -2357,12 +2370,6 @@ html.glass-effects .settings-panel {
 
     .primary-metrics strong {
         font-size: 26px;
-    }
-}
-
-@container (max-height: 220px) {
-    .axis-title {
-        display: none;
     }
 }
 

@@ -326,10 +326,29 @@ interface SavedSettings {
 }
 
 const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v2';
+const NARROWBAND_FREQUENCY_DEFAULT_MIGRATION_KEY =
+    'spectro-pro.migrations.narrowband-frequency-default.v1';
 
 const loadSavedSettings = (): Partial<SavedSettings> => {
     try {
-        return JSON.parse(window.localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+        const settings = JSON.parse(
+            window.localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}'
+        ) as Partial<SavedSettings>;
+        if (
+            window.localStorage.getItem(NARROWBAND_FREQUENCY_DEFAULT_MIGRATION_KEY) !== 'complete'
+        ) {
+            if (settings.maxFrequency === 1200) {
+                settings.maxFrequency = 5500;
+            }
+            if (settings.liveProfile?.maxFrequency === 1200) {
+                settings.liveProfile.maxFrequency = 5500;
+            }
+            if (settings.fileProfile?.maxFrequency === 1200) {
+                settings.fileProfile.maxFrequency = 5500;
+            }
+            window.localStorage.setItem(NARROWBAND_FREQUENCY_DEFAULT_MIGRATION_KEY, 'complete');
+        }
+        return settings;
     } catch {
         return {};
     }
@@ -446,8 +465,7 @@ export default function App({
     const [lightWaveformThemeName, setLightWaveformThemeName] = useState<WaveformThemeName>(
         initialLightWaveformThemeName
     );
-    const waveformThemeName =
-        uiTheme === 'dark' ? darkWaveformThemeName : lightWaveformThemeName;
+    const waveformThemeName = uiTheme === 'dark' ? darkWaveformThemeName : lightWaveformThemeName;
     const setWaveformThemeName = useCallback(
         (themeName: WaveformThemeName) => {
             if (uiTheme === 'dark') {
@@ -552,6 +570,7 @@ export default function App({
     const dragStartRef = useRef<number | null>(null);
     const touchPanRef = useRef<{ pointerId: number; lastX: number } | null>(null);
     const plotContainerRef = useRef<HTMLDivElement | null>(null);
+    const axisViewRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
@@ -769,18 +788,16 @@ export default function App({
         }
         sourceProfilesRef.current[sourceProfileMode] = currentSourceProfile;
         const settings: SavedSettings = {
-            liveProfile:
-                sourceProfilesRef.current.live || {
-                    ...currentSourceProfile,
-                    analysisPrecision: 'balanced',
-                    waveformScaleMode: 'dbfs',
-                },
-            fileProfile:
-                sourceProfilesRef.current.file || {
-                    ...currentSourceProfile,
-                    analysisPrecision: 'accurate',
-                    waveformScaleMode: 'normalized',
-                },
+            liveProfile: sourceProfilesRef.current.live || {
+                ...currentSourceProfile,
+                analysisPrecision: 'balanced',
+                waveformScaleMode: 'dbfs',
+            },
+            fileProfile: sourceProfilesRef.current.file || {
+                ...currentSourceProfile,
+                analysisPrecision: 'accurate',
+                waveformScaleMode: 'normalized',
+            },
             mode,
             pitchAlgorithm,
             pitchVisible,
@@ -1380,7 +1397,7 @@ export default function App({
                 setSensitivity(0.42);
                 setContrast(0.32);
                 setMinFrequency(0);
-                setMaxFrequency(mode === 'narrowband' ? 1200 : 5500);
+                setMaxFrequency(5500);
                 setCustomWindowLengthMs(15);
                 setWindowFunction('gaussian');
                 if (mode === 'broadband') {
@@ -1482,8 +1499,7 @@ export default function App({
             : {
                   top: `${(cursor.y * 100).toFixed(3)}%`,
               };
-    const pitchUsesFrequencyAxis =
-        mode === 'narrowband' && narrowbandPitchFrequencyAligned;
+    const pitchUsesFrequencyAxis = mode === 'narrowband' && narrowbandPitchFrequencyAligned;
     const pitchAxisTop = (frequency: number) => {
         const ratio = pitchUsesFrequencyAxis
             ? (frequencyToScale(frequency, scale) - frequencyToScale(minFrequency, scale)) /
@@ -1561,6 +1577,73 @@ export default function App({
         waveformVisible && spectrogramVisible
             ? `${waveformShare}fr 8px ${1 - waveformShare}fr`
             : 'minmax(0, 1fr)';
+
+    useEffect(() => {
+        const root = axisViewRef.current;
+        if (root === null) {
+            return undefined;
+        }
+
+        let animationFrame = 0;
+        const updateTitleVisibility = () => {
+            const titles = Array.from(root.querySelectorAll<HTMLElement>('[data-axis-title]'));
+            titles.forEach((title) => title.classList.remove('axis-title-hidden'));
+
+            const labels = Array.from(root.querySelectorAll<HTMLElement>('[data-axis-label]'));
+            const labelBoxes = labels.map((label) => ({
+                label,
+                box: label.getBoundingClientRect(),
+            }));
+            const collisionGap = 3;
+
+            titles.forEach((title) => {
+                const titleBox = title.getBoundingClientRect();
+                const overlaps = labelBoxes.some(({ label, box }) => {
+                    if (label === title || label.closest('.axis') !== title.closest('.axis')) {
+                        return false;
+                    }
+                    return (
+                        titleBox.left < box.right + collisionGap &&
+                        titleBox.right + collisionGap > box.left &&
+                        titleBox.top < box.bottom + collisionGap &&
+                        titleBox.bottom + collisionGap > box.top
+                    );
+                });
+                title.classList.toggle('axis-title-hidden', overlaps);
+            });
+        };
+        const scheduleUpdate = () => {
+            window.cancelAnimationFrame(animationFrame);
+            animationFrame = window.requestAnimationFrame(updateTitleVisibility);
+        };
+        const resizeObserver =
+            typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleUpdate);
+        resizeObserver?.observe(root);
+        root.querySelectorAll<HTMLElement>('.axis, .waveform-axis').forEach((axis) => {
+            resizeObserver?.observe(axis);
+        });
+        window.addEventListener('resize', scheduleUpdate);
+        scheduleUpdate();
+
+        return () => {
+            window.cancelAnimationFrame(animationFrame);
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', scheduleUpdate);
+        };
+    }, [
+        intensityCeiling,
+        intensityFloor,
+        locale,
+        maxFrequency,
+        minFrequency,
+        pitchCeiling,
+        pitchFloor,
+        pitchUsesFrequencyAxis,
+        spectrogramVisible,
+        waveformScaleMode,
+        waveformShare,
+        waveformVisible,
+    ]);
 
     return (
         <div className="app-shell">
@@ -2011,12 +2094,18 @@ export default function App({
                         </div>
                     </div>
 
-                    <div className="praat-view">
+                    <div ref={axisViewRef} className="praat-view">
                         <div className="axis-stack">
                             <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
                                 {waveformVisible && (
                                     <div className="waveform-axis waveform-axis-left">
-                                        <span>{tr('波形')}</span>
+                                        <span
+                                            className="waveform-label"
+                                            data-axis-title
+                                            data-axis-label
+                                        >
+                                            {tr('波形')}
+                                        </span>
                                     </div>
                                 )}
                                 {waveformVisible && spectrogramVisible && (
@@ -2026,10 +2115,10 @@ export default function App({
                                     <div className="axis axis-left">
                                         <span
                                             className="axis-title pitch-color"
+                                            data-axis-title
+                                            data-axis-label
                                             style={{
-                                                top: pitchAxisTop(
-                                                    (pitchFloor + pitchCeiling) / 2
-                                                ),
+                                                top: pitchAxisTop((pitchFloor + pitchCeiling) / 2),
                                             }}
                                         >
                                             {tr('基频')}
@@ -2037,6 +2126,7 @@ export default function App({
                                         {cursor !== null && cursorPitchCoordinate !== null && (
                                             <span
                                                 className="axis-cursor-value pitch"
+                                                data-axis-label
                                                 style={cursorPitchAxisTop}
                                             >
                                                 {cursorPitchCoordinate.toFixed(1)} Hz
@@ -2046,6 +2136,7 @@ export default function App({
                                             className={`spectral-pitch-mark pitch-color ${
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-top'
                                             }`}
+                                            data-axis-label
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? { top: pitchAxisTop(pitchCeiling) }
@@ -2058,6 +2149,7 @@ export default function App({
                                             className={`spectral-pitch-mark pitch-color ${
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-mid'
                                             }`}
+                                            data-axis-label
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? {
@@ -2074,6 +2166,7 @@ export default function App({
                                             className={`spectral-pitch-mark pitch-color ${
                                                 pitchUsesFrequencyAxis ? 'aligned' : 'scale-bottom'
                                             }`}
+                                            data-axis-label
                                             style={
                                                 pitchUsesFrequencyAxis
                                                     ? { top: pitchAxisTop(pitchFloor) }
@@ -2298,31 +2391,53 @@ export default function App({
                                 )}
                                 {spectrogramVisible && (
                                     <div className="axis axis-right">
-                                        <span className="axis-title intensity-axis-title intensity-color">
+                                        <span
+                                            className="axis-title intensity-axis-title intensity-color"
+                                            data-axis-title
+                                            data-axis-label
+                                        >
                                             {tr('音强')}
                                         </span>
-                                        <span className="axis-title frequency-axis-title">
+                                        <span
+                                            className="axis-title frequency-axis-title"
+                                            data-axis-title
+                                            data-axis-label
+                                        >
                                             {tr('频率')}
                                         </span>
                                         {cursor && (
                                             <span
                                                 className="axis-cursor-value frequency"
+                                                data-axis-label
                                                 style={cursorAxisTop}
                                             >
                                                 {cursor.frequencyHz.toFixed(1)} Hz
                                             </span>
                                         )}
-                                        <span className="top">{maxFrequency} Hz</span>
-                                        <span className="spl-top scale-top intensity-color">
+                                        <span className="top" data-axis-label>
+                                            {maxFrequency} Hz
+                                        </span>
+                                        <span
+                                            className="spl-top scale-top intensity-color"
+                                            data-axis-label
+                                        >
                                             {intensityCeiling} dB SPL*
                                         </span>
-                                        <span className="spl-mid scale-mid intensity-color">
+                                        <span
+                                            className="spl-mid scale-mid intensity-color"
+                                            data-axis-label
+                                        >
                                             {Math.round((intensityFloor + intensityCeiling) / 2)} dB
                                         </span>
-                                        <span className="spl-bottom scale-bottom intensity-color">
+                                        <span
+                                            className="spl-bottom scale-bottom intensity-color"
+                                            data-axis-label
+                                        >
                                             {intensityFloor} dB SPL*
                                         </span>
-                                        <span className="bottom">{minFrequency} Hz</span>
+                                        <span className="bottom" data-axis-label>
+                                            {minFrequency} Hz
+                                        </span>
                                     </div>
                                 )}
                             </div>
@@ -2852,7 +2967,9 @@ export default function App({
                                 <span>
                                     <strong>{tr('窄带基频与频率轴对齐')}</strong>
                                     <small>
-                                        {tr('让基频曲线与语谱频率使用同一纵坐标，以检查第一谐波重叠')}
+                                        {tr(
+                                            '让基频曲线与语谱频率使用同一纵坐标，以检查第一谐波重叠'
+                                        )}
                                     </small>
                                 </span>
                                 <input
