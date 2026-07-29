@@ -13,12 +13,8 @@ import {
     TransportSnapshot,
     UiController,
 } from './controls-ui/App';
-import {
-    Circular2DBuffer,
-    clamp,
-    frequencyToScale,
-    scaleToFrequency,
-} from './math-util';
+import { t } from './i18n';
+import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import { offThreadAnalyzeEntireFile, offThreadGenerateSpectrogram } from './worker-util';
 
@@ -547,8 +543,7 @@ class SpectroEngine {
         const visible = this.visibleHistoryRange();
         const index = clamp(
             Math.floor(
-                visible.start +
-                    clamp(xRatio, 0, 1) * Math.max(1, visible.end - visible.start)
+                visible.start + clamp(xRatio, 0, 1) * Math.max(1, visible.end - visible.start)
             ),
             0,
             Math.max(0, this.analysisHistory.length - 1)
@@ -666,8 +661,7 @@ class SpectroEngine {
         const frequency = scaleToFrequency(
             frequencyToScale(minFrequency, scale) +
                 (1 - y) *
-                    (frequencyToScale(maxFrequency, scale) -
-                        frequencyToScale(minFrequency, scale)),
+                    (frequencyToScale(maxFrequency, scale) - frequencyToScale(minFrequency, scale)),
             scale
         );
         const snapshot: CursorSnapshot = {
@@ -796,7 +790,11 @@ class SpectroEngine {
         ctx.stroke();
         ctx.fillStyle = '#9aa7bc';
         ctx.font = '12px Arial, sans-serif';
-        ctx.fillText(this.mode === 'broadband' ? '宽带 · 5 ms' : '窄带 · 30 ms', 32, 88);
+        ctx.fillText(
+            this.mode === 'broadband' ? `${t('宽带')} · 5 ms` : `${t('窄带')} · 30 ms`,
+            32,
+            88
+        );
         exportCanvas.toBlob((blob) => {
             if (!blob) {
                 return;
@@ -940,10 +938,7 @@ class SpectroEngine {
     private startMediaPlayback(item: MediaItem) {
         const rangeStart = this.playbackRange?.startSeconds ?? 0;
         const rangeEnd = this.playbackRange?.endSeconds ?? item.durationSeconds;
-        if (
-            this.playbackOffsetSeconds < rangeStart ||
-            this.playbackOffsetSeconds >= rangeEnd
-        ) {
+        if (this.playbackOffsetSeconds < rangeStart || this.playbackOffsetSeconds >= rangeEnd) {
             this.playbackOffsetSeconds = rangeStart;
         }
         this.stopMediaPlayback(false);
@@ -962,7 +957,10 @@ class SpectroEngine {
                 return;
             }
             this.playbackOffsetSeconds = rangeEnd;
+            this.sessionElapsedSeconds = rangeEnd;
             this.stopMediaPlayback(false);
+            this.updateSnapshotAtPlaybackOffset(true);
+            this.overlayDirty = true;
             this.ui.setPlayState(
                 'stopped',
                 item.name,
@@ -1048,7 +1046,7 @@ class SpectroEngine {
         const sequence = this.mediaItems.filter((item) => item.type === 'recording').length;
         const item: MediaItem = {
             id: `recording-${Date.now()}-${(this.mediaSequence += 1)}`,
-            name: `录音 ${sequence + 1}`,
+            name: `${t('录音')} ${sequence + 1}`,
             type: 'recording',
             state: 'analyzing',
             durationSeconds: samples.length / this.recordingSampleRate,
@@ -1091,9 +1089,7 @@ class SpectroEngine {
         const viewStartSeconds =
             item === null ? 0 : (item.durationSeconds * visible.start) / analysisLength;
         const viewEndSeconds =
-            item === null
-                ? 0
-                : (item.durationSeconds * visible.end) / analysisLength;
+            item === null ? 0 : (item.durationSeconds * visible.end) / analysisLength;
         const snapshot: TransportSnapshot = {
             activeId: item?.id || null,
             currentSeconds: item === null ? 0 : this.playbackOffsetSeconds,
@@ -1355,13 +1351,8 @@ class SpectroEngine {
             return (
                 height *
                 (1 -
-                    (frequencyToScale(frequency, scale) -
-                        frequencyToScale(min, scale)) /
-                        Math.max(
-                            1e-9,
-                            frequencyToScale(max, scale) -
-                                frequencyToScale(min, scale)
-                        ))
+                    (frequencyToScale(frequency, scale) - frequencyToScale(min, scale)) /
+                        Math.max(1e-9, frequencyToScale(max, scale) - frequencyToScale(min, scale)))
             );
         };
 
@@ -1442,12 +1433,9 @@ class SpectroEngine {
                 ? 0
                 : (activeMedia.durationSeconds * visible.start) / analysisLength;
         const viewEndSeconds =
-            activeMedia === null
-                ? 0
-                : (activeMedia.durationSeconds * visible.end) / analysisLength;
+            activeMedia === null ? 0 : (activeMedia.durationSeconds * visible.end) / analysisLength;
         const xForTime = (seconds: number) =>
-            ((seconds - viewStartSeconds) /
-                Math.max(0.001, viewEndSeconds - viewStartSeconds)) *
+            ((seconds - viewStartSeconds) / Math.max(0.001, viewEndSeconds - viewStartSeconds)) *
             width;
 
         if (this.selection !== null) {
@@ -1464,12 +1452,7 @@ class SpectroEngine {
             if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
                 ctx.save();
                 ctx.fillStyle = 'rgba(37, 136, 255, 0.14)';
-                ctx.fillRect(
-                    selectionLeft,
-                    0,
-                    Math.max(1, selectionRight - selectionLeft),
-                    height
-                );
+                ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
                 ctx.strokeStyle = 'rgba(105, 174, 255, 0.95)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([4, 4]);
@@ -1508,8 +1491,7 @@ class SpectroEngine {
             ctx.save();
             const inspectorIndex = clamp(
                 Math.floor(
-                    visible.start +
-                        this.inspector.x * Math.max(1, visible.end - visible.start)
+                    visible.start + this.inspector.x * Math.max(1, visible.end - visible.start)
                 ),
                 visible.start,
                 Math.max(visible.start, visible.end - 1)

@@ -10,6 +10,7 @@
   },
   "include": [
     "src/analysis.ts",
+    "src/i18n.ts",
     "src/math-util.ts",
     "src/spectrogram.ts",
     "src/types/jsfft*.d.ts",

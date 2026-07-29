@@ -6,15 +6,35 @@ import React, {
     useRef,
     useState,
 } from 'react';
+import ClearAllIcon from '@material-ui/icons/ClearAll';
+import CloseIcon from '@material-ui/icons/Close';
+import CloudUploadIcon from '@material-ui/icons/CloudUpload';
+import DeleteOutlineIcon from '@material-ui/icons/DeleteOutline';
+import DeleteSweepIcon from '@material-ui/icons/DeleteSweep';
+import ImageOutlinedIcon from '@material-ui/icons/ImageOutlined';
+import LanguageIcon from '@material-ui/icons/Language';
+import QueueMusicIcon from '@material-ui/icons/QueueMusic';
+import RestoreIcon from '@material-ui/icons/Restore';
+import SaveAltIcon from '@material-ui/icons/SaveAlt';
+import StopIcon from '@material-ui/icons/Stop';
 
 import { AnalysisOptions, PitchAlgorithm } from '../analysis';
 import { GRADIENTS } from '../color-util';
+import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
 import { frequencyToScale } from '../math-util';
 import { Scale } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
 
 export type SpectrogramMode = 'broadband' | 'narrowband';
 export type PlayState = 'stopped' | 'loading-file' | 'loading-mic' | 'playing';
+type MetricSelection =
+    | 'pitch'
+    | 'intensity'
+    | 'formant1'
+    | 'formant2'
+    | 'formant3'
+    | 'formant4'
+    | 'formant5';
 
 export interface LiveSnapshot {
     elapsedSeconds: number;
@@ -215,6 +235,7 @@ export default function App({
         savedSettingsRef.current = loadSavedSettings();
     }
     const saved = savedSettingsRef.current || {};
+    const [locale, setLocale] = useState<Locale>(() => getActiveLocale());
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
     const [statusMessage, setStatusMessage] = useState('选择麦克风或音频文件开始');
@@ -232,51 +253,34 @@ export default function App({
     const [intensityVisible, setIntensityVisible] = useState(saved.intensityVisible ?? true);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
+    const [selectedMetric, setSelectedMetric] = useState<MetricSelection>('pitch');
     const [sensitivity, setSensitivity] = useState(saved.sensitivity ?? 0.42);
     const [contrast, setContrast] = useState(saved.contrast ?? 0.32);
     const [zoom, setZoom] = useState(saved.zoom ?? 1);
     const [minFrequency, setMinFrequency] = useState(saved.minFrequency ?? 0);
     const [maxFrequency, setMaxFrequency] = useState(saved.maxFrequency ?? 5500);
     const [broadbandScale, setBroadbandScale] = useState<Scale>(
-        saved.broadbandScale ||
-            (saved.mode === 'broadband' ? saved.scale : undefined) ||
-            'linear'
+        saved.broadbandScale || (saved.mode === 'broadband' ? saved.scale : undefined) || 'linear'
     );
     const [narrowbandScale, setNarrowbandScale] = useState<Scale>(
-        saved.narrowbandScale ||
-            (saved.mode === 'narrowband' ? saved.scale : undefined) ||
-            'log'
+        saved.narrowbandScale || (saved.mode === 'narrowband' ? saved.scale : undefined) || 'log'
     );
     const [gradientName, setGradientName] = useState(saved.gradientName || 'Aurora');
     const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
     const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
-    const [voicingThreshold, setVoicingThreshold] = useState(
-        saved.voicingThreshold ?? 0.6
-    );
+    const [voicingThreshold, setVoicingThreshold] = useState(saved.voicingThreshold ?? 0.6);
     const [pitchLineWidth, setPitchLineWidth] = useState(saved.pitchLineWidth ?? 2.5);
     const [maximumFormants, setMaximumFormants] = useState(saved.maximumFormants ?? 5);
-    const [formantsToDisplay, setFormantsToDisplay] = useState(
-        saved.formantsToDisplay ?? 5
-    );
+    const [formantsToDisplay, setFormantsToDisplay] = useState(saved.formantsToDisplay ?? 5);
     const [formantCeiling, setFormantCeiling] = useState(saved.formantCeiling ?? 5500);
     const [formantWindowMs, setFormantWindowMs] = useState(saved.formantWindowMs ?? 25);
-    const [preEmphasisFrom, setPreEmphasisFrom] = useState(
-        saved.preEmphasisFrom ?? 50
-    );
-    const [formantDynamicRange, setFormantDynamicRange] = useState(
-        saved.formantDynamicRange ?? 30
-    );
+    const [preEmphasisFrom, setPreEmphasisFrom] = useState(saved.preEmphasisFrom ?? 50);
+    const [formantDynamicRange, setFormantDynamicRange] = useState(saved.formantDynamicRange ?? 30);
     const [formantDotSize, setFormantDotSize] = useState(saved.formantDotSize ?? 2.4);
-    const [intensityPitchFloor, setIntensityPitchFloor] = useState(
-        saved.intensityPitchFloor ?? 75
-    );
+    const [intensityPitchFloor, setIntensityPitchFloor] = useState(saved.intensityPitchFloor ?? 75);
     const [intensityFloor, setIntensityFloor] = useState(saved.intensityFloor ?? 50);
-    const [intensityCeiling, setIntensityCeiling] = useState(
-        saved.intensityCeiling ?? 100
-    );
-    const [intensityLineWidth, setIntensityLineWidth] = useState(
-        saved.intensityLineWidth ?? 2.5
-    );
+    const [intensityCeiling, setIntensityCeiling] = useState(saved.intensityCeiling ?? 100);
+    const [intensityLineWidth, setIntensityLineWidth] = useState(saved.intensityLineWidth ?? 2.5);
     const [splCalibration, setSplCalibration] = useState(saved.splCalibration ?? 0);
     const [timeOffset, setTimeOffset] = useState(0);
     const [playlistOpen, setPlaylistOpen] = useState(true);
@@ -306,6 +310,11 @@ export default function App({
     const metricsRef = useRef<HTMLElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
     const scale = mode === 'broadband' ? broadbandScale : narrowbandScale;
+    const tr = useCallback((text: string) => translate(text, locale), [locale]);
+    const localizedSourceName = sourceName.replace(
+        /^(\d+) 个文件$/,
+        (_, count: string) => `${count} ${tr('个文件')}`
+    );
 
     useEffect(() => {
         registerController({
@@ -333,6 +342,20 @@ export default function App({
             updateSelection: setSelection,
         });
     }, [registerController]);
+
+    useEffect(() => {
+        document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
+        document.title = tr('Spectro Pro · 实时声学显示器');
+        const description = document.querySelector('meta[name="description"]');
+        description?.setAttribute(
+            'content',
+            tr('Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具。')
+        );
+        const ogTitle = document.querySelector('meta[property="og:title"]');
+        ogTitle?.setAttribute('content', tr('Spectro Pro · 实时声学显示器'));
+        const ogDescription = document.querySelector('meta[property="og:description"]');
+        ogDescription?.setAttribute('content', tr('宽带与窄带语谱实时基频共振峰和音强曲线'));
+    }, [locale, tr]);
 
     useEffect(() => {
         const settings: SavedSettings = {
@@ -482,24 +505,23 @@ export default function App({
     }, [maximumFormants]);
 
     useEffect(() => {
-        onOverlayChange(
-            pitchVisible,
-            mode === 'broadband' && formantsVisible,
-            intensityVisible
-        );
+        onOverlayChange(pitchVisible, mode === 'broadband' && formantsVisible, intensityVisible);
     }, [pitchVisible, formantsVisible, intensityVisible, mode, onOverlayChange]);
 
     useEffect(() => {
         onModeChange(mode);
     }, [mode, onModeChange]);
 
-    const changeMode = useCallback(
-        (newMode: SpectrogramMode) => {
-            setMode(newMode);
-            setTimeOffset(0);
-        },
-        []
-    );
+    useEffect(() => {
+        if (mode === 'narrowband' && selectedMetric.indexOf('formant') === 0) {
+            setSelectedMetric('pitch');
+        }
+    }, [mode, selectedMetric]);
+
+    const changeMode = useCallback((newMode: SpectrogramMode) => {
+        setMode(newMode);
+        setTimeOffset(0);
+    }, []);
 
     const chooseFile = useCallback(() => fileRef.current?.click(), []);
     const loadFile = useCallback(
@@ -586,8 +608,7 @@ export default function App({
             if (event.button !== 0) {
                 return;
             }
-            const panel =
-                panelName === 'playlist' ? playlistRef.current : metricsRef.current;
+            const panel = panelName === 'playlist' ? playlistRef.current : metricsRef.current;
             if (panel === null) {
                 return;
             }
@@ -711,13 +732,47 @@ export default function App({
     }, []);
 
     const selectedGradient = GRADIENTS.find((item) => item.name === gradientName);
+    const selectedFormantIndex =
+        selectedMetric.indexOf('formant') === 0
+            ? Number(selectedMetric.replace('formant', '')) - 1
+            : -1;
+    const collapsedMetric =
+        selectedMetric === 'pitch'
+            ? {
+                  label: 'F0',
+                  value: snapshot.pitchHz,
+                  unit: 'Hz',
+                  color: 'pitch',
+                  digits: 1,
+              }
+            : selectedMetric === 'intensity'
+            ? {
+                  label: tr('音强'),
+                  value: snapshot.intensityDbSpl,
+                  unit: 'dB',
+                  color: 'intensity',
+                  digits: 1,
+              }
+            : {
+                  label: `F${selectedFormantIndex + 1}`,
+                  value: snapshot.formantsHz[selectedFormantIndex] ?? null,
+                  unit: 'Hz',
+                  color: 'formant',
+                  digits: 0,
+              };
+    const availableMetrics: MetricSelection[] =
+        mode === 'broadband'
+            ? ['pitch', 'intensity', 'formant1', 'formant2', 'formant3', 'formant4', 'formant5']
+            : ['pitch', 'intensity'];
+    const cycleSelectedMetric = () => {
+        const currentIndex = availableMetrics.indexOf(selectedMetric);
+        setSelectedMetric(availableMetrics[(currentIndex + 1) % availableMetrics.length]);
+    };
     const cursorAxisTop =
         cursor === null
             ? undefined
             : {
-                  top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(
-                      cursor.y * 50
-                  ).toFixed(2)}px)`,
+                  top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(cursor.y * 50).toFixed(2)}px)`,
               };
     const cursorPitchCoordinate =
         cursor === null
@@ -779,13 +834,13 @@ export default function App({
                 <div className="source-status">
                     <span className={`status-dot ${playState}`} />
                     <div>
-                        <strong>{sourceName}</strong>
-                        <span>{statusMessage}</span>
+                        <strong>{tr(localizedSourceName)}</strong>
+                        <span>{tr(statusMessage)}</span>
                     </div>
                 </div>
 
                 <div className="session-clock">
-                    <span>会话时间</span>
+                    <span>{tr('会话时间')}</span>
                     <strong>{formatTime(snapshot.elapsedSeconds)}</strong>
                 </div>
 
@@ -803,17 +858,20 @@ export default function App({
                         onClick={chooseFile}
                         disabled={playState !== 'stopped'}
                     >
-                        导入音频
+                        <CloudUploadIcon aria-hidden="true" />
+                        {tr('导入音频')}
                     </button>
                     <button
                         className={`button secondary ${playlistOpen ? 'active' : ''}`}
                         onClick={() => setPlaylistOpen(!playlistOpen)}
                     >
-                        播放列表
+                        <QueueMusicIcon aria-hidden="true" />
+                        {tr('播放列表')}
                     </button>
                     {playState === 'playing' && transport.activeId === null ? (
                         <button className="button danger" onClick={stop}>
-                            停止
+                            <StopIcon aria-hidden="true" />
+                            {tr('停止')}
                         </button>
                     ) : (
                         <button
@@ -822,14 +880,27 @@ export default function App({
                             disabled={playState !== 'stopped'}
                         >
                             <span className="record-icon" />
-                            麦克风
+                            {tr('麦克风')}
                         </button>
                     )}
                     <button
+                        className="icon-button language-button"
+                        onClick={() => {
+                            const nextLocale = locale === 'zh' ? 'en' : 'zh';
+                            setActiveLocale(nextLocale);
+                            setLocale(nextLocale);
+                        }}
+                        aria-label={tr(locale === 'zh' ? '切换到英文' : '切换到中文')}
+                        title={tr(locale === 'zh' ? '切换到英文' : '切换到中文')}
+                    >
+                        <LanguageIcon aria-hidden="true" />
+                        <span>{locale === 'zh' ? 'EN' : '中'}</span>
+                    </button>
+                    <button
                         className="icon-button"
                         onClick={() => setSettingsOpen(!settingsOpen)}
-                        aria-label="显示设置"
-                        title="显示设置"
+                        aria-label={tr('显示设置')}
+                        title={tr('显示设置')}
                     >
                         <span className="sliders-icon" />
                     </button>
@@ -858,7 +929,11 @@ export default function App({
                         >
                             <span className="eyebrow">MEDIA LIBRARY</span>
                             <strong>
-                                播放列表
+                                <QueueMusicIcon
+                                    className="playlist-heading-icon"
+                                    aria-hidden="true"
+                                />
+                                {tr('播放列表')}
                                 <small>{mediaItems.length}</small>
                             </strong>
                         </div>
@@ -867,22 +942,23 @@ export default function App({
                                 className="clear-playlist"
                                 onClick={onClearPlaylist}
                                 disabled={mediaItems.length === 0}
-                                aria-label="清空播放列表"
-                                title="清空播放列表"
+                                aria-label={tr('清空播放列表')}
+                                title={tr('清空播放列表')}
                             >
-                                清空
+                                <DeleteSweepIcon aria-hidden="true" />
+                                {tr('清空')}
                             </button>
                             <button
                                 onClick={() => setPlaylistCollapsed(!playlistCollapsed)}
-                                aria-label={playlistCollapsed ? '展开播放列表' : '收起播放列表'}
-                                title={playlistCollapsed ? '展开列表' : '收起列表'}
+                                aria-label={tr(playlistCollapsed ? '展开播放列表' : '收起播放列表')}
+                                title={tr(playlistCollapsed ? '展开列表' : '收起列表')}
                             >
                                 {playlistCollapsed ? '+' : '−'}
                             </button>
                             <button
                                 onClick={() => setPlaylistOpen(false)}
-                                aria-label="关闭播放列表"
-                                title="关闭播放列表"
+                                aria-label={tr('关闭播放列表')}
+                                title={tr('关闭播放列表')}
                             >
                                 ×
                             </button>
@@ -894,14 +970,16 @@ export default function App({
                     >
                         <span className="media-kind">LIVE</span>
                         <span className="media-copy">
-                            <strong>麦克风</strong>
-                            <small>始终置顶 · 结束后生成录音分段</small>
+                            <strong>{tr('麦克风')}</strong>
+                            <small>{tr('始终置顶 · 结束后生成录音分段')}</small>
                         </span>
                         <i className={`status-dot ${playState}`} />
                     </button>
                     <div className="media-list">
                         {mediaItems.length === 0 ? (
-                            <p className="media-empty">导入音频或录制一段声音后，会保留在这里。</p>
+                            <p className="media-empty">
+                                {tr('导入音频或录制一段声音后，会保留在这里。')}
+                            </p>
                         ) : (
                             mediaItems.map((item) => (
                                 <div
@@ -914,7 +992,7 @@ export default function App({
                                         className="media-select"
                                         onClick={() => onSelectMedia(item.id)}
                                         onDoubleClick={() => {
-                                            const nextName = window.prompt('重命名', item.name);
+                                            const nextName = window.prompt(tr('重命名'), item.name);
                                             if (nextName?.trim()) {
                                                 onRenameMedia(item.id, nextName.trim());
                                             }
@@ -927,12 +1005,12 @@ export default function App({
                                             <strong>{item.name}</strong>
                                             <small>
                                                 {item.state === 'analyzing'
-                                                    ? '正在分析…'
+                                                    ? tr('正在分析…')
                                                     : item.state === 'error'
-                                                    ? '分析失败'
-                                                    : `${formatTime(
-                                                          item.durationSeconds
-                                                      )} · 双击重命名`}
+                                                    ? tr('分析失败')
+                                                    : `${formatTime(item.durationSeconds)} · ${tr(
+                                                          '双击重命名'
+                                                      )}`}
                                             </small>
                                         </span>
                                     </button>
@@ -940,18 +1018,20 @@ export default function App({
                                         <button
                                             className="media-save"
                                             onClick={() => onSaveMedia(item.id)}
-                                            title="保存 WAV"
+                                            title={tr('保存WAV')}
                                         >
-                                            保存
+                                            <SaveAltIcon aria-hidden="true" />
+                                            {tr('保存')}
                                         </button>
                                     )}
                                     <button
                                         className="media-remove"
                                         onClick={() => onRemoveMedia(item.id)}
-                                        title="从播放列表移除"
-                                        aria-label={`移除 ${item.name}`}
+                                        title={tr('从播放列表移除')}
+                                        aria-label={`${tr('移除')} ${item.name}`}
                                     >
-                                        移除
+                                        <DeleteOutlineIcon aria-hidden="true" />
+                                        {tr('移除')}
                                     </button>
                                 </div>
                             ))
@@ -960,20 +1040,20 @@ export default function App({
                 </aside>
                 <section className="visualizer-card">
                     <div className="visualizer-toolbar">
-                        <div className="mode-switch" aria-label="语谱类型">
+                        <div className="mode-switch" aria-label={tr('语谱类型')}>
                             <button
                                 className={mode === 'broadband' ? 'active' : ''}
                                 onClick={() => changeMode('broadband')}
                             >
-                                <strong>宽带</strong>
-                                <span>5 ms · 共振峰</span>
+                                <strong>{tr('宽带')}</strong>
+                                <span>5 ms · {tr('共振峰')}</span>
                             </button>
                             <button
                                 className={mode === 'narrowband' ? 'active' : ''}
                                 onClick={() => changeMode('narrowband')}
                             >
-                                <strong>窄带</strong>
-                                <span>30 ms · 谐波</span>
+                                <strong>{tr('窄带')}</strong>
+                                <span>30 ms · {tr('谐波')}</span>
                             </button>
                         </div>
 
@@ -983,21 +1063,21 @@ export default function App({
                                     className={pitchVisible ? 'on pitch' : ''}
                                     onClick={() => setPitchVisible(!pitchVisible)}
                                 >
-                                    <i /> 基频
+                                    <i /> {tr('基频')}
                                 </button>
                                 {mode === 'broadband' && (
                                     <button
                                         className={formantsVisible ? 'on formants' : ''}
                                         onClick={() => setFormantsVisible(!formantsVisible)}
                                     >
-                                        <i /> 共振峰
+                                        <i /> {tr('共振峰')}
                                     </button>
                                 )}
                                 <button
                                     className={intensityVisible ? 'on intensity' : ''}
                                     onClick={() => setIntensityVisible(!intensityVisible)}
                                 >
-                                    <i /> 音强
+                                    <i /> {tr('音强')}
                                 </button>
                             </div>
                             {transport.activeId !== null && (
@@ -1006,8 +1086,8 @@ export default function App({
                                         transport.isPlaying ? 'pause' : 'play'
                                     }`}
                                     onClick={onToggleMediaPlayback}
-                                    aria-label={transport.isPlaying ? '暂停' : '播放'}
-                                    title={transport.isPlaying ? '暂停' : '播放'}
+                                    aria-label={tr(transport.isPlaying ? '暂停' : '播放')}
+                                    title={tr(transport.isPlaying ? '暂停' : '播放')}
                                 >
                                     {transport.isPlaying ? (
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1025,14 +1105,14 @@ export default function App({
                         <div className="view-actions">
                             <button
                                 onClick={() => setZoom(Math.max(1, zoom - 0.5))}
-                                aria-label="缩小"
+                                aria-label={tr('缩小')}
                             >
                                 −
                             </button>
                             <span>{zoom.toFixed(1)}×</span>
                             <button
                                 onClick={() => setZoom(Math.min(64, zoom + 0.5))}
-                                aria-label="放大"
+                                aria-label={tr('放大')}
                             >
                                 +
                             </button>
@@ -1042,11 +1122,11 @@ export default function App({
                                         onClick={onFitSelection}
                                         className="icon-action"
                                         disabled={selection === null}
-                                        aria-label="铺满选区"
+                                        aria-label={tr('铺满选区')}
                                         title={
                                             selection === null
-                                                ? '先在语谱图中拖动选择一段音频'
-                                                : '让选区铺满语谱图'
+                                                ? tr('先在语谱图中拖动选择一段音频')
+                                                : tr('让选区铺满语谱图')
                                         }
                                     >
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1057,8 +1137,8 @@ export default function App({
                                         onClick={onRestoreView}
                                         className="icon-action"
                                         disabled={zoom <= 1}
-                                        aria-label="还原完整视图"
-                                        title="还原完整语谱图至 1×"
+                                        aria-label={tr('还原完整视图')}
+                                        title={tr('还原完整语谱图至 1×')}
                                     >
                                         <svg viewBox="0 0 24 24" aria-hidden="true">
                                             <path d="M5 8V4m0 0h4M5 4l3.2 3.2A7 7 0 1 1 6 14" />
@@ -1069,8 +1149,8 @@ export default function App({
                             <button
                                 onClick={onExport}
                                 className="icon-action"
-                                aria-label="导出图片"
-                                title="导出图片"
+                                aria-label={tr('导出图片')}
+                                title={tr('导出图片')}
                             >
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4" />
@@ -1079,8 +1159,8 @@ export default function App({
                             <button
                                 onClick={toggleFullscreen}
                                 className="icon-action"
-                                aria-label="全屏"
-                                title="全屏"
+                                aria-label={tr('全屏')}
+                                title={tr('全屏')}
                             >
                                 <svg viewBox="0 0 24 24" aria-hidden="true">
                                     <path d="M8 4H4v4M16 4h4v4M8 20H4v-4m12 4h4v-4" />
@@ -1091,12 +1171,9 @@ export default function App({
 
                     <div className="praat-view">
                         <div className="axis axis-left">
-                            <span className="axis-title pitch-color">基频 Hz</span>
+                            <span className="axis-title pitch-color">{tr('基频Hz')}</span>
                             {cursor !== null && cursorPitchCoordinate !== null && (
-                                <span
-                                    className="axis-cursor-value pitch"
-                                    style={cursorAxisTop}
-                                >
+                                <span className="axis-cursor-value pitch" style={cursorAxisTop}>
                                     {cursorPitchCoordinate.toFixed(1)}
                                 </span>
                             )}
@@ -1121,9 +1198,7 @@ export default function App({
                                     <span
                                         className="spectral-pitch-mark pitch-color"
                                         style={{
-                                            top: spectralPitchTop(
-                                                (pitchFloor + pitchCeiling) / 2
-                                            ),
+                                            top: spectralPitchTop((pitchFloor + pitchCeiling) / 2),
                                         }}
                                     >
                                         {Math.round((pitchFloor + pitchCeiling) / 2)}
@@ -1193,48 +1268,48 @@ export default function App({
                             {transport.activeId !== null ? (
                                 <>
                                     <div className="file-transport">
-                                    <input
-                                        className="history-slider"
-                                        aria-label="播放位置"
-                                        type="range"
-                                        min={transport.viewStartSeconds}
-                                        max={Math.max(
-                                            transport.viewStartSeconds + 0.001,
-                                            transport.viewEndSeconds
-                                        )}
-                                        step={0.001}
-                                        value={Math.min(
-                                            Math.max(
-                                                transport.currentSeconds,
-                                                transport.viewStartSeconds
-                                            ),
-                                            Math.max(
+                                        <input
+                                            className="history-slider"
+                                            aria-label={tr('播放位置')}
+                                            type="range"
+                                            min={transport.viewStartSeconds}
+                                            max={Math.max(
                                                 transport.viewStartSeconds + 0.001,
                                                 transport.viewEndSeconds
-                                            )
-                                        )}
-                                        onChange={(event) =>
-                                            onSeekMedia(Number(event.target.value))
-                                        }
-                                    />
-                                    <span className="transport-current">
-                                        {formatTime(transport.currentSeconds)}
-                                    </span>
-                                    <span className="transport-duration">
-                                        {formatTime(transport.durationSeconds)}
-                                    </span>
+                                            )}
+                                            step={0.001}
+                                            value={Math.min(
+                                                Math.max(
+                                                    transport.currentSeconds,
+                                                    transport.viewStartSeconds
+                                                ),
+                                                Math.max(
+                                                    transport.viewStartSeconds + 0.001,
+                                                    transport.viewEndSeconds
+                                                )
+                                            )}
+                                            onChange={(event) =>
+                                                onSeekMedia(Number(event.target.value))
+                                            }
+                                        />
+                                        <span className="transport-current">
+                                            {formatTime(transport.currentSeconds)}
+                                        </span>
+                                        <span className="transport-duration">
+                                            {formatTime(transport.durationSeconds)}
+                                        </span>
                                     </div>
                                     {zoom > 1 && (
                                         <div
                                             className="zoom-scrollbar"
                                             role="scrollbar"
-                                            aria-label="放大后的语谱滚动位置"
+                                            aria-label={tr('放大后的语谱滚动位置')}
                                             aria-orientation="horizontal"
                                             aria-valuemin={0}
                                             aria-valuemax={maximumTimeOffset}
                                             aria-valuenow={timeOffset}
                                             tabIndex={0}
-                                            title="拖动查看放大后未显示的音频"
+                                            title={tr('拖动查看放大后未显示的音频')}
                                             onKeyDown={(event) => {
                                                 const step = maximumTimeOffset / 20;
                                                 if (event.key === 'ArrowLeft') {
@@ -1248,8 +1323,7 @@ export default function App({
                                                 } else if (event.key === 'ArrowRight') {
                                                     event.preventDefault();
                                                     onNavigate(
-                                                        Math.max(0, timeOffset - step) -
-                                                            timeOffset
+                                                        Math.max(0, timeOffset - step) - timeOffset
                                                     );
                                                 } else if (event.key === 'Home') {
                                                     event.preventDefault();
@@ -1295,12 +1369,12 @@ export default function App({
                                 <>
                                     <div className="timeline">
                                         <span>−{(8 / zoom).toFixed(1)} s</span>
-                                        <span>时间</span>
-                                        <span>现在</span>
+                                        <span>{tr('时间')}</span>
+                                        <span>{tr('现在')}</span>
                                     </div>
                                     <input
                                         className="history-slider"
-                                        aria-label="回看历史"
+                                        aria-label={tr('回看历史')}
                                         type="range"
                                         min={0}
                                         max={0.9}
@@ -1316,14 +1390,11 @@ export default function App({
 
                         <div className="axis axis-right">
                             <span className="axis-title intensity-axis-title intensity-color">
-                                音强
+                                {tr('音强')}
                             </span>
-                            <span className="axis-title frequency-axis-title">频率</span>
+                            <span className="axis-title frequency-axis-title">{tr('频率')}</span>
                             {cursor && (
-                                <span
-                                    className="axis-cursor-value frequency"
-                                    style={cursorAxisTop}
-                                >
+                                <span className="axis-cursor-value frequency" style={cursorAxisTop}>
                                     {cursor.frequencyHz.toFixed(1)} Hz
                                 </span>
                             )}
@@ -1356,20 +1427,34 @@ export default function App({
                     }
                 >
                     <button
-                        className="collapsed-reading"
+                        className={`collapsed-reading ${collapsedMetric.color}`}
                         onMouseDown={(event) => beginFloatingDrag('metrics', event)}
                         onClick={() => {
                             if (draggedPanelRef.current === 'metrics') {
                                 draggedPanelRef.current = null;
                                 return;
                             }
-                            setMetricsCollapsed(false);
+                            cycleSelectedMetric();
                         }}
-                        aria-label="展开声学概览"
+                        aria-label={`${collapsedMetric.label} ${formatNumber(
+                            collapsedMetric.value,
+                            collapsedMetric.digits
+                        )} ${collapsedMetric.unit}`}
+                        title={tr('点击切换指标')}
                     >
-                        <span>F0</span>
-                        <strong>{formatNumber(snapshot.pitchHz)}</strong>
-                        <em>Hz</em>
+                        <span>{collapsedMetric.label}</span>
+                        <strong>
+                            {formatNumber(collapsedMetric.value, collapsedMetric.digits)}
+                        </strong>
+                        <em>{collapsedMetric.unit}</em>
+                    </button>
+                    <button
+                        className="collapsed-expand"
+                        onClick={() => setMetricsCollapsed(false)}
+                        aria-label={tr('展开声学概览')}
+                        title={tr('展开声学概览')}
+                    >
+                        +
                     </button>
                     <div className="metrics-heading">
                         <div
@@ -1377,9 +1462,9 @@ export default function App({
                             onMouseDown={(event) => beginFloatingDrag('metrics', event)}
                         >
                             <span className="eyebrow">
-                                {transport.activeId === null ? '实时读数' : '白线位置读数'}
+                                {tr(transport.activeId === null ? '实时读数' : '白线位置读数')}
                             </span>
-                            <h2>声学概览</h2>
+                            <h2>{tr('声学概览')}</h2>
                         </div>
                         <div className="metrics-heading-actions">
                             {transport.activeId !== null && (
@@ -1394,8 +1479,8 @@ export default function App({
                             </span>
                             <button
                                 onClick={() => setMetricsCollapsed(true)}
-                                aria-label="收起声学概览"
-                                title="缩成气泡"
+                                aria-label={tr('收起声学概览')}
+                                title={tr('缩成气泡')}
                             >
                                 −
                             </button>
@@ -1403,24 +1488,68 @@ export default function App({
                     </div>
 
                     <div className="primary-metrics">
-                        <article>
-                            <span className="metric-label pitch-color">基频 F0</span>
+                        <article
+                            className={`selectable-metric pitch ${
+                                selectedMetric === 'pitch' ? 'selected' : ''
+                            }`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSelectedMetric('pitch')}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedMetric('pitch');
+                                }
+                            }}
+                        >
+                            <span className="metric-label pitch-color">{tr('基频F0')}</span>
                             <strong>{formatNumber(snapshot.pitchHz, 1)}</strong>
                             <em>Hz</em>
-                            <small>YIN / 自相关实时估计</small>
+                            <small>{tr('YIN / 自相关实时估计')}</small>
                         </article>
-                        <article>
-                            <span className="metric-label intensity-color">音强</span>
+                        <article
+                            className={`selectable-metric intensity ${
+                                selectedMetric === 'intensity' ? 'selected' : ''
+                            }`}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSelectedMetric('intensity')}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setSelectedMetric('intensity');
+                                }
+                            }}
+                        >
+                            <span className="metric-label intensity-color">{tr('音强')}</span>
                             <strong>{formatNumber(snapshot.intensityDbSpl, 1)}</strong>
                             <em>dB SPL*</em>
-                            <small>参考声压 20 μPa</small>
+                            <small>{tr('参考声压 20 μPa')}</small>
                         </article>
                     </div>
 
                     {mode === 'broadband' && (
                         <div className="formant-metrics">
                             {snapshot.formantsHz.map((value, index) => (
-                                <article key={index}>
+                                <article
+                                    key={index}
+                                    className={`selectable-metric formant ${
+                                        selectedMetric === `formant${index + 1}` ? 'selected' : ''
+                                    }`}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() =>
+                                        setSelectedMetric(`formant${index + 1}` as MetricSelection)
+                                    }
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            setSelectedMetric(
+                                                `formant${index + 1}` as MetricSelection
+                                            );
+                                        }
+                                    }}
+                                >
                                     <span>F{index + 1}</span>
                                     <strong>{formatNumber(value)}</strong>
                                     <em>Hz</em>
@@ -1430,38 +1559,46 @@ export default function App({
                     )}
 
                     <div className="statistics">
-                        <div className="section-label">当前会话统计</div>
+                        <div className="section-label">{tr('当前会话统计')}</div>
                         <dl>
                             <div>
-                                <dt>平均 F0</dt>
+                                <dt>{tr('平均F0')}</dt>
                                 <dd>{formatNumber(snapshot.meanPitchHz, 1)} Hz</dd>
                             </div>
                             <div>
-                                <dt>F0 范围</dt>
+                                <dt>{tr('F0范围')}</dt>
                                 <dd>
                                     {formatNumber(snapshot.minPitchHz)}–
                                     {formatNumber(snapshot.maxPitchHz)} Hz
                                 </dd>
                             </div>
                             <div>
-                                <dt>有声比例</dt>
+                                <dt>{tr('有声比例')}</dt>
                                 <dd>{snapshot.voicedPercent.toFixed(0)}%</dd>
                             </div>
                             <div>
-                                <dt>平均音强</dt>
+                                <dt>{tr('平均音强')}</dt>
                                 <dd>{formatNumber(snapshot.meanIntensityDbSpl, 1)} dB</dd>
                             </div>
                         </dl>
                     </div>
 
                     <p className="calibration-note">
-                        * 浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1
-                        Pa；绝对 SPL 仅作参考。
+                        *{' '}
+                        {tr(
+                            '浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1 Pa；绝对 SPL 仅作参考。'
+                        )}
                     </p>
 
                     <div className="panel-actions">
-                        <button onClick={onClear}>清空会话</button>
-                        <button onClick={onExport}>保存当前画面</button>
+                        <button onClick={onClear}>
+                            <ClearAllIcon aria-hidden="true" />
+                            {tr('清空会话')}
+                        </button>
+                        <button onClick={onExport}>
+                            <ImageOutlinedIcon aria-hidden="true" />
+                            {tr('保存当前画面')}
+                        </button>
                     </div>
                 </section>
             </main>
@@ -1469,20 +1606,20 @@ export default function App({
             <aside className={`settings-panel ${settingsOpen ? 'open' : ''}`}>
                 <div className="settings-header">
                     <div>
-                        <span className="eyebrow">显示设置</span>
-                        <h2>调整画面</h2>
+                        <span className="eyebrow">{tr('显示设置')}</span>
+                        <h2>{tr('调整画面')}</h2>
                     </div>
-                    <button onClick={() => setSettingsOpen(false)} aria-label="关闭设置">
-                        ×
+                    <button onClick={() => setSettingsOpen(false)} aria-label={tr('关闭设置')}>
+                        <CloseIcon aria-hidden="true" />
                     </button>
                 </div>
 
                 <div className="settings-tabs" role="tablist">
                     {[
-                        ['spectrogram', '语谱图'],
-                        ['pitch', '基频'],
-                        ['formants', '共振峰'],
-                        ['intensity', '音强'],
+                        ['spectrogram', tr('语谱图')],
+                        ['pitch', tr('基频')],
+                        ['formants', tr('共振峰')],
+                        ['intensity', tr('音强')],
                     ].map(([value, label]) => (
                         <button
                             key={value}
@@ -1507,11 +1644,12 @@ export default function App({
                                 className="reset-tab-button"
                                 onClick={() => resetSettingsTab('spectrogram')}
                             >
-                                恢复本页默认参数
+                                <RestoreIcon aria-hidden="true" />
+                                {tr('恢复本页默认参数')}
                             </button>
                             <label className="setting">
                                 <span>
-                                    显示增益 <em>{Math.round(sensitivity * 100)}%</em>
+                                    {tr('显示增益')} <em>{Math.round(sensitivity * 100)}%</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1524,7 +1662,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    层次对比 <em>{Math.round(contrast * 100)}%</em>
+                                    {tr('层次对比')} <em>{Math.round(contrast * 100)}%</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1537,7 +1675,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    显示频率上限 <em>{maxFrequency} Hz</em>
+                                    {tr('显示频率上限')} <em>{maxFrequency} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1552,7 +1690,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    显示频率下限 <em>{minFrequency} Hz</em>
+                                    {tr('显示频率下限')} <em>{minFrequency} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1567,7 +1705,7 @@ export default function App({
                             </label>
                             <div className="select-row one">
                                 <label>
-                                    频率刻度
+                                    {tr('频率刻度')}
                                     <select
                                         value={scale}
                                         onChange={(event) => {
@@ -1579,8 +1717,8 @@ export default function App({
                                             }
                                         }}
                                     >
-                                        <option value="linear">线性</option>
-                                        <option value="log">对数</option>
+                                        <option value="linear">{tr('线性')}</option>
+                                        <option value="log">{tr('对数')}</option>
                                         <option value="mel">Mel</option>
                                         <option value="bark">Bark</option>
                                         <option value="erb">ERB</option>
@@ -1588,7 +1726,7 @@ export default function App({
                                 </label>
                             </div>
                             <div className="palette-setting">
-                                <span>颜色主题</span>
+                                <span>{tr('颜色主题')}</span>
                                 <div>
                                     {GRADIENTS.slice(0, 5).map((item) => (
                                         <button
@@ -1613,8 +1751,9 @@ export default function App({
                                 <small>{selectedGradient?.name}</small>
                             </div>
                             <p className="setting-help">
-                                专业语音建议：宽带使用 5 ms、频率上限 5000–5500
-                                Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。
+                                {tr(
+                                    '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。'
+                                )}
                             </p>
                         </>
                     )}
@@ -1625,20 +1764,23 @@ export default function App({
                                 className="reset-tab-button"
                                 onClick={() => resetSettingsTab('pitch')}
                             >
-                                恢复本页默认参数
+                                <RestoreIcon aria-hidden="true" />
+                                {tr('恢复本页默认参数')}
                             </button>
                             <div className="select-row one">
                                 <label>
-                                    F0 检测算法
+                                    {tr('F0检测算法')}
                                     <select value={pitchAlgorithm} onChange={changeAlgorithm}>
                                         <option value="yin">YIN</option>
-                                        <option value="autocorrelation">归一化自相关</option>
+                                        <option value="autocorrelation">
+                                            {tr('归一化自相关')}
+                                        </option>
                                     </select>
                                 </label>
                             </div>
                             <label className="setting">
                                 <span>
-                                    搜索与显示下限 <em>{pitchFloor} Hz</em>
+                                    {tr('搜索与显示下限')} <em>{pitchFloor} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1651,7 +1793,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    搜索与显示上限 <em>{pitchCeiling} Hz</em>
+                                    {tr('搜索与显示上限')} <em>{pitchCeiling} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1666,7 +1808,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    有声阈值 <em>{voicingThreshold.toFixed(2)}</em>
+                                    {tr('有声阈值')} <em>{voicingThreshold.toFixed(2)}</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1681,7 +1823,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    曲线粗细 <em>{pitchLineWidth.toFixed(1)} px</em>
+                                    {tr('曲线粗细')} <em>{pitchLineWidth.toFixed(1)} px</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1703,11 +1845,12 @@ export default function App({
                                 className="reset-tab-button"
                                 onClick={() => resetSettingsTab('formants')}
                             >
-                                恢复本页默认参数
+                                <RestoreIcon aria-hidden="true" />
+                                {tr('恢复本页默认参数')}
                             </button>
                             <div className="select-row">
                                 <label>
-                                    LPC 分析数量
+                                    {tr('LPC分析数量')}
                                     <select
                                         value={maximumFormants}
                                         onChange={(event) =>
@@ -1716,13 +1859,13 @@ export default function App({
                                     >
                                         {[4, 4.5, 5, 5.5, 6].map((value) => (
                                             <option key={value} value={value}>
-                                                {value} 条
+                                                {value} {tr('条')}
                                             </option>
                                         ))}
                                     </select>
                                 </label>
                                 <label>
-                                    画面显示数量
+                                    {tr('画面显示数量')}
                                     <select
                                         value={formantsToDisplay}
                                         onChange={(event) =>
@@ -1756,7 +1899,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    有效分析窗 <em>{formantWindowMs} ms</em>
+                                    {tr('有效分析窗')} <em>{formantWindowMs} ms</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1771,7 +1914,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    预加重起点 <em>{preEmphasisFrom} Hz</em>
+                                    {tr('预加重起点')} <em>{preEmphasisFrom} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1786,7 +1929,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    绘制动态范围 <em>{formantDynamicRange} dB</em>
+                                    {tr('绘制动态范围')} <em>{formantDynamicRange} dB</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1801,7 +1944,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    点大小 <em>{formantDotSize.toFixed(1)} px</em>
+                                    {tr('点大小')} <em>{formantDotSize.toFixed(1)} px</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1815,8 +1958,9 @@ export default function App({
                                 />
                             </label>
                             <p className="setting-help">
-                                Praat 建议：成人男性可从 5000 Hz 起，成人女性从 5500 Hz
-                                起；即使只显示 F1–F3，也通常保留 5 条分析数量。
+                                {tr(
+                                    'Praat 建议：成人男性可从 5000 Hz 起，成人女性从 5500 Hz 起；即使只显示 F1–F3，也通常保留 5 条分析数量。'
+                                )}
                             </p>
                         </>
                     )}
@@ -1827,11 +1971,12 @@ export default function App({
                                 className="reset-tab-button"
                                 onClick={() => resetSettingsTab('intensity')}
                             >
-                                恢复本页默认参数
+                                <RestoreIcon aria-hidden="true" />
+                                {tr('恢复本页默认参数')}
                             </button>
                             <label className="setting">
                                 <span>
-                                    音强窗 Pitch floor <em>{intensityPitchFloor} Hz</em>
+                                    {tr('音强窗Pitchfloor')} <em>{intensityPitchFloor} Hz</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1846,7 +1991,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    显示下限 <em>{intensityFloor} dB SPL</em>
+                                    {tr('显示下限')} <em>{intensityFloor} dB SPL</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1861,7 +2006,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    显示上限 <em>{intensityCeiling} dB SPL</em>
+                                    {tr('显示上限')} <em>{intensityCeiling} dB SPL</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1876,7 +2021,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    SPL 校准偏移{' '}
+                                    {tr('SPL校准偏移')}{' '}
                                     <em>
                                         {splCalibration > 0 ? '+' : ''}
                                         {splCalibration} dB
@@ -1895,7 +2040,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    曲线粗细 <em>{intensityLineWidth.toFixed(1)} px</em>
+                                    {tr('曲线粗细')} <em>{intensityLineWidth.toFixed(1)} px</em>
                                 </span>
                                 <input
                                     type="range"
@@ -1909,18 +2054,22 @@ export default function App({
                                 />
                             </label>
                             <p className="setting-help">
-                                未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。
+                                {tr(
+                                    '未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。'
+                                )}
                             </p>
                         </>
                     )}
                 </div>
 
                 <div className="mode-explainer">
-                    <strong>{mode === 'broadband' ? '宽带语谱' : '窄带语谱'}</strong>
+                    <strong>{tr(mode === 'broadband' ? '宽带语谱' : '窄带语谱')}</strong>
                     <p>
-                        {mode === 'broadband'
-                            ? '5 ms 有效窗，约 260 Hz 带宽。时间分辨率高，适合观察共振峰运动。'
-                            : '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。'}
+                        {tr(
+                            mode === 'broadband'
+                                ? '5 ms 有效窗，约 260 Hz 带宽。时间分辨率高，适合观察共振峰运动。'
+                                : '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。'
+                        )}
                     </p>
                 </div>
             </aside>
@@ -1928,7 +2077,7 @@ export default function App({
                 <button
                     className="settings-backdrop"
                     onClick={() => setSettingsOpen(false)}
-                    aria-label="关闭设置"
+                    aria-label={tr('关闭设置')}
                 />
             )}
         </div>

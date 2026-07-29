@@ -1,0 +1,169 @@
+export type Locale = 'zh' | 'en';
+
+const ENGLISH: { [key: string]: string } = {
+    等待输入: 'Waiting for input',
+    选择麦克风或音频文件开始: 'Choose the microphone or an audio file to begin',
+    实时分析中: 'Live analysis',
+    分析已停止: 'Analysis stopped',
+    '正在准备音频…': 'Preparing audio…',
+    个文件: 'files',
+    '正在建立分析缓存…': 'Building analysis cache…',
+    无法读取音频文件: 'Unable to read the audio file',
+    '正在请求麦克风权限…': 'Requesting microphone permission…',
+    麦克风不可用: 'Microphone unavailable',
+    无法打开麦克风: 'Unable to open the microphone',
+    '正在解码音频…': 'Decoding audio…',
+    无法读取此音频: 'Unable to read this audio',
+    点击麦克风开始新的录音分段: 'Click Microphone to start a new recording',
+    '已定位，按绿色播放按钮开始': 'Positioned · Press the green play button to begin',
+    分析缓存已就绪: 'Analysis cache ready',
+    '播放列表已清空，可开始新的会话': 'Playlist cleared · Ready for a new session',
+    '音频已移除，可开始新的会话': 'Audio removed · Ready for a new session',
+    '正在分析整段宽带语谱…': 'Analyzing the full broadband spectrogram…',
+    '正在分析整段窄带语谱…': 'Analyzing the full narrowband spectrogram…',
+    无法分析此音频: 'Unable to analyze this audio',
+    '整段分析完成，可自由拖动播放': 'Full analysis complete · Drag or play freely',
+    播放完成: 'Playback complete',
+    选区播放完成: 'Selection playback complete',
+    '播放中 · 分析图保持完整': 'Playing · Full analysis remains visible',
+    '已暂停，可拖动定位': 'Paused · Drag to seek',
+    '分析已停止，可滚轮回看': 'Analysis stopped · Scroll to review',
+    会话时间: 'Session time',
+    导入音频: 'Import audio',
+    播放列表: 'Playlist',
+    停止: 'Stop',
+    麦克风: 'Microphone',
+    显示设置: 'Display settings',
+    清空播放列表: 'Clear playlist',
+    清空: 'Clear',
+    展开播放列表: 'Expand playlist',
+    收起播放列表: 'Collapse playlist',
+    展开列表: 'Expand list',
+    收起列表: 'Collapse list',
+    关闭播放列表: 'Close playlist',
+    '始终置顶 · 结束后生成录音分段': 'Always pinned · A recording is added when finished',
+    '导入音频或录制一段声音后，会保留在这里。': 'Imported audio and recordings will stay here.',
+    重命名: 'Rename',
+    '正在分析…': 'Analyzing…',
+    分析失败: 'Analysis failed',
+    双击重命名: 'Double-click to rename',
+    保存: 'Save',
+    保存WAV: 'Save WAV',
+    从播放列表移除: 'Remove from playlist',
+    移除: 'Remove',
+    语谱类型: 'Spectrogram type',
+    宽带: 'Broadband',
+    窄带: 'Narrowband',
+    共振峰: 'Formants',
+    谐波: 'Harmonics',
+    基频: 'Pitch',
+    音强: 'Intensity',
+    暂停: 'Pause',
+    播放: 'Play',
+    缩小: 'Zoom out',
+    放大: 'Zoom in',
+    铺满选区: 'Fit selection',
+    先在语谱图中拖动选择一段音频: 'Drag on the spectrogram to select audio first',
+    让选区铺满语谱图: 'Fit the selection to the spectrogram',
+    还原完整视图: 'Restore full view',
+    '还原完整语谱图至 1×': 'Restore the full spectrogram at 1×',
+    导出图片: 'Export image',
+    全屏: 'Fullscreen',
+    基频Hz: 'Pitch Hz',
+    播放位置: 'Playback position',
+    放大后的语谱滚动位置: 'Zoomed spectrogram scroll position',
+    拖动查看放大后未显示的音频: 'Drag to view audio outside the zoomed window',
+    时间: 'Time',
+    现在: 'Now',
+    回看历史: 'Review history',
+    频率: 'Frequency',
+    展开声学概览: 'Expand acoustic overview',
+    点击切换指标: 'Click to switch metric',
+    实时读数: 'Live readings',
+    白线位置读数: 'Readings at the white playhead',
+    声学概览: 'Acoustic overview',
+    收起声学概览: 'Collapse acoustic overview',
+    缩成气泡: 'Collapse to bubble',
+    基频F0: 'Pitch F0',
+    'YIN / 自相关实时估计': 'Live YIN / autocorrelation estimate',
+    '参考声压 20 μPa': 'Reference pressure 20 μPa',
+    当前会话统计: 'Current session statistics',
+    平均F0: 'Mean F0',
+    F0范围: 'F0 range',
+    有声比例: 'Voiced frames',
+    平均音强: 'Mean intensity',
+    '浏览器麦克风没有统一声压校准。当前按 Praat 公式并假定 1.0 样本单位 = 1 Pa；绝对 SPL 仅作参考。':
+        'Browser microphones have no standard sound-pressure calibration. Praat’s formula is used with 1.0 sample unit = 1 Pa; absolute SPL is for reference only.',
+    清空会话: 'Clear session',
+    保存当前画面: 'Save current view',
+    调整画面: 'Adjust display',
+    关闭设置: 'Close settings',
+    语谱图: 'Spectrogram',
+    恢复本页默认参数: 'Restore defaults for this tab',
+    显示增益: 'Display gain',
+    层次对比: 'Layer contrast',
+    显示频率上限: 'Display frequency ceiling',
+    显示频率下限: 'Display frequency floor',
+    频率刻度: 'Frequency scale',
+    线性: 'Linear',
+    对数: 'Logarithmic',
+    颜色主题: 'Color theme',
+    '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。':
+        'Speech tip: use a 5 ms broadband window and a 5000–5500 Hz ceiling. The default gain and contrast are tuned for speech formants; lower contrast further for noisy recordings.',
+    F0检测算法: 'F0 detection algorithm',
+    归一化自相关: 'Normalized autocorrelation',
+    搜索与显示下限: 'Search and display floor',
+    搜索与显示上限: 'Search and display ceiling',
+    有声阈值: 'Voicing threshold',
+    曲线粗细: 'Line width',
+    LPC分析数量: 'LPC analysis count',
+    画面显示数量: 'Displayed formants',
+    条: 'formants',
+    有效分析窗: 'Analysis window',
+    预加重起点: 'Pre-emphasis from',
+    绘制动态范围: 'Drawing dynamic range',
+    点大小: 'Dot size',
+    'Praat 建议：成人男性可从 5000 Hz 起，成人女性从 5500 Hz 起；即使只显示 F1–F3，也通常保留 5 条分析数量。':
+        'Praat tip: start around 5000 Hz for adult men and 5500 Hz for adult women. Keep five analyzed formants even when displaying only F1–F3.',
+    音强窗Pitchfloor: 'Intensity window pitch floor',
+    显示下限: 'Display floor',
+    显示上限: 'Display ceiling',
+    SPL校准偏移: 'SPL calibration offset',
+    '未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。':
+        'Without a sound-level meter calibration, compare relative changes only. Use the offset for microphone systems with a known SPL.',
+    宽带语谱: 'Broadband spectrogram',
+    窄带语谱: 'Narrowband spectrogram',
+    '5 ms 有效窗，约 260 Hz 带宽。时间分辨率高，适合观察共振峰运动。':
+        'A 5 ms effective window with about 260 Hz bandwidth. High time resolution is ideal for tracking formant movement.',
+    '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。':
+        'A 30 ms effective window with about 43 Hz bandwidth. High frequency resolution is ideal for comparing F0 with the first harmonic.',
+    切换到英文: 'Switch to English',
+    切换到中文: 'Switch to Chinese',
+    录音: 'Recording',
+    'Spectro Pro · 实时声学显示器': 'Spectro Pro · Real-time acoustic visualizer',
+    'Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具。':
+        'Spectro Pro is a modern, real-time acoustic visualizer for the browser.',
+    宽带与窄带语谱实时基频共振峰和音强曲线:
+        'Broadband and narrowband spectrograms with live pitch, formants, and intensity.',
+};
+
+export const detectBrowserLocale = (): Locale => {
+    if (typeof navigator === 'undefined') {
+        return 'en';
+    }
+    const language = navigator.languages?.[0] || navigator.language;
+    return /^zh(?:-|$)/i.test(language || '') ? 'zh' : 'en';
+};
+
+export const translate = (text: string, locale: Locale): string =>
+    locale === 'zh' ? text : ENGLISH[text] || text;
+
+let activeLocale = detectBrowserLocale();
+
+export const getActiveLocale = (): Locale => activeLocale;
+
+export const setActiveLocale = (locale: Locale) => {
+    activeLocale = locale;
+};
+
+export const t = (text: string): string => translate(text, activeLocale);

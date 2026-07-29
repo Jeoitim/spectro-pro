@@ -4,6 +4,7 @@ import {
     PitchAlgorithm,
     resampleForFormants,
 } from '../src/analysis';
+import { translate } from '../src/i18n';
 import { frequencyToScale, scaleToFrequency } from '../src/math-util';
 import { generateSpectrogram, Scale } from '../src/spectrogram';
 
@@ -201,11 +202,26 @@ function testFrequencyScales() {
     }
 }
 
+function testLocalization() {
+    if (translate('导入音频', 'en') !== 'Import audio') {
+        throw new Error('English localization did not translate a known label');
+    }
+    if (translate('导入音频', 'zh') !== '导入音频') {
+        throw new Error(
+            'Chinese localization did not preserve its source label'
+        );
+    }
+    if (translate('user-audio.wav', 'en') !== 'user-audio.wav') {
+        throw new Error('Localization changed an unknown user-provided label');
+    }
+}
+
 testPitch('yin');
 testPitch('autocorrelation');
 testIntensity();
 testFormants();
 testSpectrogramDisplayPreEmphasis();
 testFrequencyScales();
+testLocalization();
 
 console.log('Synthetic pitch, SPL, formant and spectrogram checks passed.');
