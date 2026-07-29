@@ -5,7 +5,7 @@
   "scripts": {
     "test": "npm run test:analysis",
     "test:analysis": "tsc -p tsconfig.tests.json && node .test-dist/tests/synthetic-analysis.js",
-    "build": "webpack --mode=production",
+    "build": "webpack --mode=production && node scripts/prepare-sites-build.cjs",
     "start": "webpack serve --mode=development",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'",
     "type-check": "tsc -p tsconfig.json && tsc -p src/workers/tsconfig.json"
