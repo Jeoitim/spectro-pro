@@ -723,6 +723,7 @@ button.media-row {
 .mode-switch button {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     min-height: 39px;
     padding: 0 12px;
@@ -740,13 +741,17 @@ button.media-row {
 }
 
 .mode-switch strong {
+    flex: 0 0 auto;
     font-size: 12px;
+    white-space: nowrap;
 }
 
 .mode-switch span {
+    flex: 0 0 auto;
     color: #748198;
     font-size: 9px;
     font-weight: 600;
+    white-space: nowrap;
 }
 
 .toolbar-center .plot-toggles,
@@ -2236,6 +2241,7 @@ html.glass-effects .settings-panel {
     .mode-switch button {
         flex: 1;
         justify-content: center;
+        row-gap: 2px;
     }
 
     .praat-view {
@@ -2255,6 +2261,7 @@ html.glass-effects .settings-panel {
 
     .media-panel,
     .metrics-panel {
+        z-index: 42;
         top: 12px !important;
         max-height: calc(100dvh - 24px);
     }
