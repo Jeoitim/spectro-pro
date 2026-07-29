@@ -680,7 +680,7 @@ export default function App({
         setAnalysisPrecision(profile.analysisPrecision);
     }, []);
 
-    useLayoutEffect(() => {
+    useEffect(() => {
         registerController({
             setPlayState: (state, source = sourceName, message = '') => {
                 setPlayState(state);
@@ -1494,11 +1494,12 @@ export default function App({
                   color: 'formant',
                   digits: 0,
               };
+    const clampCursorBubbleTop = (top: string) => `clamp(12px, ${top}, calc(100% - 12px))`;
     const cursorAxisTop =
         cursor === null
             ? undefined
             : {
-                  top: `${(cursor.y * 100).toFixed(3)}%`,
+                  top: clampCursorBubbleTop(`${(cursor.y * 100).toFixed(3)}%`),
               };
     const pitchUsesFrequencyAxis = mode === 'narrowband' && narrowbandPitchFrequencyAligned;
     const pitchAxisTop = (frequency: number) => {
@@ -1513,24 +1514,28 @@ export default function App({
     };
     const cursorPitchCoordinate = cursor?.pitchHz ?? null;
     const cursorPitchAxisTop =
-        cursorPitchCoordinate === null ? undefined : { top: pitchAxisTop(cursorPitchCoordinate) };
+        cursorPitchCoordinate === null
+            ? undefined
+            : { top: clampCursorBubbleTop(pitchAxisTop(cursorPitchCoordinate)) };
     const cursorIntensityCoordinate = cursor?.intensityDbSpl ?? null;
     const cursorIntensityAxisTop =
         cursorIntensityCoordinate === null
             ? undefined
             : {
-                  top: `${(
-                      (1 -
-                          Math.min(
-                              1,
-                              Math.max(
-                                  0,
-                                  (cursorIntensityCoordinate - intensityFloor) /
-                                      Math.max(1e-9, intensityCeiling - intensityFloor)
-                              )
-                          )) *
-                      100
-                  ).toFixed(3)}%`,
+                  top: clampCursorBubbleTop(
+                      `${(
+                          (1 -
+                              Math.min(
+                                  1,
+                                  Math.max(
+                                      0,
+                                      (cursorIntensityCoordinate - intensityFloor) /
+                                          Math.max(1e-9, intensityCeiling - intensityFloor)
+                                  )
+                              )) *
+                          100
+                      ).toFixed(3)}%`
+                  ),
               };
     const waveformGainDb = 20 * Math.log10(Math.max(1e-9, waveformGain));
     const waveformAxis = (() => {
@@ -1597,7 +1602,7 @@ export default function App({
             ? `${waveformShare}fr 8px ${1 - waveformShare}fr`
             : 'minmax(0, 1fr)';
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const root = axisViewRef.current;
         if (root === null) {
             return undefined;
