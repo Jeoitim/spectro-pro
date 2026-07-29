@@ -204,6 +204,8 @@ class SpectroEngine {
 
     private timeOffset = 0;
 
+    private returnView: MediaViewState | null = null;
+
     private overlayDirty = true;
 
     private processing = false;
@@ -298,9 +300,13 @@ class SpectroEngine {
         requestAnimationFrame(() => this.renderLoop());
         this.notifyMediaLibrary();
         this.notifyTransport();
+        this.ui.updateReturnViewAvailable(false);
     }
 
     updateDisplay(parameters: Partial<RenderParameters>) {
+        if (parameters.zoom !== undefined) {
+            this.clearReturnView();
+        }
         this.renderParameters = { ...this.renderParameters, ...parameters };
         if (parameters.timeOffset !== undefined) {
             this.timeOffset = parameters.timeOffset;
@@ -321,6 +327,7 @@ class SpectroEngine {
     }
 
     setMode(mode: SpectrogramMode) {
+        this.clearReturnView();
         this.saveActiveView();
         this.mode = mode;
         const activeMedia = this.activeMedia();
@@ -585,6 +592,7 @@ class SpectroEngine {
     }
 
     selectMedia(id: string | null) {
+        this.clearReturnView();
         this.saveActiveView();
         this.stop();
         if (this.activeMediaId !== id) {
@@ -843,6 +851,11 @@ class SpectroEngine {
         const zoom = clamp(total / selectedColumns, 1, 64);
         const maximumOffset = Math.max(0, 1 - 1 / zoom);
         const offset = clamp((total - endIndex) / total, 0, maximumOffset);
+        this.returnView = {
+            zoom: Math.max(1, this.renderParameters.zoom || 1),
+            timeOffset: this.timeOffset,
+        };
+        this.ui.updateReturnViewAvailable(true);
         this.renderParameters = {
             ...this.renderParameters,
             zoom,
@@ -857,7 +870,31 @@ class SpectroEngine {
         this.overlayDirty = true;
     }
 
+    returnToPreviousView() {
+        if (this.returnView === null) {
+            return;
+        }
+        const view = this.returnView;
+        this.clearReturnView();
+        const zoom = Math.max(1, view.zoom);
+        const maximumOffset = Math.max(0, 1 - 1 / zoom);
+        const timeOffset = clamp(view.timeOffset, 0, maximumOffset);
+        this.renderParameters = {
+            ...this.renderParameters,
+            zoom,
+            timeOffset,
+        };
+        this.timeOffset = timeOffset;
+        this.renderer.updateParameters({ zoom, timeOffset });
+        this.ui.updateZoom(zoom);
+        this.ui.updateTimeOffset(timeOffset);
+        this.saveActiveView();
+        this.notifyTransport();
+        this.overlayDirty = true;
+    }
+
     restoreView() {
+        this.clearReturnView();
         this.renderParameters = {
             ...this.renderParameters,
             zoom: 1,
@@ -1503,6 +1540,7 @@ class SpectroEngine {
     }
 
     private resetSession() {
+        this.clearReturnView();
         this.statistics = emptyStatistics();
         this.liveAnalysisBatchSequence = 0;
         this.sessionElapsedSeconds = 0;
@@ -1533,6 +1571,14 @@ class SpectroEngine {
         this.renderer.updateParameters({ timeOffset: 0 });
         this.ui.updateTimeOffset(0);
         this.overlayDirty = true;
+    }
+
+    private clearReturnView() {
+        if (this.returnView === null) {
+            return;
+        }
+        this.returnView = null;
+        this.ui.updateReturnViewAvailable(false);
     }
 
     private resize() {
@@ -1902,6 +1948,7 @@ const ui = initialiseControlsUi(appContainer, {
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
     onPlayMediaAt: (xRatio) => engine?.playMediaAt(xRatio),
     onFitSelection: () => engine?.fitSelection(),
+    onReturnView: () => engine?.returnToPreviousView(),
     onRestoreView: () => engine?.restoreView(),
     onSeekMedia: (seconds) => engine?.seekMedia(seconds),
     onRenameMedia: (id, name) => engine?.renameMedia(id, name),

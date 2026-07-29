@@ -30,6 +30,8 @@ export default function initialiseControlsUi(
         updateTimeOffset: (offset) =>
             withController((controller) => controller.updateTimeOffset(offset)),
         updateZoom: (zoom) => withController((controller) => controller.updateZoom(zoom)),
+        updateReturnViewAvailable: (available) =>
+            withController((controller) => controller.updateReturnViewAvailable(available)),
         updateMediaLibrary: (items, activeId) =>
             withController((controller) => controller.updateMediaLibrary(items, activeId)),
         updateTransport: (snapshot) =>

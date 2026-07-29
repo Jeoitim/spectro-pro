@@ -66,11 +66,13 @@ const ENGLISH: { [key: string]: string } = {
     播放: 'Play',
     缩小: 'Zoom out',
     放大: 'Zoom in',
-    铺满选区: 'Fit selection',
+    扩选: 'Expand',
+    返回: 'Back',
+    全部: 'All',
     先在语谱图中拖动选择一段音频: 'Drag on the spectrogram to select audio first',
-    让选区铺满语谱图: 'Fit the selection to the spectrogram',
-    还原完整视图: 'Restore full view',
-    '还原完整语谱图至 1×': 'Restore the full spectrogram at 1×',
+    让选区扩展至铺满语谱图: 'Expand the selection to fill the spectrogram',
+    返回扩选前的视图: 'Return to the view before expanding',
+    '显示完整语谱图至 1×': 'Show the full spectrogram at 1×',
     导出图片: 'Export image',
     全屏: 'Fullscreen',
     基频Hz: 'Pitch Hz',
@@ -135,6 +137,10 @@ const ENGLISH: { [key: string]: string } = {
     颜色主题: 'Color theme',
     '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。':
         'Speech tip: use a 5 ms broadband window and a 5000–5500 Hz ceiling. The default gain and contrast are tuned for speech formants; lower contrast further for noisy recordings.',
+    '专业语音建议：窄带使用 30 ms，适合分辨基频与谐波；需要观察共振峰运动时请切换宽带。':
+        'Speech tip: use a 30 ms narrowband window to resolve pitch and harmonics. Switch to Broadband to inspect formant movement.',
+    '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。':
+        'Custom speech tip: shorter windows emphasize timing and formants, while longer windows emphasize pitch and harmonics. Start at 15 ms and adjust for your goal.',
     F0检测算法: 'F0 detection algorithm',
     归一化自相关: 'Normalized autocorrelation',
     搜索与显示下限: 'Search and display floor',

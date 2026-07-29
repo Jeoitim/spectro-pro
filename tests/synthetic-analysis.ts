@@ -394,6 +394,17 @@ function testLocalization() {
     if (translate('实时分析精度', 'en') !== 'Real-time analysis precision') {
         throw new Error('Performance settings localization is incomplete');
     }
+    if (translate('扩选', 'en') !== 'Expand' || translate('返回', 'en') !== 'Back') {
+        throw new Error('Spectrogram view controls localization is incomplete');
+    }
+    if (
+        !translate(
+            '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。',
+            'en'
+        ).startsWith('Custom speech tip:')
+    ) {
+        throw new Error('Mode-specific spectrogram guidance localization is incomplete');
+    }
     if (translate('user-audio.wav', 'en') !== 'user-audio.wav') {
         throw new Error('Localization changed an unknown user-provided label');
     }

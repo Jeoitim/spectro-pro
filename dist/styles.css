@@ -456,7 +456,7 @@ select:focus-visible {
 .media-panel-heading strong small {
     margin-left: 7px;
     color: #718097;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 650;
 }
 
@@ -581,7 +581,7 @@ button.media-row {
     place-items: center;
     border-radius: 7px;
     color: #7fb5ff;
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.08em;
     background: rgba(37, 136, 255, 0.1);
@@ -607,13 +607,14 @@ button.media-row {
 }
 
 .media-copy strong {
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .media-copy small,
 .media-empty {
     color: #6f7c91;
-    font-size: 8px;
+    font-size: 10px;
+    line-height: 1.4;
 }
 
 .media-save,
@@ -731,16 +732,26 @@ button.media-row {
 .overlay-toggles {
     display: flex;
     align-items: center;
-    gap: 11px;
+    gap: 7px;
 }
 
 .overlay-toggles button {
-    padding: 5px 2px;
-    border: 0;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
     color: #69768c;
     font-size: 11px;
-    background: transparent;
+    font-weight: 650;
+    background: rgba(255, 255, 255, 0.02);
     cursor: pointer;
+    transition: 150ms ease;
+}
+
+.overlay-toggles button:hover {
+    border-color: var(--line-strong);
+    color: #aab7ca;
+    background: rgba(255, 255, 255, 0.055);
 }
 
 .overlay-toggles button.on {
@@ -761,9 +772,19 @@ button.media-row {
     box-shadow: 0 0 8px var(--blue);
 }
 
+.overlay-toggles .on.pitch {
+    border-color: rgba(54, 150, 255, 0.52);
+    background: rgba(54, 150, 255, 0.11);
+}
+
 .overlay-toggles .on.formants i {
     color: var(--red);
     box-shadow: 0 0 8px var(--red);
+}
+
+.overlay-toggles .on.formants {
+    border-color: rgba(255, 79, 114, 0.5);
+    background: rgba(255, 79, 114, 0.1);
 }
 
 .overlay-toggles .on.intensity i {
@@ -771,10 +792,17 @@ button.media-row {
     box-shadow: 0 0 8px var(--yellow);
 }
 
+.overlay-toggles .on.intensity {
+    border-color: rgba(228, 235, 84, 0.44);
+    background: rgba(228, 235, 84, 0.09);
+}
+
 .view-actions {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 5px;
+    flex-wrap: wrap;
 }
 
 .view-actions button {
@@ -782,7 +810,7 @@ button.media-row {
     height: 30px;
 }
 
-.view-actions span {
+.view-actions > .zoom-readout {
     min-width: 38px;
     color: #8e9bb0;
     text-align: center;
@@ -818,6 +846,31 @@ button.media-row {
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+.view-actions .view-level-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-width: auto;
+    gap: 5px;
+    padding: 0 8px;
+    font-size: 10px;
+}
+
+.view-actions .view-level-action svg {
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+    stroke: none;
+}
+
+.view-actions .view-level-action span {
+    color: currentColor;
+    font-size: inherit;
+    font-weight: 650;
+    white-space: nowrap;
 }
 
 .view-actions button:disabled {
@@ -1333,7 +1386,7 @@ button.media-row {
 
 .collapsed-reading span,
 .collapsed-reading em {
-    font-size: 8px;
+    font-size: 9px;
     font-style: normal;
     font-weight: 800;
     letter-spacing: 0.08em;
@@ -1378,7 +1431,7 @@ button.media-row {
 .eyebrow,
 .section-label {
     color: #74829a;
-    font-size: 8px;
+    font-size: 9px;
     font-weight: 800;
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -1396,7 +1449,7 @@ button.media-row {
     border: 1px solid var(--line);
     border-radius: 7px;
     color: #8e9bb0;
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .playhead-time {
@@ -1460,7 +1513,7 @@ button.media-row {
 .metric-label {
     display: block;
     margin-bottom: 8px;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
 }
 
@@ -1476,7 +1529,7 @@ button.media-row {
 .formant-metrics em {
     margin-left: 4px;
     color: #8290a6;
-    font-size: 9px;
+    font-size: 10px;
     font-style: normal;
 }
 
@@ -1485,7 +1538,7 @@ button.media-row {
     overflow: hidden;
     margin-top: 8px;
     color: #657289;
-    font-size: 8px;
+    font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1508,7 +1561,7 @@ button.media-row {
     display: block;
     margin-bottom: 5px;
     color: var(--red);
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
 }
 
@@ -1537,20 +1590,20 @@ button.media-row {
 
 .statistics dt {
     color: #7d899d;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .statistics dd {
     margin: 0;
     color: #d6dfed;
-    font-size: 10px;
+    font-size: 11px;
     font-variant-numeric: tabular-nums;
 }
 
 .calibration-note {
     margin: 18px 0 0;
     color: #5f6c81;
-    font-size: 8px;
+    font-size: 10px;
     line-height: 1.6;
 }
 
@@ -1569,7 +1622,7 @@ button.media-row {
     gap: 6px;
     min-height: 35px;
     color: #9da9bb;
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .settings-panel {
@@ -1578,7 +1631,7 @@ button.media-row {
     top: 88px;
     right: 18px;
     display: grid;
-    width: min(390px, calc(100vw - 36px));
+    width: min(460px, calc(100vw - 36px));
     max-height: calc(100vh - 106px);
     gap: 17px;
     padding: 22px;
@@ -1586,6 +1639,10 @@ button.media-row {
     transform: translateX(calc(100% + 30px));
     opacity: 0;
     transition: 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html[lang='en'] .settings-panel {
+    width: min(520px, calc(100vw - 36px));
 }
 
 .settings-tabs {
@@ -1609,6 +1666,7 @@ button.media-row {
     font-weight: 650;
     background: transparent;
     cursor: pointer;
+    overflow-wrap: anywhere;
 }
 
 .settings-tabs button.active {
@@ -1654,7 +1712,15 @@ button.media-row {
 .reset-tab-button {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
+    min-height: 32px;
+    line-height: 1;
+}
+
+.reset-tab-button > svg {
+    display: block;
+    align-self: center;
 }
 
 .setting {
@@ -1665,11 +1731,14 @@ button.media-row {
 .setting > span {
     display: flex;
     justify-content: space-between;
+    gap: 14px;
     color: #9aa6b9;
     font-size: 12px;
+    overflow-wrap: anywhere;
 }
 
 .setting em {
+    flex: 0 0 auto;
     color: #d5dce8;
     font-style: normal;
     font-variant-numeric: tabular-nums;
@@ -1755,6 +1824,12 @@ html.glass-effects .metrics-panel {
     backdrop-filter: blur(22px);
 }
 
+html.glass-effects .settings-panel {
+    background: linear-gradient(155deg, rgba(17, 23, 37, 0.88), rgba(10, 14, 24, 0.92));
+    -webkit-backdrop-filter: blur(22px);
+    backdrop-filter: blur(22px);
+}
+
 .select-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1768,6 +1843,7 @@ html.glass-effects .metrics-panel {
 .select-row label {
     color: #8895aa;
     font-size: 11px;
+    overflow-wrap: anywhere;
 }
 
 .select-row select {
@@ -1914,6 +1990,11 @@ html.glass-effects .metrics-panel {
         justify-content: flex-start;
     }
 
+    .view-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
     .mode-switch button {
         flex: 1;
         justify-content: center;
@@ -1944,5 +2025,18 @@ html.glass-effects .metrics-panel {
 
     .primary-metrics strong {
         font-size: 26px;
+    }
+}
+
+@media (max-width: 540px) {
+    .settings-tabs {
+        grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+    }
+
+    .settings-tabs button {
+        min-height: 35px;
+        height: auto;
+        padding: 6px 4px;
+        line-height: 1.15;
     }
 }

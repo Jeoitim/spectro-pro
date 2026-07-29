@@ -19,6 +19,9 @@ import RemoveIcon from '@material-ui/icons/Remove';
 import RestoreIcon from '@material-ui/icons/Restore';
 import SaveAltIcon from '@material-ui/icons/SaveAlt';
 import StopIcon from '@material-ui/icons/Stop';
+import UndoIcon from '@material-ui/icons/Undo';
+import ViewArrayIcon from '@material-ui/icons/ViewArray';
+import ZoomOutMapIcon from '@material-ui/icons/ZoomOutMap';
 
 import { AnalysisOptions, PitchAlgorithm, RealtimeAnalysisPrecision } from '../analysis';
 import { GRADIENTS } from '../color-util';
@@ -117,6 +120,7 @@ export interface AppCallbacks {
     onToggleMediaPlayback: () => void;
     onPlayMediaAt: (xRatio: number) => void;
     onFitSelection: () => void;
+    onReturnView: () => void;
     onRestoreView: () => void;
     onSeekMedia: (seconds: number) => void;
     onRenameMedia: (id: string, name: string) => void;
@@ -267,6 +271,7 @@ export interface UiController {
     updateCursor: (snapshot: CursorSnapshot | null) => void;
     updateTimeOffset: (offset: number) => void;
     updateZoom: (zoom: number) => void;
+    updateReturnViewAvailable: (available: boolean) => void;
     updateMediaLibrary: (items: MediaListItem[], activeId: string | null) => void;
     updateTransport: (snapshot: TransportSnapshot) => void;
     updateSelection: (snapshot: SelectionSnapshot | null) => void;
@@ -294,6 +299,7 @@ export default function App({
     onToggleMediaPlayback,
     onPlayMediaAt,
     onFitSelection,
+    onReturnView,
     onRestoreView,
     onSeekMedia,
     onRenameMedia,
@@ -365,6 +371,7 @@ export default function App({
         saved.analysisPrecision || 'accurate'
     );
     const [timeOffset, setTimeOffset] = useState(0);
+    const [returnViewAvailable, setReturnViewAvailable] = useState(false);
     const [playlistOpen, setPlaylistOpen] = useState(true);
     const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
     const [playlistPosition, setPlaylistPosition] = useState<{
@@ -428,6 +435,7 @@ export default function App({
             updateCursor: setCursor,
             updateTimeOffset: setTimeOffset,
             updateZoom: setZoom,
+            updateReturnViewAvailable: setReturnViewAvailable,
             updateMediaLibrary: (items, activeId) => {
                 setMediaItems(items);
                 setActiveMediaId(activeId);
@@ -1349,7 +1357,7 @@ export default function App({
                             >
                                 −
                             </button>
-                            <span>{zoom.toFixed(1)}×</span>
+                            <span className="zoom-readout">{zoom.toFixed(1)}×</span>
                             <button
                                 onClick={() => setZoom(Math.min(64, zoom + 0.5))}
                                 aria-label={tr('放大')}
@@ -1360,29 +1368,37 @@ export default function App({
                                 <>
                                     <button
                                         onClick={onFitSelection}
-                                        className="icon-action"
+                                        className="icon-action view-level-action"
                                         disabled={selection === null}
-                                        aria-label={tr('铺满选区')}
+                                        aria-label={tr('扩选')}
                                         title={
                                             selection === null
                                                 ? tr('先在语谱图中拖动选择一段音频')
-                                                : tr('让选区铺满语谱图')
+                                                : tr('让选区扩展至铺满语谱图')
                                         }
                                     >
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M4 7V4h3m10 0h3v3M4 17v3h3m10 0h3v-3M8 12h8m-8 0 3-3m-3 3 3 3m5-3-3-3m3 3-3 3" />
-                                        </svg>
+                                        <ZoomOutMapIcon aria-hidden="true" />
+                                        <span>{tr('扩选')}</span>
+                                    </button>
+                                    <button
+                                        onClick={onReturnView}
+                                        className="icon-action view-level-action"
+                                        disabled={!returnViewAvailable}
+                                        aria-label={tr('返回')}
+                                        title={tr('返回扩选前的视图')}
+                                    >
+                                        <UndoIcon aria-hidden="true" />
+                                        <span>{tr('返回')}</span>
                                     </button>
                                     <button
                                         onClick={onRestoreView}
-                                        className="icon-action"
+                                        className="icon-action view-level-action"
                                         disabled={zoom <= 1}
-                                        aria-label={tr('还原完整视图')}
-                                        title={tr('还原完整语谱图至 1×')}
+                                        aria-label={tr('全部')}
+                                        title={tr('显示完整语谱图至 1×')}
                                     >
-                                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                                            <path d="M5 8V4m0 0h4M5 4l3.2 3.2A7 7 0 1 1 6 14" />
-                                        </svg>
+                                        <ViewArrayIcon aria-hidden="true" />
+                                        <span>{tr('全部')}</span>
                                     </button>
                                 </>
                             )}
@@ -2024,7 +2040,11 @@ export default function App({
                             </div>
                             <p className="setting-help">
                                 {tr(
-                                    '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。'
+                                    mode === 'broadband'
+                                        ? '专业语音建议：宽带使用 5 ms、频率上限 5000–5500 Hz。默认显示增益与层次对比已按语音共振峰优化；若录音噪声较大，可继续降低层次对比。'
+                                        : mode === 'narrowband'
+                                        ? '专业语音建议：窄带使用 30 ms，适合分辨基频与谐波；需要观察共振峰运动时请切换宽带。'
+                                        : '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。'
                                 )}
                             </p>
                         </>
