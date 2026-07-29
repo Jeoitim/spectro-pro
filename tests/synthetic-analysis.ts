@@ -169,6 +169,18 @@ function testIntensity() {
         // Float32 audio, so validate mean subtraction at Float32 precision.
         0.0001
     );
+
+    const disabledLayers = analyzePitchAndIntensityFrame(
+        praatReferenceTone,
+        SAMPLE_RATE,
+        DEFAULT_OPTIONS,
+        0.1 * SAMPLE_RATE,
+        { pitch: false, intensity: false }
+    );
+    if (disabledLayers.pitchHz !== null) {
+        throw new Error(`disabled pitch layer: expected null, received ${disabledLayers.pitchHz}`);
+    }
+    assertNear('disabled intensity layer', disabledLayers.intensityDbSpl, 0, 0);
 }
 
 function testFormants() {

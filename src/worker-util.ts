@@ -1,4 +1,9 @@
-import { AcousticAnalysis, AnalysisOptions, TimedAcousticAnalysis } from './analysis';
+import {
+    AcousticAnalysis,
+    AnalysisLayerSelection,
+    AnalysisOptions,
+    TimedAcousticAnalysis,
+} from './analysis';
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 import {
     ACTION_ANALYZE_ACOUSTICS,
@@ -86,7 +91,8 @@ export async function offThreadGenerateSpectrogram(
     samplesStart: number,
     samplesLength: number,
     options: SpectrogramOptions,
-    analysisOptions: AnalysisOptions
+    analysisOptions: AnalysisOptions,
+    analysisLayers: AnalysisLayerSelection
 ): Promise<SpectrogramResult & { input: Float32Array; analyses: AcousticAnalysis[] }> {
     const {
         spectrogramWindowCount,
@@ -102,6 +108,7 @@ export async function offThreadGenerateSpectrogram(
             samplesLength,
             options,
             analysisOptions,
+            analysisLayers,
         },
         [samples.buffer]
     );

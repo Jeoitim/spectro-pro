@@ -17,6 +17,12 @@ export interface AnalysisOptions {
     splCalibrationDb: number;
 }
 
+export interface AnalysisLayerSelection {
+    pitch: boolean;
+    formants: boolean;
+    intensity: boolean;
+}
+
 export interface AcousticAnalysis {
     pitchHz: number | null;
     pitchConfidence: number;
@@ -713,16 +719,29 @@ export function analyzePitchAndIntensityFrame(
     samples: Float32Array,
     sampleRate: number,
     partialOptions: Partial<AnalysisOptions> = {},
-    centreSample = 0.5 * (samples.length - 1)
+    centreSample = 0.5 * (samples.length - 1),
+    layers: Pick<AnalysisLayerSelection, 'pitch' | 'intensity'> = {
+        pitch: true,
+        intensity: true,
+    }
 ) {
     const options = { ...DEFAULT_OPTIONS, ...partialOptions };
-    const intensityDbSpl = calculateIntensityDbSpl(
-        samples,
-        sampleRate,
-        options.intensityPitchFloorHz,
-        options.splCalibrationDb,
-        centreSample
-    );
+    const intensityDbSpl = layers.intensity
+        ? calculateIntensityDbSpl(
+              samples,
+              sampleRate,
+              options.intensityPitchFloorHz,
+              options.splCalibrationDb,
+              centreSample
+          )
+        : 0;
+    if (!layers.pitch) {
+        return {
+            pitchHz: null,
+            pitchConfidence: 0,
+            intensityDbSpl,
+        };
+    }
     const pitch =
         options.pitchAlgorithm === 'autocorrelation'
             ? detectPitchAutocorrelation(

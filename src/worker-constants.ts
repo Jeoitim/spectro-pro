@@ -1,4 +1,9 @@
-import { AcousticAnalysis, AnalysisOptions, TimedAcousticAnalysis } from './analysis';
+import {
+    AcousticAnalysis,
+    AnalysisLayerSelection,
+    AnalysisOptions,
+    TimedAcousticAnalysis,
+} from './analysis';
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 
 export const ACTION_COMPUTE_SPECTROGRAM = 'spectrogram-compute';
@@ -24,6 +29,7 @@ export type ComputeSpectrogramMessage = MessageBase<
         samplesLength: number;
         options: SpectrogramOptions;
         analysisOptions: AnalysisOptions;
+        analysisLayers: AnalysisLayerSelection;
     },
     {
         spectrogramWindowCount: number;

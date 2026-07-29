@@ -1,5 +1,6 @@
 import {
     AcousticAnalysis,
+    AnalysisLayerSelection,
     analyzeFormantsAtTimes,
     analyzePitchAndIntensityFrame,
     AnalysisOptions,
@@ -23,9 +24,13 @@ function analyzeAtCentres(
     sampleRate: number,
     centreSamples: number[],
     analysisOptions: AnalysisOptions,
-    includeFormants = true
+    layers: AnalysisLayerSelection = {
+        pitch: true,
+        formants: true,
+        intensity: true,
+    }
 ) {
-    const formantFrames = includeFormants
+    const formantFrames = layers.formants
         ? analyzeFormantsAtTimes(
               samples,
               sampleRate,
@@ -39,7 +44,8 @@ function analyzeAtCentres(
                 samples,
                 sampleRate,
                 analysisOptions,
-                centreSample
+                centreSample,
+                layers
             );
             const formants = formantFrames[centreIndex];
             return {
@@ -51,7 +57,7 @@ function analyzeAtCentres(
                     formants?.formantBandwidthsHz ||
                     new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
                 formantIntensity: formants?.formantIntensity || 0,
-                drawFormants: includeFormants && (formants?.formantIntensity || 0) > 0,
+                drawFormants: layers.formants && (formants?.formantIntensity || 0) > 0,
             };
         }
     );
@@ -78,7 +84,11 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     sampleRate,
                     centreSamples,
                     analysisOptions,
-                    includeFormants
+                    {
+                        pitch: true,
+                        formants: includeFormants,
+                        intensity: true,
+                    }
                 );
                 const response: AnalyzeAcousticsMessage['response'] = {
                     payload: {
@@ -102,6 +112,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                 samplesLength,
                 options,
                 analysisOptions,
+                analysisLayers,
             } = payload as ComputeSpectrogramMessage['request']['payload'];
 
             try {
@@ -123,7 +134,8 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     samples,
                     options.sampleRate,
                     centreSamples,
-                    analysisOptions
+                    analysisOptions,
+                    analysisLayers
                 );
 
                 const response: ComputeSpectrogramMessage['response'] = {

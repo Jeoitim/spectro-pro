@@ -61,6 +61,7 @@ const ENGLISH: { [key: string]: string } = {
     谐波: 'Harmonics',
     基频: 'Pitch',
     音强: 'Intensity',
+    性能: 'Performance',
     暂停: 'Pause',
     播放: 'Play',
     缩小: 'Zoom out',
@@ -103,6 +104,16 @@ const ENGLISH: { [key: string]: string } = {
     关闭设置: 'Close settings',
     语谱图: 'Spectrogram',
     恢复本页默认参数: 'Restore defaults for this tab',
+    渲染帧率: 'Render frame rate',
+    无限制浏览器刷新率: 'Unlimited (browser refresh rate)',
+    '较低帧率可显著降低实时 GPU 占用':
+        'A lower frame rate can significantly reduce real-time GPU usage.',
+    内部渲染分辨率: 'Internal render resolution',
+    '遇到性能问题时可适当降低，数值越高画面越清晰':
+        'Lower this when performance is limited; higher values produce a sharper image.',
+    毛玻璃效果: 'Glass effect',
+    关闭后可降低动态图层的合成开销:
+        'Turning this off reduces the compositing cost of dynamic layers.',
     显示增益: 'Display gain',
     语谱窗口长度: 'Spectrogram window length',
     选择自定义模式后可调节窗口长度: 'Select Custom mode to adjust the window length.',

@@ -33,6 +33,11 @@ export interface SpectrogramAnalysisSettings {
     customWindowLengthMs: number;
     windowFunction: SpectrogramWindowFunction;
 }
+export interface PerformanceSettings {
+    framesPerSecond: number;
+    renderPixelRatio: number;
+}
+type SettingsTab = 'spectrogram' | 'pitch' | 'formants' | 'intensity' | 'performance';
 type MetricSelection =
     | 'pitch'
     | 'intensity'
@@ -102,6 +107,7 @@ export interface AppCallbacks {
     onAnalysisChange: (parameters: Partial<AnalysisOptions>) => void;
     onLayerDisplayChange: (parameters: Partial<LayerDisplayOptions>) => void;
     onDisplayChange: (parameters: Partial<RenderParameters>) => void;
+    onPerformanceChange: (settings: PerformanceSettings) => void;
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onSelectRange: (xStartRatio: number, xEndRatio: number) => void;
@@ -234,6 +240,9 @@ interface SavedSettings {
     intensityCeiling: number;
     intensityLineWidth: number;
     splCalibration: number;
+    framesPerSecond: number;
+    glassEffect: boolean;
+    renderPixelRatio: number;
 }
 
 const SETTINGS_STORAGE_KEY = 'spectro-pro.settings.v2';
@@ -274,6 +283,7 @@ export default function App({
     onAnalysisChange,
     onLayerDisplayChange,
     onDisplayChange,
+    onPerformanceChange,
     onOverlayChange,
     onInspect,
     onSelectRange,
@@ -302,9 +312,7 @@ export default function App({
     const [pitchAlgorithm, setPitchAlgorithm] = useState<PitchAlgorithm>(
         saved.pitchAlgorithm || 'yin'
     );
-    const [settingsTab, setSettingsTab] = useState<
-        'spectrogram' | 'pitch' | 'formants' | 'intensity'
-    >('spectrogram');
+    const [settingsTab, setSettingsTab] = useState<SettingsTab>('spectrogram');
     const [snapshot, setSnapshot] = useState<LiveSnapshot>(EMPTY_SNAPSHOT);
     const [cursor, setCursor] = useState<CursorSnapshot | null>(null);
     const [pitchVisible, setPitchVisible] = useState(saved.pitchVisible ?? true);
@@ -348,6 +356,9 @@ export default function App({
     const [intensityCeiling, setIntensityCeiling] = useState(saved.intensityCeiling ?? 100);
     const [intensityLineWidth, setIntensityLineWidth] = useState(saved.intensityLineWidth ?? 2.5);
     const [splCalibration, setSplCalibration] = useState(saved.splCalibration ?? 0);
+    const [framesPerSecond, setFramesPerSecond] = useState(saved.framesPerSecond ?? 30);
+    const [glassEffect, setGlassEffect] = useState(saved.glassEffect ?? true);
+    const [renderPixelRatio, setRenderPixelRatio] = useState(saved.renderPixelRatio ?? 1.5);
     const [timeOffset, setTimeOffset] = useState(0);
     const [playlistOpen, setPlaylistOpen] = useState(true);
     const [playlistCollapsed, setPlaylistCollapsed] = useState(false);
@@ -378,7 +389,7 @@ export default function App({
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
     const scale =
-        mode !== 'narrowband'
+        mode === 'broadband'
             ? broadbandScale
             : mode === 'narrowband'
             ? narrowbandScale
@@ -496,6 +507,9 @@ export default function App({
             intensityCeiling,
             intensityLineWidth,
             splCalibration,
+            framesPerSecond,
+            glassEffect,
+            renderPixelRatio,
         };
         try {
             window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
@@ -535,7 +549,19 @@ export default function App({
         intensityCeiling,
         intensityLineWidth,
         splCalibration,
+        framesPerSecond,
+        glassEffect,
+        renderPixelRatio,
     ]);
+
+    useEffect(() => {
+        onPerformanceChange({ framesPerSecond, renderPixelRatio });
+    }, [framesPerSecond, renderPixelRatio, onPerformanceChange]);
+
+    useEffect(() => {
+        document.documentElement.classList.toggle('glass-effects', glassEffect);
+        return () => document.documentElement.classList.remove('glass-effects');
+    }, [glassEffect]);
 
     useEffect(() => {
         const gradient = GRADIENTS.find((item) => item.name === gradientName);
@@ -800,7 +826,7 @@ export default function App({
     );
 
     const resetSettingsTab = useCallback(
-        (tab: 'spectrogram' | 'pitch' | 'formants' | 'intensity') => {
+        (tab: SettingsTab) => {
             if (tab === 'spectrogram') {
                 setSensitivity(0.42);
                 setContrast(0.32);
@@ -834,6 +860,12 @@ export default function App({
                 setPreEmphasisFrom(50);
                 setFormantDynamicRange(30);
                 setFormantDotSize(2.4);
+                return;
+            }
+            if (tab === 'performance') {
+                setFramesPerSecond(30);
+                setGlassEffect(true);
+                setRenderPixelRatio(1.5);
                 return;
             }
             setIntensityPitchFloor(75);
@@ -1757,17 +1789,14 @@ export default function App({
                         ['pitch', tr('基频')],
                         ['formants', tr('共振峰')],
                         ['intensity', tr('音强')],
+                        ['performance', tr('性能')],
                     ].map(([value, label]) => (
                         <button
                             key={value}
                             role="tab"
                             aria-selected={settingsTab === value}
                             className={settingsTab === value ? 'active' : ''}
-                            onClick={() =>
-                                setSettingsTab(
-                                    value as 'spectrogram' | 'pitch' | 'formants' | 'intensity'
-                                )
-                            }
+                            onClick={() => setSettingsTab(value as SettingsTab)}
                         >
                             {label}
                         </button>
@@ -2238,6 +2267,65 @@ export default function App({
                                     '未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。'
                                 )}
                             </p>
+                        </>
+                    )}
+
+                    {settingsTab === 'performance' && (
+                        <>
+                            <button
+                                className="reset-tab-button"
+                                onClick={() => resetSettingsTab('performance')}
+                            >
+                                <RestoreIcon aria-hidden="true" />
+                                {tr('恢复本页默认参数')}
+                            </button>
+                            <div className="select-row one">
+                                <label>
+                                    {tr('渲染帧率')}
+                                    <select
+                                        value={framesPerSecond}
+                                        onChange={(event) =>
+                                            setFramesPerSecond(Number(event.target.value))
+                                        }
+                                    >
+                                        <option value={0}>{tr('无限制浏览器刷新率')}</option>
+                                        {[15, 24, 30, 45, 60].map((fps) => (
+                                            <option key={fps} value={fps}>
+                                                {fps} FPS
+                                            </option>
+                                        ))}
+                                    </select>
+                                </label>
+                            </div>
+                            <p className="setting-help">{tr('较低帧率可显著降低实时 GPU 占用')}</p>
+                            <label className="setting">
+                                <span>
+                                    {tr('内部渲染分辨率')}{' '}
+                                    <em>{Math.round(renderPixelRatio * 100)}%</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={0.5}
+                                    max={2}
+                                    step={0.25}
+                                    value={renderPixelRatio}
+                                    onChange={(event) =>
+                                        setRenderPixelRatio(Number(event.target.value))
+                                    }
+                                />
+                                <small>{tr('遇到性能问题时可适当降低，数值越高画面越清晰')}</small>
+                            </label>
+                            <label className="effect-toggle">
+                                <span>
+                                    <strong>{tr('毛玻璃效果')}</strong>
+                                    <small>{tr('关闭后可降低动态图层的合成开销')}</small>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={glassEffect}
+                                    onChange={(event) => setGlassEffect(event.target.checked)}
+                                />
+                            </label>
                         </>
                     )}
                 </div>

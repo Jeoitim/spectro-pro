@@ -91,8 +91,7 @@ select:focus-visible {
     min-height: 76px;
     padding: 12px 24px;
     border-bottom: 1px solid var(--line);
-    background: rgba(7, 10, 18, 0.86);
-    backdrop-filter: blur(22px);
+    background: rgba(7, 10, 18, 0.97);
 }
 
 .brand {
@@ -339,9 +338,8 @@ select:focus-visible {
     padding: 5px;
     border: 1px solid var(--line-strong);
     border-radius: 10px;
-    background: rgba(9, 14, 24, 0.98);
+    background: rgba(9, 14, 24, 0.99);
     box-shadow: 0 14px 38px rgba(0, 0, 0, 0.42);
-    backdrop-filter: blur(18px);
 }
 
 .language-menu button {
@@ -1592,7 +1590,7 @@ button.media-row {
 
 .settings-tabs {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 3px;
     padding: 3px;
     border: 1px solid var(--line);
@@ -1694,6 +1692,67 @@ button.media-row {
     margin-top: -5px;
     color: #68758a;
     font-size: 9px;
+}
+
+.effect-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    color: #9aa6b9;
+}
+
+.effect-toggle > span {
+    display: grid;
+    gap: 4px;
+}
+
+.effect-toggle strong {
+    color: #cbd5e4;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.effect-toggle small {
+    color: #68758a;
+    font-size: 9px;
+}
+
+.effect-toggle input {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+    accent-color: var(--blue);
+}
+
+html.glass-effects .topbar {
+    background: rgba(7, 10, 18, 0.86);
+    -webkit-backdrop-filter: blur(22px);
+    backdrop-filter: blur(22px);
+}
+
+html.glass-effects .language-menu {
+    background: rgba(9, 14, 24, 0.98);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+}
+
+html.glass-effects .media-panel {
+    background: rgba(7, 11, 19, 0.94);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+}
+
+html.glass-effects .cursor-tooltip {
+    background: rgba(5, 8, 15, 0.9);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+}
+
+html.glass-effects .metrics-panel {
+    background: linear-gradient(155deg, rgba(17, 23, 37, 0.88), rgba(10, 14, 24, 0.92));
+    -webkit-backdrop-filter: blur(22px);
+    backdrop-filter: blur(22px);
 }
 
 .select-row {

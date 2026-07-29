@@ -8,6 +8,7 @@ import {
     LayerDisplayOptions,
     LiveSnapshot,
     MediaListItem,
+    PerformanceSettings,
     SelectionSnapshot,
     SpectrogramAnalysisSettings,
     SpectrogramMode,
@@ -32,8 +33,6 @@ const PITCH_CEILING_HZ = 500;
 const INTENSITY_FLOOR_DB_SPL = 50;
 const INTENSITY_CEILING_DB_SPL = 100;
 const MAX_OFFLINE_COLUMNS = 2048;
-const MAX_RENDER_FRAMES_PER_SECOND = 30;
-const MAX_RENDER_PIXEL_RATIO = 1.5;
 
 interface ModeConfiguration {
     windowSize: number;
@@ -82,7 +81,8 @@ interface MediaItem {
 }
 
 interface SessionStatistics {
-    totalFrames: number;
+    pitchFrames: number;
+    intensityFrames: number;
     voicedFrames: number;
     pitchSum: number;
     pitchMin: number;
@@ -113,7 +113,8 @@ function modeConfiguration(
 
 function emptyStatistics(): SessionStatistics {
     return {
-        totalFrames: 0,
+        pitchFrames: 0,
+        intensityFrames: 0,
         voicedFrames: 0,
         pitchSum: 0,
         pitchMin: Number.POSITIVE_INFINITY,
@@ -212,6 +213,10 @@ class SpectroEngine {
     private lastUiUpdate = 0;
 
     private lastRenderTime = 0;
+
+    private renderFramesPerSecond = 30;
+
+    private renderPixelRatio = 1.5;
 
     private inspector: { x: number; y: number } | null = null;
 
@@ -405,6 +410,16 @@ class SpectroEngine {
             ...parameters,
         };
         this.overlayDirty = true;
+    }
+
+    updatePerformance(settings: PerformanceSettings) {
+        this.renderFramesPerSecond =
+            settings.framesPerSecond <= 0 ? 0 : clamp(Math.round(settings.framesPerSecond), 15, 60);
+        const nextPixelRatio = clamp(settings.renderPixelRatio, 0.5, 2);
+        if (this.renderPixelRatio !== nextPixelRatio) {
+            this.renderPixelRatio = nextPixelRatio;
+            this.resize();
+        }
     }
 
     setOverlays(pitch: boolean, formants: boolean, intensity: boolean) {
@@ -1083,7 +1098,8 @@ class SpectroEngine {
     private rebuildStatisticsFromHistory() {
         this.statistics = emptyStatistics();
         for (const point of this.analysisHistory) {
-            this.statistics.totalFrames += 1;
+            this.statistics.pitchFrames += 1;
+            this.statistics.intensityFrames += 1;
             this.statistics.intensityPowerSum += 10 ** (point.intensityDbSpl / 10);
             if (point.pitchHz !== null) {
                 this.statistics.voicedFrames += 1;
@@ -1328,7 +1344,12 @@ class SpectroEngine {
                     scaleSize: SPECTROGRAM_HEIGHT,
                     windowFunction: this.windowFunction,
                 },
-                this.analysisOptions
+                this.analysisOptions,
+                {
+                    pitch: this.showPitch,
+                    formants: this.showFormants,
+                    intensity: this.showIntensity,
+                }
             );
 
             this.renderer.updateParameters({
@@ -1384,9 +1405,14 @@ class SpectroEngine {
             return;
         }
         for (const analysis of analyses) {
-            this.statistics.totalFrames += 1;
-            this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
-            if (analysis.pitchHz !== null) {
+            if (this.showIntensity) {
+                this.statistics.intensityFrames += 1;
+                this.statistics.intensityPowerSum += 10 ** (analysis.intensityDbSpl / 10);
+            }
+            if (this.showPitch) {
+                this.statistics.pitchFrames += 1;
+            }
+            if (this.showPitch && analysis.pitchHz !== null) {
                 this.statistics.voicedFrames += 1;
                 this.statistics.pitchSum += analysis.pitchHz;
                 this.statistics.pitchMin = Math.min(this.statistics.pitchMin, analysis.pitchHz);
@@ -1405,7 +1431,8 @@ class SpectroEngine {
         }
         this.lastUiUpdate = now;
         const voiced = this.statistics.voicedFrames;
-        const total = this.statistics.totalFrames;
+        const pitchFrames = this.statistics.pitchFrames;
+        const intensityFrames = this.statistics.intensityFrames;
         const snapshot: LiveSnapshot = {
             elapsedSeconds: this.sessionElapsedSeconds,
             pitchHz: analysis.pitchHz,
@@ -1414,10 +1441,10 @@ class SpectroEngine {
             meanPitchHz: voiced ? this.statistics.pitchSum / voiced : null,
             minPitchHz: voiced ? this.statistics.pitchMin : null,
             maxPitchHz: voiced ? this.statistics.pitchMax : null,
-            meanIntensityDbSpl: total
-                ? 10 * Math.log10(this.statistics.intensityPowerSum / total)
+            meanIntensityDbSpl: intensityFrames
+                ? 10 * Math.log10(this.statistics.intensityPowerSum / intensityFrames)
                 : null,
-            voicedPercent: total ? (100 * voiced) / total : 0,
+            voicedPercent: pitchFrames ? (100 * voiced) / pitchFrames : 0,
             sampleRate: this.sampleRate,
         };
         this.ui.updateSnapshot(snapshot);
@@ -1476,7 +1503,7 @@ class SpectroEngine {
     private resize() {
         const width = Math.max(1, this.stage.clientWidth);
         const height = Math.max(1, this.stage.clientHeight);
-        const pixelRatio = Math.min(MAX_RENDER_PIXEL_RATIO, window.devicePixelRatio || 1);
+        const pixelRatio = this.renderPixelRatio;
         this.renderer.resizeCanvas(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
         this.overlay.width = Math.round(width * pixelRatio);
         this.overlay.height = Math.round(height * pixelRatio);
@@ -1487,9 +1514,14 @@ class SpectroEngine {
     }
 
     private renderLoop(timestamp: number = performance.now()) {
-        const frameInterval = 1000 / MAX_RENDER_FRAMES_PER_SECOND;
+        const frameInterval =
+            this.renderFramesPerSecond === 0 ? 0 : 1000 / this.renderFramesPerSecond;
         if (timestamp - this.lastRenderTime >= frameInterval) {
-            this.lastRenderTime = timestamp - ((timestamp - this.lastRenderTime) % frameInterval);
+            this.lastRenderTime =
+                frameInterval === 0
+                    ? timestamp
+                    : timestamp -
+                      ((timestamp - this.lastRenderTime) % frameInterval);
             this.renderer.render();
             if (this.overlayDirty) {
                 this.drawOverlay();
@@ -1826,6 +1858,7 @@ const ui = initialiseControlsUi(appContainer, {
     onAnalysisChange: (parameters) => engine?.updateAnalysis(parameters),
     onLayerDisplayChange: (parameters) => engine?.updateLayerDisplay(parameters),
     onDisplayChange: (parameters) => engine?.updateDisplay(parameters),
+    onPerformanceChange: (settings) => engine?.updatePerformance(settings),
     onOverlayChange: (pitch, formants, intensity) =>
         engine?.setOverlays(pitch, formants, intensity),
     onInspect: (x, y) => engine?.inspect(x, y),
