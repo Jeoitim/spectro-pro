@@ -1528,8 +1528,10 @@ button.media-row {
 }
 
 .axis-left .axis-cursor-value.pitch {
+    right: auto;
+    left: calc(100% + 4px);
     color: #d9ebff;
-    border-right: 2px solid #3696ff;
+    border-left: 2px solid #3696ff;
 }
 
 .axis-right .axis-cursor-value {
@@ -1539,6 +1541,13 @@ button.media-row {
 .axis-right .axis-cursor-value.frequency {
     color: #ffd8df;
     border-left: 2px solid #ff4f72;
+}
+
+.axis-right .axis-cursor-value.intensity {
+    right: calc(100% + 4px);
+    left: auto;
+    color: #f4f79a;
+    border-right: 2px solid #dcea46;
 }
 
 .pitch-color {

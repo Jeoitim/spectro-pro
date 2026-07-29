@@ -1514,6 +1514,24 @@ export default function App({
     const cursorPitchCoordinate = cursor?.pitchHz ?? null;
     const cursorPitchAxisTop =
         cursorPitchCoordinate === null ? undefined : { top: pitchAxisTop(cursorPitchCoordinate) };
+    const cursorIntensityCoordinate = cursor?.intensityDbSpl ?? null;
+    const cursorIntensityAxisTop =
+        cursorIntensityCoordinate === null
+            ? undefined
+            : {
+                  top: `${(
+                      (1 -
+                          Math.min(
+                              1,
+                              Math.max(
+                                  0,
+                                  (cursorIntensityCoordinate - intensityFloor) /
+                                      Math.max(1e-9, intensityCeiling - intensityFloor)
+                              )
+                          )) *
+                      100
+                  ).toFixed(3)}%`,
+              };
     const waveformGainDb = 20 * Math.log10(Math.max(1e-9, waveformGain));
     const waveformAxis = (() => {
         if (waveformScaleMode === 'normalized') {
@@ -1649,6 +1667,7 @@ export default function App({
         pitchFloor,
         pitchUsesFrequencyAxis,
         cursor?.frequencyHz,
+        cursorIntensityCoordinate,
         cursorPitchCoordinate,
         scale,
         spectrogramVisible,
@@ -2444,14 +2463,27 @@ export default function App({
                                             {tr('频率')}
                                         </span>
                                         {cursor && (
-                                            <span
-                                                className="axis-cursor-value frequency"
-                                                data-axis-label
-                                                data-axis-priority="100"
-                                                style={cursorAxisTop}
-                                            >
-                                                {cursor.frequencyHz.toFixed(1)} Hz
-                                            </span>
+                                            <>
+                                                <span
+                                                    className="axis-cursor-value frequency"
+                                                    data-axis-label
+                                                    data-axis-priority="100"
+                                                    style={cursorAxisTop}
+                                                >
+                                                    {cursor.frequencyHz.toFixed(1)} Hz
+                                                </span>
+                                                {cursorIntensityCoordinate !== null && (
+                                                    <span
+                                                        className="axis-cursor-value intensity"
+                                                        data-axis-label
+                                                        data-axis-priority="100"
+                                                        style={cursorIntensityAxisTop}
+                                                    >
+                                                        {cursorIntensityCoordinate.toFixed(1)} dB
+                                                        SPL*
+                                                    </span>
+                                                )}
+                                            </>
                                         )}
                                         <span
                                             className="top"
