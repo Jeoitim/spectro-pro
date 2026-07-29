@@ -262,6 +262,10 @@ class SpectroEngine {
 
     private playbackStartedAt = 0;
 
+    private playbackRate = 1;
+
+    private playbackDirection: -1 | 1 = 1;
+
     private playbackOffsetSeconds = 0;
 
     private playbackIsPlaying = false;
@@ -673,12 +677,22 @@ class SpectroEngine {
         }
     }
 
+    startMediaAudition(playbackRate: number, direction: -1 | 1) {
+        const item = this.activeMedia();
+        if (item === null || item.state !== 'ready' || this.playbackIsPlaying) {
+            return;
+        }
+        this.startMediaPlayback(item, clamp(playbackRate, 1, 3), direction);
+    }
+
     seekMedia(seconds: number) {
         const item = this.activeMedia();
         if (item === null) {
             return;
         }
         const wasPlaying = this.playbackIsPlaying;
+        const playbackRate = this.playbackRate;
+        const playbackDirection = this.playbackDirection;
         this.stopMediaPlayback(false);
         const minimum = this.playbackRange?.startSeconds ?? 0;
         const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
@@ -688,7 +702,7 @@ class SpectroEngine {
         this.notifyTransport();
         this.overlayDirty = true;
         if (wasPlaying && this.playbackOffsetSeconds < item.durationSeconds) {
-            this.startMediaPlayback(item);
+            this.startMediaPlayback(item, playbackRate, playbackDirection);
         }
     }
 
@@ -704,13 +718,15 @@ class SpectroEngine {
         const minimum = this.playbackRange?.startSeconds ?? 0;
         const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
         const continuePlayback = this.playbackIsPlaying;
+        const playbackRate = this.playbackRate;
+        const playbackDirection = this.playbackDirection;
         this.stopMediaPlayback(false);
         this.playbackOffsetSeconds = clamp(targetSeconds, minimum, maximum);
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
         this.updateSnapshotAtPlaybackOffset(true);
         this.notifyTransport();
         if (continuePlayback) {
-            this.startMediaPlayback(item);
+            this.startMediaPlayback(item, playbackRate, playbackDirection);
         } else {
             this.ui.setPlayState('stopped', item.name, '已定位，按绿色播放按钮开始');
         }
@@ -1247,18 +1263,37 @@ class SpectroEngine {
         }
     }
 
-    private startMediaPlayback(item: MediaItem) {
+    private startMediaPlayback(
+        item: MediaItem,
+        playbackRate: number = 1,
+        playbackDirection: -1 | 1 = 1
+    ) {
         const rangeStart = this.playbackRange?.startSeconds ?? 0;
         const rangeEnd = this.playbackRange?.endSeconds ?? item.durationSeconds;
-        if (this.playbackOffsetSeconds < rangeStart || this.playbackOffsetSeconds >= rangeEnd) {
-            this.playbackOffsetSeconds = rangeStart;
+        if (
+            this.playbackOffsetSeconds < rangeStart ||
+            this.playbackOffsetSeconds > rangeEnd ||
+            (playbackDirection > 0 && this.playbackOffsetSeconds >= rangeEnd) ||
+            (playbackDirection < 0 && this.playbackOffsetSeconds <= rangeStart)
+        ) {
+            this.playbackOffsetSeconds = playbackDirection > 0 ? rangeStart : rangeEnd;
         }
         this.stopMediaPlayback(false);
+        this.playbackRate = clamp(playbackRate, 1, 3);
+        this.playbackDirection = playbackDirection;
         const audioCtx = this.createAudioContext();
         const buffer = audioCtx.createBuffer(1, item.samples.length, item.sampleRate);
-        buffer.copyToChannel(new Float32Array(item.samples), 0);
+        if (this.playbackDirection > 0) {
+            buffer.copyToChannel(new Float32Array(item.samples), 0);
+        } else {
+            const reversedSamples = buffer.getChannelData(0);
+            for (let index = 0; index < item.samples.length; index += 1) {
+                reversedSamples[index] = item.samples[item.samples.length - index - 1];
+            }
+        }
         const source = audioCtx.createBufferSource();
         source.buffer = buffer;
+        source.playbackRate.value = this.playbackRate;
         source.connect(audioCtx.destination);
         this.playbackContext = audioCtx;
         this.playbackSource = source;
@@ -1268,8 +1303,9 @@ class SpectroEngine {
             if (this.playbackSource !== source) {
                 return;
             }
-            this.playbackOffsetSeconds = rangeEnd;
-            this.sessionElapsedSeconds = rangeEnd;
+            const terminalSeconds = this.playbackDirection > 0 ? rangeEnd : rangeStart;
+            this.playbackOffsetSeconds = terminalSeconds;
+            this.sessionElapsedSeconds = terminalSeconds;
             this.stopMediaPlayback(false);
             this.updateSnapshotAtPlaybackOffset(true);
             this.overlayDirty = true;
@@ -1279,10 +1315,17 @@ class SpectroEngine {
                 this.playbackRange === null ? '播放完成' : '选区播放完成'
             );
         });
-        source.start(
-            0,
-            this.playbackOffsetSeconds,
-            Math.max(0.001, rangeEnd - this.playbackOffsetSeconds)
+        const sourceOffsetSeconds =
+            this.playbackDirection > 0
+                ? this.playbackOffsetSeconds
+                : item.durationSeconds - this.playbackOffsetSeconds;
+        const sourceDurationSeconds =
+            this.playbackDirection > 0
+                ? rangeEnd - this.playbackOffsetSeconds
+                : this.playbackOffsetSeconds - rangeStart;
+        source.start(0, sourceOffsetSeconds);
+        source.stop(
+            audioCtx.currentTime + Math.max(0.001, sourceDurationSeconds) / this.playbackRate
         );
         audioCtx.resume();
         this.playbackTimer = window.setInterval(() => this.updatePlaybackPosition(), 33);
@@ -1296,9 +1339,13 @@ class SpectroEngine {
             return;
         }
         const rangeEnd = this.playbackRange?.endSeconds ?? item.durationSeconds;
-        this.playbackOffsetSeconds = Math.min(
-            rangeEnd,
-            this.playbackOffsetSeconds + (this.playbackContext.currentTime - this.playbackStartedAt)
+        this.playbackOffsetSeconds = clamp(
+            this.playbackOffsetSeconds +
+                (this.playbackContext.currentTime - this.playbackStartedAt) *
+                    this.playbackRate *
+                    this.playbackDirection,
+            this.playbackRange?.startSeconds ?? 0,
+            rangeEnd
         );
         this.playbackStartedAt = this.playbackContext.currentTime;
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
@@ -1336,6 +1383,8 @@ class SpectroEngine {
             this.playbackContext = null;
         }
         this.playbackIsPlaying = false;
+        this.playbackRate = 1;
+        this.playbackDirection = 1;
         if (resetPosition) {
             this.playbackOffsetSeconds = 0;
         }
@@ -2050,6 +2099,8 @@ const ui = initialiseControlsUi(appContainer, {
     onNavigate: (amount) => engine?.navigate(amount),
     onSelectMedia: (id) => engine?.selectMedia(id),
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
+    onStartMediaAudition: (playbackRate, direction) =>
+        engine?.startMediaAudition(playbackRate, direction),
     onPauseMediaPlayback: () => engine?.pauseMediaPlayback(),
     onPlayMediaAt: (xRatio) => engine?.playMediaAt(xRatio),
     onFitSelection: () => engine?.fitSelection(),

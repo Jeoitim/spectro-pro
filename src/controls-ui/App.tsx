@@ -126,6 +126,7 @@ export interface AppCallbacks {
     onNavigate: (amount: number) => void;
     onSelectMedia: (id: string | null) => void;
     onToggleMediaPlayback: () => void;
+    onStartMediaAudition: (playbackRate: number, direction: -1 | 1) => void;
     onPauseMediaPlayback: () => void;
     onPlayMediaAt: (xRatio: number) => void;
     onFitSelection: () => void;
@@ -317,6 +318,7 @@ export default function App({
     onNavigate,
     onSelectMedia,
     onToggleMediaPlayback,
+    onStartMediaAudition,
     onPauseMediaPlayback,
     onPlayMediaAt,
     onFitSelection,
@@ -678,14 +680,14 @@ export default function App({
             ) {
                 event.preventDefault();
                 heldArrowKeysRef.current.add(event.key);
+                const direction = event.key === 'ArrowLeft' ? -1 : 1;
                 if (event.repeat) {
                     if (!keyboardAuditionRef.current && !transport.isPlaying) {
                         keyboardAuditionRef.current = true;
-                        onToggleMediaPlayback();
+                        onStartMediaAudition(event.shiftKey ? 3 : 1, direction);
                     }
                     return;
                 }
-                const direction = event.key === 'ArrowLeft' ? -1 : 1;
                 const visibleDurationSeconds = Math.max(
                     0.001,
                     transport.viewEndSeconds - transport.viewStartSeconds
@@ -728,6 +730,7 @@ export default function App({
         transport.viewEndSeconds,
         transport.viewStartSeconds,
         onPauseMediaPlayback,
+        onStartMediaAudition,
         onToggleMediaPlayback,
         onSeekMedia,
     ]);
@@ -2747,7 +2750,7 @@ export default function App({
                             </label>
                             <p className="setting-help">
                                 {tr(
-                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按方向键以正常速度试听，松开自动暂停。'
+                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按右键正放、长按左键倒放，Shift + 长按以 3× 试听，松开自动暂停。'
                                 )}
                             </p>
                         </>
