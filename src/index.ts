@@ -23,7 +23,7 @@ import {
 } from './controls-ui/App';
 import { t } from './i18n';
 import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
-import { getPlotSelectionTheme } from './plot-theme';
+import { drawPlotPlayhead, getPlotSelectionTheme } from './plot-theme';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import {
@@ -1765,7 +1765,6 @@ class SpectroEngine {
         }
         const width = this.overlay.width;
         const height = this.overlay.height;
-        const praatTheme = this.spectrogramThemeName === 'Praat';
         const selectionTheme = getPlotSelectionTheme(this.spectrogramThemeName);
         ctx.clearRect(0, 0, width, height);
         const visible = this.visibleHistoryRange();
@@ -1899,23 +1898,7 @@ class SpectroEngine {
         if (activeMedia !== null) {
             const playheadX = xForTime(this.playbackOffsetSeconds);
             if (playheadX >= 0 && playheadX <= width) {
-                ctx.save();
-                ctx.strokeStyle = praatTheme
-                    ? 'rgba(15, 23, 35, 0.92)'
-                    : 'rgba(255, 255, 255, 0.92)';
-                ctx.lineWidth = 1.5;
-                ctx.beginPath();
-                ctx.moveTo(playheadX, 0);
-                ctx.lineTo(playheadX, height);
-                ctx.stroke();
-                ctx.fillStyle = praatTheme ? '#0f1723' : '#ffffff';
-                ctx.beginPath();
-                ctx.moveTo(playheadX - 5, 0);
-                ctx.lineTo(playheadX + 5, 0);
-                ctx.lineTo(playheadX, 8);
-                ctx.closePath();
-                ctx.fill();
-                ctx.restore();
+                drawPlotPlayhead(ctx, playheadX, height, this.spectrogramThemeName);
             }
         }
 

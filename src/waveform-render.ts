@@ -1,5 +1,5 @@
 import { clamp } from './math-util';
-import { getPlotSelectionTheme } from './plot-theme';
+import { drawPlotPlayhead, getPlotSelectionTheme } from './plot-theme';
 
 export type WaveformThemeName =
     | 'Aurora'
@@ -9,8 +9,7 @@ export type WaveformThemeName =
     | 'Heated Metal'
     | 'Audacity®'
     | 'Spectrum'
-    | 'Black to White'
-    | 'White to Black';
+    | 'Black to White';
 
 export const WAVEFORM_THEMES: {
     name: WaveformThemeName;
@@ -25,7 +24,6 @@ export const WAVEFORM_THEMES: {
     { name: 'Audacity®', background: '#bfbfbf', waveform: '#4c99ff' },
     { name: 'Spectrum', background: '#000080', waveform: '#00be00' },
     { name: 'Black to White', background: '#000000', waveform: '#ffffff' },
-    { name: 'White to Black', background: '#ffffff', waveform: '#000000' },
 ];
 
 const WAVEFORM_THEME_COLORS: Record<
@@ -34,62 +32,47 @@ const WAVEFORM_THEME_COLORS: Record<
         background: string;
         waveform: string;
         zeroLine: string;
-        playhead: string;
     }
 > = {
     Aurora: {
         background: '#040712',
         waveform: '#15cebe',
         zeroLine: 'rgba(21, 206, 190, 0.48)',
-        playhead: '#f7fff8',
     },
     Praat: {
         background: '#ffffff',
         waveform: '#000000',
         zeroLine: 'rgba(50, 132, 170, 0.55)',
-        playhead: '#1385ba',
     },
     Ember: {
         background: '#08080d',
         waveform: '#ff8030',
         zeroLine: 'rgba(255, 128, 48, 0.42)',
-        playhead: '#fff5ee',
     },
     Ocean: {
         background: '#030b16',
         waveform: '#5fe8d3',
         zeroLine: 'rgba(95, 232, 211, 0.42)',
-        playhead: '#f4fcff',
     },
     'Heated Metal': {
         background: '#000000',
         waveform: '#ff0000',
         zeroLine: 'rgba(255, 0, 0, 0.42)',
-        playhead: '#fff8ea',
     },
     'Audacity®': {
         background: '#bfbfbf',
         waveform: '#4c99ff',
         zeroLine: 'rgba(76, 153, 255, 0.55)',
-        playhead: '#f6f9ff',
     },
     Spectrum: {
         background: '#000080',
         waveform: '#00be00',
         zeroLine: 'rgba(0, 190, 0, 0.5)',
-        playhead: '#f4fff6',
     },
     'Black to White': {
         background: '#000000',
         waveform: '#ffffff',
         zeroLine: 'rgba(255, 255, 255, 0.32)',
-        playhead: '#ffffff',
-    },
-    'White to Black': {
-        background: '#ffffff',
-        waveform: '#000000',
-        zeroLine: 'rgba(0, 0, 0, 0.28)',
-        playhead: '#1385ba',
     },
 };
 
@@ -382,12 +365,7 @@ export class WaveformRenderer {
         if (playheadSeconds !== null) {
             const x = xForTime(playheadSeconds);
             if (x >= 0 && x <= width) {
-                ctx.strokeStyle = theme.playhead;
-                ctx.lineWidth = 1.25;
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, height);
-                ctx.stroke();
+                drawPlotPlayhead(ctx, x, height, this.themeName);
             }
         }
     }

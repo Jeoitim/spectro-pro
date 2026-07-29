@@ -103,10 +103,6 @@ export const GRADIENTS: { name: string; gradient: Gradient }[] = [
         name: 'Black to White',
         gradient: BLACK_WHITE_GRADIENT,
     },
-    {
-        name: 'White to Black',
-        gradient: WHITE_BLACK_GRADIENT,
-    },
 ];
 
 function addGamma(u: number): number {

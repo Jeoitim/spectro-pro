@@ -103,7 +103,7 @@ const ENGLISH: { [key: string]: string } = {
     展开声学概览: 'Expand acoustic overview',
     点击切换指标: 'Click to switch metric',
     实时读数: 'Live readings',
-    白线位置读数: 'Readings at the white playhead',
+    时刻线位置读数: 'Readings at the playhead',
     声学概览: 'Acoustic overview',
     收起声学概览: 'Collapse acoustic overview',
     缩成气泡: 'Collapse to bubble',

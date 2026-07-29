@@ -35,11 +35,57 @@ const PLOT_SELECTION_THEMES: Record<string, PlotSelectionTheme> = {
         stroke: 'rgba(178, 153, 0, 0.95)',
     },
     'Black to White': DEFAULT_SELECTION_THEME,
-    'White to Black': {
-        fill: 'rgba(255, 105, 120, 0.18)',
-        stroke: 'rgba(211, 48, 70, 0.92)',
-    },
 };
 
 export const getPlotSelectionTheme = (themeName: string): PlotSelectionTheme =>
     PLOT_SELECTION_THEMES[themeName] || DEFAULT_SELECTION_THEME;
+
+export const drawPlotPlayhead = (
+    context: CanvasRenderingContext2D,
+    x: number,
+    height: number,
+    themeName: string
+) => {
+    const gradient = GRADIENTS.find((item) => item.name === themeName)?.gradient;
+    const background = gradient?.[0]?.color || [4, 7, 18];
+    const negative = background.map((channel) => 255 - channel);
+    const backgroundColor = `rgb(${background.join(', ')})`;
+    const negativeColor = `rgb(${negative.join(', ')})`;
+
+    context.save();
+    context.lineCap = 'butt';
+    context.setLineDash([]);
+    context.strokeStyle = negativeColor;
+    context.lineWidth = 4;
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.stroke();
+
+    context.strokeStyle = backgroundColor;
+    context.lineWidth = 1.5;
+    context.setLineDash([8, 5]);
+    context.beginPath();
+    context.moveTo(x, 0);
+    context.lineTo(x, height);
+    context.stroke();
+    context.setLineDash([]);
+
+    context.fillStyle = negativeColor;
+    context.beginPath();
+    context.moveTo(x - 7, 0);
+    context.lineTo(x + 7, 0);
+    context.lineTo(x, 11);
+    context.closePath();
+    context.fill();
+
+    context.fillStyle = backgroundColor;
+    context.beginPath();
+    context.moveTo(x - 4, 1);
+    context.lineTo(x + 4, 1);
+    context.lineTo(x, 7);
+    context.closePath();
+    context.fill();
+    context.restore();
+};
+import { GRADIENTS } from './color-util';

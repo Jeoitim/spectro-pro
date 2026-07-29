@@ -331,6 +331,10 @@ export default function App({
         savedSettingsRef.current = loadSavedSettings();
     }
     const saved = savedSettingsRef.current || {};
+    const initialWaveformThemeName =
+        WAVEFORM_THEMES.find((item) => item.name === saved.waveformThemeName)?.name || 'Aurora';
+    const initialGradientName =
+        GRADIENTS.find((item) => item.name === saved.gradientName)?.name || 'Aurora';
     const [locale, setLocale] = useState<Locale>(() => getActiveLocale());
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
@@ -349,7 +353,7 @@ export default function App({
     const [spectrogramVisible, setSpectrogramVisible] = useState(saved.spectrogramVisible ?? true);
     const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
     const [waveformThemeName, setWaveformThemeName] = useState<WaveformThemeName>(
-        saved.waveformThemeName || 'Aurora'
+        initialWaveformThemeName
     );
     const [waveformGain, setWaveformGain] = useState(saved.waveformGain ?? 1);
     const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
@@ -376,7 +380,7 @@ export default function App({
     const [windowFunction, setWindowFunction] = useState<SpectrogramWindowFunction>(
         saved.windowFunction || 'gaussian'
     );
-    const [gradientName, setGradientName] = useState(saved.gradientName || 'Aurora');
+    const [gradientName, setGradientName] = useState(initialGradientName);
     const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
     const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
     const [voicingThreshold, setVoicingThreshold] = useState(saved.voicingThreshold ?? 0.6);
@@ -1877,7 +1881,7 @@ export default function App({
                             onMouseDown={(event) => beginFloatingDrag('metrics', event)}
                         >
                             <span className="eyebrow">
-                                {tr(transport.activeId === null ? '实时读数' : '白线位置读数')}
+                                {tr(transport.activeId === null ? '实时读数' : '时刻线位置读数')}
                             </span>
                             <h2>{tr('声学概览')}</h2>
                         </div>
