@@ -992,12 +992,7 @@ export default function App({
             : {
                   top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(cursor.y * 50).toFixed(2)}px)`,
               };
-    const cursorPitchCoordinate =
-        cursor === null
-            ? null
-            : mode !== 'narrowband'
-            ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
-            : cursor.frequencyHz;
+    const cursorPitchCoordinate = cursor === null ? null : cursor.frequencyHz;
     const spectralPitchTop = (frequency: number) => {
         const minimum = frequencyToScale(minFrequency, scale);
         const maximum = frequencyToScale(maxFrequency, scale);
@@ -1440,42 +1435,30 @@ export default function App({
                                     {cursorPitchCoordinate.toFixed(1)}
                                 </span>
                             )}
-                            {mode !== 'narrowband' ? (
-                                <>
-                                    <span className="top pitch-color">{pitchCeiling}</span>
-                                    <span className="mid pitch-color">
-                                        {Math.round((pitchFloor + pitchCeiling) / 2)}
-                                    </span>
-                                    <span className="bottom pitch-color">{pitchFloor}</span>
-                                </>
-                            ) : (
-                                <>
-                                    <span
-                                        className="spectral-pitch-mark pitch-color"
-                                        style={{
-                                            top: spectralPitchTop(pitchCeiling),
-                                        }}
-                                    >
-                                        {pitchCeiling}
-                                    </span>
-                                    <span
-                                        className="spectral-pitch-mark pitch-color"
-                                        style={{
-                                            top: spectralPitchTop((pitchFloor + pitchCeiling) / 2),
-                                        }}
-                                    >
-                                        {Math.round((pitchFloor + pitchCeiling) / 2)}
-                                    </span>
-                                    <span
-                                        className="spectral-pitch-mark pitch-color"
-                                        style={{
-                                            top: spectralPitchTop(pitchFloor),
-                                        }}
-                                    >
-                                        {pitchFloor}
-                                    </span>
-                                </>
-                            )}
+                            <span
+                                className="spectral-pitch-mark pitch-color"
+                                style={{
+                                    top: spectralPitchTop(pitchCeiling),
+                                }}
+                            >
+                                {pitchCeiling}
+                            </span>
+                            <span
+                                className="spectral-pitch-mark pitch-color"
+                                style={{
+                                    top: spectralPitchTop((pitchFloor + pitchCeiling) / 2),
+                                }}
+                            >
+                                {Math.round((pitchFloor + pitchCeiling) / 2)}
+                            </span>
+                            <span
+                                className="spectral-pitch-mark pitch-color"
+                                style={{
+                                    top: spectralPitchTop(pitchFloor),
+                                }}
+                            >
+                                {pitchFloor}
+                            </span>
                         </div>
 
                         <div className="plot-stack">

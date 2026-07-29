@@ -1711,14 +1711,7 @@ class SpectroEngine {
                 visible.end,
                 xForIndex,
                 (point) => point.pitchHz,
-                (pitch) =>
-                    this.mode === 'narrowband'
-                        ? frequencyY(pitch)
-                        : height *
-                          (1 -
-                              (pitch - this.layerDisplayOptions.pitchFloorHz) /
-                                  (this.layerDisplayOptions.pitchCeilingHz -
-                                      this.layerDisplayOptions.pitchFloorHz)),
+                (pitch) => frequencyY(pitch),
                 '#2588ff',
                 this.layerDisplayOptions.pitchLineWidth
             );
@@ -1814,17 +1807,7 @@ class SpectroEngine {
             );
             const inspectorPitch = this.analysisHistory[inspectorIndex]?.pitchHz;
             if (this.showPitch && inspectorPitch !== null && inspectorPitch !== undefined) {
-                const pitchY =
-                    this.mode === 'narrowband'
-                        ? frequencyY(inspectorPitch)
-                        : height *
-                          (1 -
-                              (inspectorPitch - this.layerDisplayOptions.pitchFloorHz) /
-                                  Math.max(
-                                      1,
-                                      this.layerDisplayOptions.pitchCeilingHz -
-                                          this.layerDisplayOptions.pitchFloorHz
-                                  ));
+                const pitchY = frequencyY(inspectorPitch);
                 if (pitchY >= 0 && pitchY <= height) {
                     ctx.strokeStyle = 'rgba(61, 151, 255, 0.72)';
                     ctx.lineWidth = 0.75;
