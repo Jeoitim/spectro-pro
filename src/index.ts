@@ -1307,7 +1307,7 @@ class SpectroEngine {
         this.overlayDirty = true;
     }
 
-    private pauseMediaPlayback() {
+    pauseMediaPlayback() {
         const item = this.activeMedia();
         this.updatePlaybackPosition();
         this.stopMediaPlayback(false);
@@ -2050,6 +2050,7 @@ const ui = initialiseControlsUi(appContainer, {
     onNavigate: (amount) => engine?.navigate(amount),
     onSelectMedia: (id) => engine?.selectMedia(id),
     onToggleMediaPlayback: () => engine?.toggleMediaPlayback(),
+    onPauseMediaPlayback: () => engine?.pauseMediaPlayback(),
     onPlayMediaAt: (xRatio) => engine?.playMediaAt(xRatio),
     onFitSelection: () => engine?.fitSelection(),
     onReturnView: () => engine?.returnToPreviousView(),

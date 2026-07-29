@@ -139,8 +139,8 @@ const ENGLISH: { [key: string]: string } = {
     流畅大幅降低分析频率: 'Smooth · greatly reduce analysis cadence',
     '只降低实时分析的时间采样密度，每个被分析帧仍使用完整算法；离线音频始终保持精确。':
         'Only the real-time sampling cadence is reduced. Every analyzed frame still uses the full algorithm; offline audio always stays accurate.',
-    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动。':
-        'Shortcuts: Space plays or pauses; Left/Right moves by 1% of the visible view, or 5% while holding Shift.',
+    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按方向键试听，松开自动暂停。':
+        'Shortcuts: Space plays or pauses; Left/Right moves by 1% of the visible view, or 5% with Shift. Hold an arrow key to audition and release it to pause.',
     显示增益: 'Display gain',
     语谱窗口长度: 'Spectrogram window length',
     选择自定义模式后可调节窗口长度: 'Select Custom mode to adjust the window length.',

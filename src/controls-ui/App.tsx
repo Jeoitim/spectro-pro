@@ -126,6 +126,7 @@ export interface AppCallbacks {
     onNavigate: (amount: number) => void;
     onSelectMedia: (id: string | null) => void;
     onToggleMediaPlayback: () => void;
+    onPauseMediaPlayback: () => void;
     onPlayMediaAt: (xRatio: number) => void;
     onFitSelection: () => void;
     onReturnView: () => void;
@@ -316,6 +317,7 @@ export default function App({
     onNavigate,
     onSelectMedia,
     onToggleMediaPlayback,
+    onPauseMediaPlayback,
     onPlayMediaAt,
     onFitSelection,
     onReturnView,
@@ -434,6 +436,8 @@ export default function App({
     const languageRef = useRef<HTMLDivElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
     const zoomInitializedRef = useRef(false);
+    const heldArrowKeysRef = useRef<Set<string>>(new Set());
+    const keyboardAuditionRef = useRef(false);
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
     const scale =
         mode === 'broadband'
@@ -639,6 +643,13 @@ export default function App({
     }, [uiTheme]);
 
     useEffect(() => {
+        const finishKeyboardAudition = () => {
+            heldArrowKeysRef.current.clear();
+            if (keyboardAuditionRef.current) {
+                keyboardAuditionRef.current = false;
+                onPauseMediaPlayback();
+            }
+        };
         const handleKeyboardShortcut = (event: KeyboardEvent) => {
             const target = event.target;
             if (
@@ -667,6 +678,7 @@ export default function App({
             ) {
                 event.preventDefault();
                 const direction = event.key === 'ArrowLeft' ? -1 : 1;
+                heldArrowKeysRef.current.add(event.key);
                 const visibleDurationSeconds = Math.max(
                     0.001,
                     transport.viewEndSeconds - transport.viewStartSeconds
@@ -681,16 +693,38 @@ export default function App({
                         )
                     )
                 );
+                if (event.repeat && !keyboardAuditionRef.current && !transport.isPlaying) {
+                    keyboardAuditionRef.current = true;
+                    onToggleMediaPlayback();
+                }
+            }
+        };
+        const handleKeyboardShortcutRelease = (event: KeyboardEvent) => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+                return;
+            }
+            heldArrowKeysRef.current.delete(event.key);
+            if (heldArrowKeysRef.current.size === 0 && keyboardAuditionRef.current) {
+                keyboardAuditionRef.current = false;
+                onPauseMediaPlayback();
             }
         };
         document.addEventListener('keydown', handleKeyboardShortcut);
-        return () => document.removeEventListener('keydown', handleKeyboardShortcut);
+        document.addEventListener('keyup', handleKeyboardShortcutRelease);
+        window.addEventListener('blur', finishKeyboardAudition);
+        return () => {
+            document.removeEventListener('keydown', handleKeyboardShortcut);
+            document.removeEventListener('keyup', handleKeyboardShortcutRelease);
+            window.removeEventListener('blur', finishKeyboardAudition);
+        };
     }, [
         activeMediaId,
         transport.currentSeconds,
         transport.durationSeconds,
+        transport.isPlaying,
         transport.viewEndSeconds,
         transport.viewStartSeconds,
+        onPauseMediaPlayback,
         onToggleMediaPlayback,
         onSeekMedia,
     ]);
@@ -2710,7 +2744,7 @@ export default function App({
                             </label>
                             <p className="setting-help">
                                 {tr(
-                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动。'
+                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按方向键试听，松开自动暂停。'
                                 )}
                             </p>
                         </>
