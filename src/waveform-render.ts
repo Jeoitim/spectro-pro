@@ -1,4 +1,5 @@
 import { clamp } from './math-util';
+import { getPlotSelectionTheme } from './plot-theme';
 
 export type WaveformThemeName =
     | 'Aurora'
@@ -33,8 +34,6 @@ const WAVEFORM_THEME_COLORS: Record<
         background: string;
         waveform: string;
         zeroLine: string;
-        selectionFill: string;
-        selectionStroke: string;
         playhead: string;
     }
 > = {
@@ -42,72 +41,54 @@ const WAVEFORM_THEME_COLORS: Record<
         background: '#040712',
         waveform: '#15cebe',
         zeroLine: 'rgba(21, 206, 190, 0.48)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#f7fff8',
     },
     Praat: {
         background: '#ffffff',
         waveform: '#000000',
         zeroLine: 'rgba(50, 132, 170, 0.55)',
-        selectionFill: 'rgba(105, 188, 255, 0.24)',
-        selectionStroke: 'rgba(52, 145, 210, 0.92)',
         playhead: '#1385ba',
     },
     Ember: {
         background: '#08080d',
         waveform: '#ff8030',
         zeroLine: 'rgba(255, 128, 48, 0.42)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#fff5ee',
     },
     Ocean: {
         background: '#030b16',
         waveform: '#5fe8d3',
         zeroLine: 'rgba(95, 232, 211, 0.42)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#f4fcff',
     },
     'Heated Metal': {
         background: '#000000',
         waveform: '#ff0000',
         zeroLine: 'rgba(255, 0, 0, 0.42)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#fff8ea',
     },
     'Audacity®': {
         background: '#bfbfbf',
         waveform: '#4c99ff',
         zeroLine: 'rgba(76, 153, 255, 0.55)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#f6f9ff',
     },
     Spectrum: {
         background: '#000080',
         waveform: '#00be00',
         zeroLine: 'rgba(0, 190, 0, 0.5)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#f4fff6',
     },
     'Black to White': {
         background: '#000000',
         waveform: '#ffffff',
         zeroLine: 'rgba(255, 255, 255, 0.32)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(124, 203, 255, 0.95)',
         playhead: '#ffffff',
     },
     'White to Black': {
         background: '#ffffff',
         waveform: '#000000',
         zeroLine: 'rgba(0, 0, 0, 0.28)',
-        selectionFill: 'rgba(104, 190, 255, 0.24)',
-        selectionStroke: 'rgba(52, 145, 210, 0.92)',
         playhead: '#1385ba',
     },
 };
@@ -377,15 +358,16 @@ export class WaveformRenderer {
 
         const xForTime = (seconds: number) => ((seconds - viewStartSeconds) / duration) * width;
         if (selection !== null) {
+            const selectionTheme = getPlotSelectionTheme(this.themeName);
             const left = clamp(xForTime(selection.startSeconds), 0, width);
             const right = clamp(xForTime(selection.endSeconds), 0, width);
             if (
                 selection.endSeconds >= viewStartSeconds &&
                 selection.startSeconds <= viewEndSeconds
             ) {
-                ctx.fillStyle = theme.selectionFill;
+                ctx.fillStyle = selectionTheme.fill;
                 ctx.fillRect(left, 0, Math.max(1, right - left), height);
-                ctx.strokeStyle = theme.selectionStroke;
+                ctx.strokeStyle = selectionTheme.stroke;
                 ctx.setLineDash([4, 4]);
                 ctx.beginPath();
                 ctx.moveTo(left, 0);

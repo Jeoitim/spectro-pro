@@ -23,6 +23,7 @@ import {
 } from './controls-ui/App';
 import { t } from './i18n';
 import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
+import { getPlotSelectionTheme } from './plot-theme';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import {
@@ -1765,6 +1766,7 @@ class SpectroEngine {
         const width = this.overlay.width;
         const height = this.overlay.height;
         const praatTheme = this.spectrogramThemeName === 'Praat';
+        const selectionTheme = getPlotSelectionTheme(this.spectrogramThemeName);
         ctx.clearRect(0, 0, width, height);
         const visible = this.visibleHistoryRange();
         if (visible.end <= visible.start) {
@@ -1879,13 +1881,9 @@ class SpectroEngine {
             const selectionRight = clamp(rawSelectionRight, 0, width);
             if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
                 ctx.save();
-                ctx.fillStyle = praatTheme
-                    ? 'rgba(255, 105, 120, 0.2)'
-                    : 'rgba(37, 136, 255, 0.14)';
+                ctx.fillStyle = selectionTheme.fill;
                 ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
-                ctx.strokeStyle = praatTheme
-                    ? 'rgba(211, 48, 70, 0.92)'
-                    : 'rgba(105, 174, 255, 0.95)';
+                ctx.strokeStyle = selectionTheme.stroke;
                 ctx.lineWidth = 1;
                 ctx.setLineDash([4, 4]);
                 ctx.beginPath();
