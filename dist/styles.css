@@ -1592,6 +1592,11 @@ button.media-row {
     cursor: grabbing !important;
 }
 
+.media-panel.dragging,
+.metrics-panel.dragging {
+    transition: none !important;
+}
+
 .metrics-panel.bubble {
     top: 98px;
     width: 92px !important;
@@ -2324,6 +2329,8 @@ html.glass-effects .settings-panel {
 
     .mode-switch button {
         flex: 1;
+        flex-direction: column;
+        flex-wrap: nowrap;
         justify-content: center;
         row-gap: 2px;
     }
@@ -2426,6 +2433,23 @@ html.light-ui .visualizer-toolbar {
 html.light-ui .axis-cursor-value {
     background: #ffffff;
     box-shadow: 0 2px 10px rgba(36, 50, 76, 0.18);
+}
+
+html.light-ui .cursor-tooltip,
+html.light-ui.glass-effects .cursor-tooltip {
+    color: #475467;
+    border-color: rgba(54, 68, 91, 0.18);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 10px 30px rgba(36, 50, 76, 0.18);
+}
+
+html.light-ui .cursor-tooltip strong {
+    color: #172033;
+}
+
+html.light-ui .cursor-tooltip .tooltip-selection {
+    color: #1769c2;
+    border-top-color: rgba(23, 105, 194, 0.24);
 }
 
 html.light-ui .axis-left .axis-cursor-value.pitch {

@@ -1,6 +1,5 @@
 import React, {
     ChangeEvent,
-    MouseEvent as ReactMouseEvent,
     PointerEvent as ReactPointerEvent,
     useCallback,
     useEffect,
@@ -149,6 +148,23 @@ export interface SelectionSnapshot {
     startSeconds: number;
     endSeconds: number;
     durationSeconds: number;
+}
+
+interface PlotPointer {
+    x: number;
+    y: number;
+    clientX: number;
+    clientY: number;
+}
+
+interface PlotGesture {
+    pointers: Map<number, PlotPointer>;
+    primaryPointerId: number | null;
+    start: PlotPointer | null;
+    dragging: boolean;
+    panning: boolean;
+    blockedUntilRelease: boolean;
+    lastPanCenterX: number | null;
 }
 
 export interface AppCallbacks {
@@ -568,8 +584,15 @@ export default function App({
     });
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
-    const dragStartRef = useRef<number | null>(null);
-    const touchPanRef = useRef<{ pointerId: number; lastX: number } | null>(null);
+    const plotGestureRef = useRef<PlotGesture>({
+        pointers: new Map(),
+        primaryPointerId: null,
+        start: null,
+        dragging: false,
+        panning: false,
+        blockedUntilRelease: false,
+        lastPanCenterX: null,
+    });
     const plotContainerRef = useRef<HTMLDivElement | null>(null);
     const axisViewRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
@@ -1187,41 +1210,208 @@ export default function App({
         [onStartFile]
     );
 
-    const pointerRatios = useCallback((event: ReactMouseEvent<HTMLCanvasElement>) => {
-        const bounds = event.currentTarget.getBoundingClientRect();
-        return {
-            x: Math.min(1, Math.max(0, (event.clientX - bounds.left) / bounds.width)),
-            y: Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height)),
-        };
-    }, []);
-
-    const startPlotSelection = useCallback(
-        (event: ReactMouseEvent<HTMLCanvasElement>) => {
-            const point = pointerRatios(event);
-            dragStartRef.current = point.x;
-            if (event.currentTarget.dataset.plot === 'spectrogram') {
-                onInspect(point.x, point.y);
-            } else {
-                onInspect(-1, -1);
-            }
-            onSelectRange(-1, -1);
+    const plotPoint = useCallback(
+        (canvas: HTMLCanvasElement, clientX: number, clientY: number): PlotPointer => {
+            const bounds = canvas.getBoundingClientRect();
+            return {
+                x: Math.min(1, Math.max(0, (clientX - bounds.left) / bounds.width)),
+                y: Math.min(1, Math.max(0, (clientY - bounds.top) / bounds.height)),
+                clientX,
+                clientY,
+            };
         },
-        [onInspect, onSelectRange, pointerRatios]
+        []
     );
 
-    const updatePlotSelection = useCallback(
-        (event: ReactMouseEvent<HTMLCanvasElement>) => {
-            const point = pointerRatios(event);
-            if (event.currentTarget.dataset.plot === 'spectrogram') {
+    const inspectPlotPoint = useCallback(
+        (canvas: HTMLCanvasElement, point: PlotPointer) => {
+            if (canvas.dataset.plot === 'spectrogram') {
                 onInspect(point.x, point.y);
             } else {
                 onInspect(-1, -1);
             }
-            if (dragStartRef.current !== null) {
-                onSelectRange(dragStartRef.current, point.x);
+        },
+        [onInspect]
+    );
+
+    const resetPlotGesture = useCallback(() => {
+        const gesture = plotGestureRef.current;
+        gesture.pointers.clear();
+        gesture.primaryPointerId = null;
+        gesture.start = null;
+        gesture.dragging = false;
+        gesture.panning = false;
+        gesture.blockedUntilRelease = false;
+        gesture.lastPanCenterX = null;
+    }, []);
+
+    const plotPanCenterX = useCallback((gesture: PlotGesture) => {
+        const points = Array.from(gesture.pointers.values());
+        if (points.length === 0) {
+            return null;
+        }
+        return points.reduce((sum, point) => sum + point.clientX, 0) / points.length;
+    }, []);
+
+    const startPlotGesture = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) {
+                return;
+            }
+            event.preventDefault();
+            const canvas = event.currentTarget;
+            const gesture = plotGestureRef.current;
+            const point = plotPoint(canvas, event.clientX, event.clientY);
+            canvas.setPointerCapture(event.pointerId);
+            gesture.pointers.set(event.pointerId, point);
+
+            if (gesture.pointers.size === 1) {
+                gesture.primaryPointerId = event.pointerId;
+                gesture.start = point;
+                gesture.dragging = false;
+                gesture.panning = false;
+                gesture.blockedUntilRelease = false;
+                gesture.lastPanCenterX = null;
+                inspectPlotPoint(canvas, point);
+                onSelectRange(-1, -1);
+                return;
+            }
+
+            if (event.pointerType === 'touch') {
+                gesture.panning = true;
+                gesture.blockedUntilRelease = true;
+                gesture.dragging = false;
+                gesture.lastPanCenterX = plotPanCenterX(gesture);
+                onSelectRange(-1, -1);
+                onInspect(-1, -1);
             }
         },
-        [onInspect, onSelectRange, pointerRatios]
+        [inspectPlotPoint, onInspect, onSelectRange, plotPanCenterX, plotPoint]
+    );
+
+    const updatePlotGesture = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            const canvas = event.currentTarget;
+            const gesture = plotGestureRef.current;
+            const current = gesture.pointers.get(event.pointerId);
+            const point = plotPoint(canvas, event.clientX, event.clientY);
+
+            if (current === undefined) {
+                if (event.pointerType === 'mouse') {
+                    inspectPlotPoint(canvas, point);
+                }
+                return;
+            }
+
+            event.preventDefault();
+            gesture.pointers.set(event.pointerId, point);
+            if (gesture.panning && gesture.pointers.size >= 2) {
+                const centerX = plotPanCenterX(gesture);
+                if (centerX !== null && gesture.lastPanCenterX !== null) {
+                    const bounds = canvas.getBoundingClientRect();
+                    onNavigate(
+                        (centerX - gesture.lastPanCenterX) /
+                            Math.max(1, bounds.width) /
+                            Math.max(1, zoom)
+                    );
+                }
+                gesture.lastPanCenterX = centerX;
+                return;
+            }
+
+            if (
+                gesture.blockedUntilRelease ||
+                gesture.primaryPointerId !== event.pointerId ||
+                gesture.start === null
+            ) {
+                return;
+            }
+
+            inspectPlotPoint(canvas, point);
+            const distance = Math.hypot(
+                point.clientX - gesture.start.clientX,
+                point.clientY - gesture.start.clientY
+            );
+            if (distance >= 6) {
+                gesture.dragging = true;
+                onSelectRange(gesture.start.x, point.x);
+            }
+        },
+        [inspectPlotPoint, onNavigate, onSelectRange, plotPanCenterX, plotPoint, zoom]
+    );
+
+    const finishPlotGesture = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>, cancelled = false) => {
+            const canvas = event.currentTarget;
+            const gesture = plotGestureRef.current;
+            const current = gesture.pointers.get(event.pointerId);
+            if (current === undefined) {
+                return;
+            }
+
+            const point = plotPoint(canvas, event.clientX, event.clientY);
+            gesture.pointers.set(event.pointerId, point);
+            const wasPanning = gesture.panning || gesture.blockedUntilRelease;
+            const wasPrimary = gesture.primaryPointerId === event.pointerId;
+            const start = gesture.start;
+            const wasDragging = gesture.dragging;
+            gesture.pointers.delete(event.pointerId);
+
+            if (!cancelled && !wasPanning && wasPrimary && start !== null) {
+                inspectPlotPoint(canvas, point);
+                if (wasDragging) {
+                    onSelectRange(start.x, point.x);
+                    if (transport.activeId !== null) {
+                        onPlayMediaAt(Math.min(start.x, point.x));
+                    }
+                } else {
+                    onSelectRange(-1, -1);
+                    if (transport.activeId !== null) {
+                        onPlayMediaAt(point.x);
+                    }
+                }
+            }
+
+            if (canvas.hasPointerCapture(event.pointerId)) {
+                canvas.releasePointerCapture(event.pointerId);
+            }
+            if (gesture.pointers.size === 0) {
+                resetPlotGesture();
+            } else if (gesture.pointers.size >= 2) {
+                gesture.lastPanCenterX = plotPanCenterX(gesture);
+            } else {
+                gesture.panning = false;
+                gesture.lastPanCenterX = null;
+            }
+        },
+        [
+            inspectPlotPoint,
+            onPlayMediaAt,
+            onSelectRange,
+            plotPanCenterX,
+            plotPoint,
+            resetPlotGesture,
+            transport.activeId,
+        ]
+    );
+
+    const leavePlot = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (
+                event.pointerType === 'mouse' &&
+                !plotGestureRef.current.pointers.has(event.pointerId)
+            ) {
+                onInspect(-1, -1);
+            }
+        },
+        [onInspect]
+    );
+
+    const cancelPlotGesture = useCallback(
+        (event: ReactPointerEvent<HTMLCanvasElement>) => {
+            finishPlotGesture(event, true);
+        },
+        [finishPlotGesture]
     );
 
     const beginPlotResize = useCallback(
@@ -1248,67 +1438,6 @@ export default function App({
         [spectrogramVisible, waveformVisible]
     );
 
-    const finishPlotSelection = useCallback(
-        (event: ReactMouseEvent<HTMLCanvasElement>) => {
-            if (dragStartRef.current === null) {
-                return;
-            }
-            const point = pointerRatios(event);
-            const start = dragStartRef.current;
-            dragStartRef.current = null;
-            onSelectRange(
-                Math.abs(point.x - start) < 0.004 ? -1 : start,
-                Math.abs(point.x - start) < 0.004 ? -1 : point.x
-            );
-            if (transport.activeId !== null) {
-                onPlayMediaAt(Math.min(start, point.x));
-            }
-        },
-        [onPlayMediaAt, onSelectRange, pointerRatios, transport.activeId]
-    );
-
-    const startPlotTouchPan = useCallback(
-        (event: ReactPointerEvent<HTMLCanvasElement>) => {
-            if (event.pointerType !== 'touch' || zoom <= 1) {
-                return;
-            }
-            event.preventDefault();
-            event.currentTarget.setPointerCapture(event.pointerId);
-            touchPanRef.current = {
-                pointerId: event.pointerId,
-                lastX: event.clientX,
-            };
-            dragStartRef.current = null;
-            onInspect(-1, -1);
-        },
-        [onInspect, zoom]
-    );
-
-    const updatePlotTouchPan = useCallback(
-        (event: ReactPointerEvent<HTMLCanvasElement>) => {
-            const touchPan = touchPanRef.current;
-            if (touchPan === null || touchPan.pointerId !== event.pointerId) {
-                return;
-            }
-            event.preventDefault();
-            const bounds = event.currentTarget.getBoundingClientRect();
-            const deltaX = event.clientX - touchPan.lastX;
-            touchPan.lastX = event.clientX;
-            onNavigate(deltaX / Math.max(1, bounds.width) / Math.max(1, zoom));
-        },
-        [onNavigate, zoom]
-    );
-
-    const finishPlotTouchPan = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
-        if (touchPanRef.current?.pointerId !== event.pointerId) {
-            return;
-        }
-        touchPanRef.current = null;
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId);
-        }
-    }, []);
-
     const beginFloatingDrag = useCallback(
         (panelName: 'playlist' | 'metrics', event: ReactPointerEvent<HTMLElement>) => {
             if (event.button !== 0) {
@@ -1326,7 +1455,6 @@ export default function App({
             let latestLeft = bounds.left;
             let latestTop = bounds.top;
             panel.classList.add('dragging');
-            panel.style.transition = 'none';
 
             const move = (moveEvent: PointerEvent) => {
                 if (moveEvent.pointerId !== event.pointerId) {
@@ -1354,12 +1482,10 @@ export default function App({
                 document.removeEventListener('pointermove', move);
                 document.removeEventListener('pointerup', finish);
                 document.removeEventListener('pointercancel', finish);
-                panel.style.transform = '';
                 panel.style.left = `${latestLeft}px`;
                 panel.style.top = `${latestTop}px`;
                 panel.style.right = 'auto';
-                panel.style.transition = '';
-                panel.classList.remove('dragging');
+                panel.style.transform = '';
                 if (moved) {
                     const nextPosition = { left: latestLeft, top: latestTop };
                     if (panelName === 'playlist') {
@@ -1368,6 +1494,7 @@ export default function App({
                         setMetricsPosition(nextPosition);
                     }
                 }
+                window.requestAnimationFrame(() => panel.classList.remove('dragging'));
                 draggedPanelRef.current = moved ? panelName : null;
             };
             document.addEventListener('pointermove', move);
@@ -2226,17 +2353,14 @@ export default function App({
                                     <canvas
                                         id="waveformInteraction"
                                         data-plot="waveform"
-                                        onPointerDown={startPlotTouchPan}
-                                        onPointerMove={updatePlotTouchPan}
-                                        onPointerUp={finishPlotTouchPan}
-                                        onPointerCancel={finishPlotTouchPan}
-                                        onMouseDown={startPlotSelection}
-                                        onMouseMove={updatePlotSelection}
-                                        onMouseUp={finishPlotSelection}
-                                        onMouseLeave={() => {
-                                            dragStartRef.current = null;
-                                            onInspect(-1, -1);
-                                        }}
+                                        aria-label={tr(
+                                            '波形交互区：单击定位，单指拖动选择，双指拖动平移'
+                                        )}
+                                        onPointerDown={startPlotGesture}
+                                        onPointerMove={updatePlotGesture}
+                                        onPointerUp={finishPlotGesture}
+                                        onPointerCancel={cancelPlotGesture}
+                                        onPointerLeave={leavePlot}
                                         onWheel={(event) => {
                                             event.preventDefault();
                                             onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
@@ -2271,17 +2395,14 @@ export default function App({
                                     <canvas
                                         id="analysisOverlay"
                                         data-plot="spectrogram"
-                                        onPointerDown={startPlotTouchPan}
-                                        onPointerMove={updatePlotTouchPan}
-                                        onPointerUp={finishPlotTouchPan}
-                                        onPointerCancel={finishPlotTouchPan}
-                                        onMouseDown={startPlotSelection}
-                                        onMouseMove={updatePlotSelection}
-                                        onMouseUp={finishPlotSelection}
-                                        onMouseLeave={() => {
-                                            dragStartRef.current = null;
-                                            onInspect(-1, -1);
-                                        }}
+                                        aria-label={tr(
+                                            '语谱图交互区：单击定位并显示坐标，单指拖动选择，双指拖动平移'
+                                        )}
+                                        onPointerDown={startPlotGesture}
+                                        onPointerMove={updatePlotGesture}
+                                        onPointerUp={finishPlotGesture}
+                                        onPointerCancel={cancelPlotGesture}
+                                        onPointerLeave={leavePlot}
                                         onWheel={(event) => {
                                             event.preventDefault();
                                             onNavigate(event.deltaY > 0 ? 0.05 : -0.05);

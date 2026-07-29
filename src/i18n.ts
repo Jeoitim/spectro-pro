@@ -112,6 +112,10 @@ const ENGLISH: { [key: string]: string } = {
     点击切换指标: 'Click to switch metric',
     实时读数: 'Live readings',
     时刻线位置读数: 'Readings at the playhead',
+    '波形交互区：单击定位，单指拖动选择，双指拖动平移':
+        'Waveform: tap to seek, drag with one finger to select, drag with two fingers to pan',
+    '语谱图交互区：单击定位并显示坐标，单指拖动选择，双指拖动平移':
+        'Spectrogram: tap to seek and inspect coordinates, drag with one finger to select, drag with two fingers to pan',
     声学概览: 'Acoustic overview',
     收起声学概览: 'Collapse acoustic overview',
     关闭声学概览: 'Close acoustic overview',
