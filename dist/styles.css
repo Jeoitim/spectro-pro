@@ -1777,7 +1777,12 @@ button.media-row {
 }
 
 html[lang='en'] .settings-panel {
-    width: min(520px, calc(100vw - 36px));
+    width: min(640px, calc(100vw - 36px));
+}
+
+html[lang='en'] .settings-tabs button {
+    white-space: nowrap;
+    overflow-wrap: normal;
 }
 
 .settings-tabs {
@@ -2188,9 +2193,9 @@ html.glass-effects .settings-panel {
     }
 }
 
-@media (max-width: 540px) {
+@media (max-width: 700px) {
     .settings-tabs {
-        grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
     }
 
     .settings-tabs button {
