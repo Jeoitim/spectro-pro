@@ -411,12 +411,11 @@ select:focus-visible {
     padding: 12px;
     border: 1px solid rgba(143, 166, 207, 0.22);
     border-radius: 14px;
-    background: rgba(7, 11, 19, 0.94);
+    background: rgba(7, 11, 19, 0.98);
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
     opacity: 0;
     transform: translateX(calc(-100% - 20px));
     pointer-events: none;
-    backdrop-filter: blur(18px);
     will-change: transform;
     transition: 180ms ease;
 }
@@ -947,10 +946,9 @@ button.media-row {
     border: 1px solid rgba(162, 180, 211, 0.25);
     border-radius: 8px;
     color: #cbd5e4;
-    background: rgba(5, 8, 15, 0.9);
+    background: rgba(5, 8, 15, 0.97);
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
     pointer-events: none;
-    backdrop-filter: blur(10px);
 }
 
 .cursor-tooltip strong {
@@ -1258,8 +1256,7 @@ button.media-row {
     padding: 20px;
     overflow: auto;
     resize: both;
-    background: linear-gradient(155deg, rgba(17, 23, 37, 0.88), rgba(10, 14, 24, 0.92));
-    backdrop-filter: blur(22px);
+    background: linear-gradient(155deg, rgba(17, 23, 37, 0.97), rgba(10, 14, 24, 0.98));
     will-change: transform;
     transition: width 180ms ease, min-height 180ms ease, border-radius 180ms ease,
         padding 180ms ease;

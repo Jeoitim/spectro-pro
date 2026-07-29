@@ -32,6 +32,8 @@ const PITCH_CEILING_HZ = 500;
 const INTENSITY_FLOOR_DB_SPL = 50;
 const INTENSITY_CEILING_DB_SPL = 100;
 const MAX_OFFLINE_COLUMNS = 2048;
+const MAX_RENDER_FRAMES_PER_SECOND = 30;
+const MAX_RENDER_PIXEL_RATIO = 1.5;
 
 interface ModeConfiguration {
     windowSize: number;
@@ -208,6 +210,8 @@ class SpectroEngine {
     private sessionElapsedSeconds = 0;
 
     private lastUiUpdate = 0;
+
+    private lastRenderTime = 0;
 
     private inspector: { x: number; y: number } | null = null;
 
@@ -843,7 +847,7 @@ class SpectroEngine {
     }
 
     exportImage() {
-        this.renderer.render();
+        this.renderer.render(true);
         this.drawOverlay();
         const width = this.canvas.width;
         const height = this.canvas.height;
@@ -1472,7 +1476,7 @@ class SpectroEngine {
     private resize() {
         const width = Math.max(1, this.stage.clientWidth);
         const height = Math.max(1, this.stage.clientHeight);
-        const pixelRatio = Math.min(2, window.devicePixelRatio || 1);
+        const pixelRatio = Math.min(MAX_RENDER_PIXEL_RATIO, window.devicePixelRatio || 1);
         this.renderer.resizeCanvas(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
         this.overlay.width = Math.round(width * pixelRatio);
         this.overlay.height = Math.round(height * pixelRatio);
@@ -1482,13 +1486,17 @@ class SpectroEngine {
         this.overlayDirty = true;
     }
 
-    private renderLoop() {
-        this.renderer.render();
-        if (this.overlayDirty) {
-            this.drawOverlay();
-            this.overlayDirty = false;
+    private renderLoop(timestamp: number = performance.now()) {
+        const frameInterval = 1000 / MAX_RENDER_FRAMES_PER_SECOND;
+        if (timestamp - this.lastRenderTime >= frameInterval) {
+            this.lastRenderTime = timestamp - ((timestamp - this.lastRenderTime) % frameInterval);
+            this.renderer.render();
+            if (this.overlayDirty) {
+                this.drawOverlay();
+                this.overlayDirty = false;
+            }
         }
-        requestAnimationFrame(() => this.renderLoop());
+        requestAnimationFrame((nextTimestamp) => this.renderLoop(nextTimestamp));
     }
 
     private visibleHistoryRange() {

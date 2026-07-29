@@ -1,10 +1,5 @@
 import { colorRamp, Gradient, HEATED_METAL_GRADIENT } from './color-util';
-import {
-    Circular2DBuffer,
-    frequencyToScale,
-    lerp,
-    scaleToFrequency,
-} from './math-util';
+import { Circular2DBuffer, frequencyToScale, lerp, scaleToFrequency } from './math-util';
 import FragmentShader from './shaders/fragment.glsl';
 import VertexShader from './shaders/vertex.glsl';
 import { Scale } from './spectrogram';
@@ -87,6 +82,8 @@ export class SpectrogramGPURenderer {
     private resizeHandlerLastRealWidth: number = 0;
 
     private resizeHandlerZoomOverride: number = 1;
+
+    private dirty = true;
 
     private readonly program: {
         program: WebGLProgram;
@@ -185,7 +182,10 @@ export class SpectrogramGPURenderer {
         this.updateParameters({});
     }
 
-    render() {
+    render(force: boolean = false) {
+        if (!force && !this.dirty) {
+            return false;
+        }
         this.ctx.clearColor(0.0, 0.0, 0.0, 1.0);
         this.ctx.clear(this.ctx.COLOR_BUFFER_BIT);
 
@@ -265,6 +265,15 @@ export class SpectrogramGPURenderer {
         this.ctx.uniform1i(this.program.gradientSamplerUniform, 2);
 
         this.ctx.drawElements(this.ctx.TRIANGLES, 6, this.ctx.UNSIGNED_SHORT, 0);
+
+        this.dirty =
+            Math.abs(this.currentScaleRange[0] - this.scaleRange[0]) > 1e-9 ||
+            Math.abs(this.currentScaleRange[1] - this.scaleRange[1]) > 1e-9 ||
+            Math.abs(this.currentContrast - this.parameters!.contrast) > 1e-9 ||
+            Math.abs(this.currentSensitivity - this.parameters!.sensitivity) > 1e-9 ||
+            Math.abs(this.currentZoom - this.parameters!.zoom) > 1e-9 ||
+            Math.abs(this.currentTimeOffset - this.parameters!.timeOffset) > 1e-9;
+        return true;
     }
 
     public resizeCanvas(width: number, height: number) {
@@ -274,6 +283,7 @@ export class SpectrogramGPURenderer {
         this.canvas.width = width;
         this.canvas.height = height;
         this.ctx.viewport(0, 0, width, height);
+        this.dirty = true;
     }
 
     public fastResizeCanvas(width: number, height: number) {
@@ -281,6 +291,7 @@ export class SpectrogramGPURenderer {
         this.canvas.width = width;
         this.canvas.height = height;
         this.ctx.viewport(0, 0, width, height);
+        this.dirty = true;
     }
 
     public updateParameters(parameters: Partial<RenderParameters>) {
@@ -336,6 +347,14 @@ export class SpectrogramGPURenderer {
             this.currentScaleRange = this.scaleRange;
         }
 
+        if (
+            this.parameters === null ||
+            Object.entries(parameters).some(
+                ([key, value]) => this.parameters![key as keyof RenderParameters] !== value
+            )
+        ) {
+            this.dirty = true;
+        }
         this.parameters = newParameters;
     }
 
@@ -343,6 +362,8 @@ export class SpectrogramGPURenderer {
         circular2dQueue: Circular2DBuffer<Float32Array>,
         forceFullRender: boolean = false
     ) {
+        const previousStart = this.lastSpectrogramStart;
+        const previousLength = this.lastSpectrogramLength;
         this.ctx.bindTexture(this.ctx.TEXTURE_2D, this.spectrogramTexture);
 
         if (forceFullRender || this.lastSpectrogramStart === null) {
@@ -393,6 +414,13 @@ export class SpectrogramGPURenderer {
         this.spectrogramOffset = circular2dQueue.start / circular2dQueue.width;
         this.spectrogramLength =
             -0.5 / circular2dQueue.width + circular2dQueue.length / circular2dQueue.width;
+        if (
+            forceFullRender ||
+            previousStart !== circular2dQueue.start ||
+            previousLength !== circular2dQueue.length
+        ) {
+            this.dirty = true;
+        }
     }
 
     private updateSpectrogramPartial(
