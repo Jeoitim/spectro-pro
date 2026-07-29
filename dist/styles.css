@@ -809,11 +809,10 @@ button.media-row {
 
 .toolbar-center .plot-toggles button,
 .overlay-toggles button {
-    display: inline-grid;
-    grid-template-columns: 6px minmax(0, 1fr);
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    column-gap: 4px;
+    gap: 4px;
     min-height: 32px;
     padding: 0 10px;
     border: 1px solid var(--line);
@@ -847,12 +846,10 @@ button.media-row {
     margin-right: 0;
     border-radius: 50%;
     background: currentColor;
-    transform: translateY(-1px);
 }
 
 .toggle-label {
-    align-self: center;
-    line-height: 1;
+    line-height: normal;
 }
 
 .plot-toggles .on.waveform {
