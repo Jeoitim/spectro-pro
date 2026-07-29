@@ -2476,10 +2476,12 @@ export default function App({
                                             <strong>{cursor.timeSeconds.toFixed(3)} s</strong>
                                             <span>{cursor.frequencyHz.toFixed(0)} Hz</span>
                                             {cursor.pitchHz !== null && (
-                                                <span>F0 {cursor.pitchHz.toFixed(1)} Hz</span>
+                                                <span className="tooltip-pitch">
+                                                    F0 {cursor.pitchHz.toFixed(1)} Hz
+                                                </span>
                                             )}
                                             {cursor.intensityDbSpl !== null && (
-                                                <span>
+                                                <span className="tooltip-intensity">
                                                     {cursor.intensityDbSpl.toFixed(1)} dB SPL*
                                                 </span>
                                             )}

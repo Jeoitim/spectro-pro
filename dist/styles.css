@@ -2267,8 +2267,8 @@ html.glass-effects .settings-panel {
         position: relative;
         grid-template-columns: 1fr;
         min-height: 0;
-        gap: 8px;
-        padding: 8px 10px;
+        gap: 5px;
+        padding: 6px 8px;
     }
 
     .source-status {
@@ -2277,34 +2277,59 @@ html.glass-effects .settings-panel {
 
     .brand {
         min-width: 0;
+        gap: 9px;
     }
 
     .brand-mark {
-        width: 32px;
-        height: 32px;
-        border-radius: 9px;
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+    }
+
+    .brand strong {
+        font-size: 18px;
+    }
+
+    .brand span {
+        font-size: 9px;
     }
 
     .top-actions {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
         width: 100%;
         padding-left: 0;
-        gap: 6px;
-        justify-content: flex-start;
+        gap: 4px;
     }
 
     .top-actions .button.secondary {
         display: inline-flex;
+        grid-column: span 2;
     }
 
     .top-actions .button {
-        min-height: 34px;
-        padding: 0 10px;
+        min-width: 0;
+        min-height: 30px;
+        padding: 0 6px;
+        gap: 4px;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+
+    .top-actions .button.primary,
+    .top-actions .button.danger {
+        grid-column: span 3;
+    }
+
+    .top-actions .button > svg {
+        width: 14px;
+        height: 14px;
     }
 
     .top-actions .icon-button,
     .top-actions .language-button {
-        width: 34px;
-        height: 34px;
+        width: 100%;
+        height: 30px;
     }
 
     .workspace {
@@ -2312,10 +2337,10 @@ html.glass-effects .settings-panel {
     }
 
     .visualizer-toolbar {
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr);
         min-height: 0;
-        gap: 8px;
-        padding: 7px 8px;
+        gap: 5px;
+        padding: 6px 7px;
     }
 
     .mode-switch {
@@ -2324,12 +2349,37 @@ html.glass-effects .settings-panel {
     }
 
     .toolbar-center {
-        justify-content: flex-start;
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        width: 100%;
+        gap: 4px;
+    }
+
+    .toolbar-center .plot-toggles,
+    .toolbar-center .overlay-toggles {
+        display: contents;
+    }
+
+    .toolbar-center .plot-toggles button,
+    .toolbar-center .overlay-toggles button {
+        min-width: 0;
+        min-height: 29px;
+        padding: 0 2px;
+        font-size: 10px;
+        white-space: nowrap;
+    }
+
+    .toolbar-center > .transport-control {
+        grid-column: 1 / -1;
+        width: 100%;
+        height: 28px;
     }
 
     .view-actions {
         grid-column: 1 / -1;
+        flex-wrap: nowrap;
         justify-content: flex-start;
+        gap: 4px;
     }
 
     .mode-switch button {
@@ -2337,7 +2387,25 @@ html.glass-effects .settings-panel {
         flex-direction: column;
         flex-wrap: nowrap;
         justify-content: center;
+        min-height: 35px;
+        padding: 0 6px;
         row-gap: 2px;
+    }
+
+    .mode-switch strong {
+        font-size: 11px;
+    }
+
+    .mode-switch span {
+        font-size: 8px;
+    }
+
+    .view-actions button {
+        height: 28px;
+    }
+
+    .view-actions > .zoom-readout {
+        min-width: 34px;
     }
 
     .praat-view {
@@ -2381,21 +2449,33 @@ html.glass-effects .settings-panel {
     }
 
     .axis-cursor-value {
-        padding: 2px 4px;
-        font-size: 11px;
+        padding: 1px 3px;
+        border-radius: 3px;
+        font-size: 8px;
+        font-weight: 700;
     }
 
     .cursor-tooltip {
-        gap: 2px;
-        padding: 7px 9px;
+        min-width: min(98px, calc(100% - 12px));
+        max-width: min(140px, calc(100% - 12px));
+        max-height: calc(100% - 12px);
+        gap: 1px;
+        padding: 5px 7px;
+        border-radius: 6px;
     }
 
     .cursor-tooltip strong {
-        font-size: 12px;
+        font-size: 10px;
     }
 
     .cursor-tooltip span {
-        font-size: 10px;
+        font-size: 8px;
+    }
+
+    .cursor-tooltip .tooltip-pitch,
+    .cursor-tooltip .tooltip-intensity,
+    .cursor-tooltip .tooltip-selection {
+        display: none;
     }
 
     .axis-title {
