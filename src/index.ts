@@ -9,12 +9,14 @@ import {
     LiveSnapshot,
     MediaListItem,
     SelectionSnapshot,
+    SpectrogramAnalysisSettings,
     SpectrogramMode,
     TransportSnapshot,
     UiController,
 } from './controls-ui/App';
 import { t } from './i18n';
 import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
+import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import { offThreadAnalyzeEntireFile, offThreadGenerateSpectrogram } from './worker-util';
 
@@ -83,10 +85,15 @@ function nextPowerOfTwo(value: number) {
     return 2 ** Math.ceil(Math.log2(value));
 }
 
-function modeConfiguration(mode: SpectrogramMode, sampleRate: number): ModeConfiguration {
-    const durationSeconds = mode === 'broadband' ? 0.005 : 0.03;
+function modeConfiguration(
+    mode: SpectrogramMode,
+    sampleRate: number,
+    customWindowLengthMs: number
+): ModeConfiguration {
+    const durationSeconds =
+        mode === 'broadband' ? 0.005 : mode === 'narrowband' ? 0.03 : customWindowLengthMs / 1000;
     const windowSize = Math.max(32, Math.round(sampleRate * durationSeconds));
-    const hopSize = mode === 'broadband' ? 128 : 256;
+    const hopSize = durationSeconds <= 0.012 ? 128 : 256;
     return {
         windowSize,
         fftSize: nextPowerOfTwo(windowSize),
@@ -122,6 +129,16 @@ class SpectroEngine {
     private analysisHistory: AnalysisPoint[] = [];
 
     private mode: SpectrogramMode = 'broadband';
+
+    private customWindowLengthMs = 15;
+
+    private windowFunction: SpectrogramWindowFunction = 'gaussian';
+
+    private spectrogramAnalysisRevision: Record<SpectrogramMode, number> = {
+        broadband: 0,
+        narrowband: 0,
+        custom: 0,
+    };
 
     private pitchAlgorithm: PitchAlgorithm = 'yin';
 
@@ -233,7 +250,7 @@ class SpectroEngine {
         this.overlay = overlay;
         this.stage = stage;
 
-        const config = modeConfiguration(this.mode, this.sampleRate);
+        const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
         this.spectrogramBuffer = new Circular2DBuffer(
             Float32Array,
             config.historyCapacity,
@@ -288,7 +305,7 @@ class SpectroEngine {
             this.showOrAnalyzeMedia(activeMedia);
             return;
         }
-        const config = modeConfiguration(mode, this.sampleRate);
+        const config = modeConfiguration(mode, this.sampleRate, this.customWindowLengthMs);
         this.spectrogramBuffer.resizeWidth(config.historyCapacity);
         this.renderer.updateParameters({
             sampleRate: this.sampleRate,
@@ -296,6 +313,50 @@ class SpectroEngine {
             timeOffset: 0,
         });
         this.timeOffset = 0;
+        this.clearVisualHistory();
+    }
+
+    setSpectrogramAnalysis(settings: SpectrogramAnalysisSettings) {
+        const customWindowChanged = this.customWindowLengthMs !== settings.customWindowLengthMs;
+        const windowFunctionChanged = this.windowFunction !== settings.windowFunction;
+        if (!customWindowChanged && !windowFunctionChanged) {
+            return;
+        }
+
+        this.customWindowLengthMs = settings.customWindowLengthMs;
+        this.windowFunction = settings.windowFunction;
+        if (windowFunctionChanged) {
+            this.spectrogramAnalysisRevision.broadband += 1;
+            this.spectrogramAnalysisRevision.narrowband += 1;
+            this.spectrogramAnalysisRevision.custom += 1;
+        } else {
+            this.spectrogramAnalysisRevision.custom += 1;
+        }
+        for (const item of this.mediaItems) {
+            if (windowFunctionChanged) {
+                item.modes = {};
+            } else {
+                delete item.modes.custom;
+            }
+        }
+
+        const affectsCurrentMode = windowFunctionChanged || this.mode === 'custom';
+        if (!affectsCurrentMode) {
+            return;
+        }
+        const activeMedia = this.activeMedia();
+        if (activeMedia !== null) {
+            this.stopMediaPlayback(false);
+            this.showOrAnalyzeMedia(activeMedia);
+            return;
+        }
+
+        const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
+        this.spectrogramBuffer.resizeWidth(config.historyCapacity);
+        this.renderer.updateParameters({
+            sampleRate: this.sampleRate,
+            windowSize: config.fftSize,
+        });
         this.clearVisualHistory();
     }
 
@@ -315,6 +376,9 @@ class SpectroEngine {
         for (const item of this.mediaItems) {
             item.modes = {};
         }
+        this.spectrogramAnalysisRevision.broadband += 1;
+        this.spectrogramAnalysisRevision.narrowband += 1;
+        this.spectrogramAnalysisRevision.custom += 1;
         const activeMedia = this.activeMedia();
         if (activeMedia !== null) {
             this.showOrAnalyzeMedia(activeMedia);
@@ -483,11 +547,16 @@ class SpectroEngine {
     selectMedia(id: string | null) {
         this.saveActiveView();
         this.stop();
+        if (this.activeMediaId !== id) {
+            this.selection = null;
+            this.playbackRange = null;
+            this.ui.updateSelection(null);
+        }
         this.activeMediaId = id;
         this.notifyMediaLibrary();
         this.notifyTransport();
         if (id === null) {
-            const config = modeConfiguration(this.mode, this.sampleRate);
+            const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
             this.spectrogramBuffer = new Circular2DBuffer(
                 Float32Array,
                 config.historyCapacity,
@@ -791,7 +860,11 @@ class SpectroEngine {
         ctx.fillStyle = '#9aa7bc';
         ctx.font = '12px Arial, sans-serif';
         ctx.fillText(
-            this.mode === 'broadband' ? `${t('宽带')} · 5 ms` : `${t('窄带')} · 30 ms`,
+            this.mode === 'broadband'
+                ? `${t('宽带')} · 5 ms`
+                : this.mode === 'narrowband'
+                ? `${t('窄带')} · 30 ms`
+                : `${t('自定义')} · ${this.customWindowLengthMs} ms`,
             32,
             88
         );
@@ -821,17 +894,22 @@ class SpectroEngine {
     }
 
     private async analyzeMedia(item: MediaItem, mode: SpectrogramMode, displayWhenReady: boolean) {
+        const analysisRevision = this.spectrogramAnalysisRevision[mode];
         item.state = 'analyzing';
         this.notifyMediaLibrary();
         if (displayWhenReady && this.activeMediaId === item.id) {
             this.ui.setPlayState(
                 'loading-file',
                 item.name,
-                mode === 'broadband' ? '正在分析整段宽带语谱…' : '正在分析整段窄带语谱…'
+                mode === 'broadband'
+                    ? '正在分析整段宽带语谱…'
+                    : mode === 'narrowband'
+                    ? '正在分析整段窄带语谱…'
+                    : '正在分析自定义语谱…'
             );
         }
         try {
-            const config = modeConfiguration(mode, item.sampleRate);
+            const config = modeConfiguration(mode, item.sampleRate, this.customWindowLengthMs);
             const adaptiveHop = Math.max(
                 config.hopSize,
                 Math.ceil(
@@ -847,9 +925,13 @@ class SpectroEngine {
                     windowStepSize: adaptiveHop,
                     sampleRate: item.sampleRate,
                     scaleSize: SPECTROGRAM_HEIGHT,
+                    windowFunction: this.windowFunction,
                 },
                 this.analysisOptions
             );
+            if (analysisRevision !== this.spectrogramAnalysisRevision[mode]) {
+                return;
+            }
             const cache: OfflineModeCache = {
                 spectrogram: result.spectrogram,
                 analyses: result.analyses,
@@ -863,6 +945,9 @@ class SpectroEngine {
                 this.displayMediaCache(item, cache);
             }
         } catch (error) {
+            if (analysisRevision !== this.spectrogramAnalysisRevision[mode]) {
+                return;
+            }
             item.state = 'error';
             this.notifyMediaLibrary();
             if (displayWhenReady && this.activeMediaId === item.id) {
@@ -902,9 +987,6 @@ class SpectroEngine {
             timeOffset,
         };
         this.timeOffset = timeOffset;
-        this.selection = null;
-        this.playbackRange = null;
-        this.ui.updateSelection(null);
         this.playbackOffsetSeconds = clamp(this.playbackOffsetSeconds, 0, item.durationSeconds);
         this.rebuildStatisticsFromHistory();
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
@@ -1076,10 +1158,13 @@ class SpectroEngine {
         if (item === null) {
             return;
         }
-        item.views[this.mode] = {
+        const view = {
             zoom: Math.max(1, this.renderParameters.zoom || 1),
             timeOffset: this.timeOffset,
         };
+        item.views.broadband = view;
+        item.views.narrowband = view;
+        item.views.custom = view;
     }
 
     private notifyTransport() {
@@ -1110,7 +1195,7 @@ class SpectroEngine {
             return;
         }
         this.sampleRate = sampleRate;
-        const config = modeConfiguration(this.mode, sampleRate);
+        const config = modeConfiguration(this.mode, sampleRate, this.customWindowLengthMs);
         this.spectrogramBuffer.resizeWidth(config.historyCapacity);
         this.renderer.updateParameters({
             sampleRate,
@@ -1130,7 +1215,14 @@ class SpectroEngine {
     private async processRequest(request: ProcessRequest) {
         this.processing = true;
         try {
-            const config = modeConfiguration(this.mode, request.sampleRate);
+            const config = modeConfiguration(
+                this.mode,
+                request.sampleRate,
+                this.customWindowLengthMs
+            );
+            if (request.samples.length < config.windowSize) {
+                return;
+            }
             const maximumFrames = Math.floor(request.newSamples / config.hopSize);
             const availableFrames =
                 Math.floor((request.samples.length - config.windowSize) / config.hopSize) + 1;
@@ -1151,6 +1243,7 @@ class SpectroEngine {
                     windowStepSize: config.hopSize,
                     sampleRate: request.sampleRate,
                     scaleSize: SPECTROGRAM_HEIGHT,
+                    windowFunction: this.windowFunction,
                 },
                 request.samples.length - analysisLength,
                 analysisLength,
@@ -1356,7 +1449,7 @@ class SpectroEngine {
             );
         };
 
-        if (this.showFormants && this.mode === 'broadband') {
+        if (this.showFormants && this.mode !== 'narrowband') {
             const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
             const formantCount = Math.min(
                 this.layerDisplayOptions.formantsToDisplay,
@@ -1621,6 +1714,7 @@ const ui = initialiseControlsUi(appContainer, {
     onClear: () => engine?.clear(),
     onExport: () => engine?.exportImage(),
     onModeChange: (mode) => engine?.setMode(mode),
+    onSpectrogramAnalysisChange: (settings) => engine?.setSpectrogramAnalysis(settings),
     onPitchAlgorithmChange: (algorithm) => engine?.setPitchAlgorithm(algorithm),
     onAnalysisChange: (parameters) => engine?.updateAnalysis(parameters),
     onLayerDisplayChange: (parameters) => engine?.updateLayerDisplay(parameters),

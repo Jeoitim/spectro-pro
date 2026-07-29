@@ -6,6 +6,7 @@ import React, {
     useRef,
     useState,
 } from 'react';
+import AddIcon from '@material-ui/icons/Add';
 import ClearAllIcon from '@material-ui/icons/ClearAll';
 import CloseIcon from '@material-ui/icons/Close';
 import CloudUploadIcon from '@material-ui/icons/CloudUpload';
@@ -14,6 +15,7 @@ import DeleteSweepIcon from '@material-ui/icons/DeleteSweep';
 import ImageOutlinedIcon from '@material-ui/icons/ImageOutlined';
 import LanguageIcon from '@material-ui/icons/Language';
 import QueueMusicIcon from '@material-ui/icons/QueueMusic';
+import RemoveIcon from '@material-ui/icons/Remove';
 import RestoreIcon from '@material-ui/icons/Restore';
 import SaveAltIcon from '@material-ui/icons/SaveAlt';
 import StopIcon from '@material-ui/icons/Stop';
@@ -22,11 +24,15 @@ import { AnalysisOptions, PitchAlgorithm } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
 import { frequencyToScale } from '../math-util';
-import { Scale } from '../spectrogram';
+import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
 
-export type SpectrogramMode = 'broadband' | 'narrowband';
+export type SpectrogramMode = 'broadband' | 'narrowband' | 'custom';
 export type PlayState = 'stopped' | 'loading-file' | 'loading-mic' | 'playing';
+export interface SpectrogramAnalysisSettings {
+    customWindowLengthMs: number;
+    windowFunction: SpectrogramWindowFunction;
+}
 type MetricSelection =
     | 'pitch'
     | 'intensity'
@@ -91,6 +97,7 @@ export interface AppCallbacks {
     onClear: () => void;
     onExport: () => void;
     onModeChange: (mode: SpectrogramMode) => void;
+    onSpectrogramAnalysisChange: (settings: SpectrogramAnalysisSettings) => void;
     onPitchAlgorithmChange: (algorithm: PitchAlgorithm) => void;
     onAnalysisChange: (parameters: Partial<AnalysisOptions>) => void;
     onLayerDisplayChange: (parameters: Partial<LayerDisplayOptions>) => void;
@@ -159,6 +166,9 @@ interface SavedSettings {
     scale?: 'linear' | 'mel';
     broadbandScale: Scale;
     narrowbandScale: Scale;
+    customScale: Scale;
+    customWindowLengthMs: number;
+    windowFunction: SpectrogramWindowFunction;
     gradientName: string;
     pitchFloor: number;
     pitchCeiling: number;
@@ -211,6 +221,7 @@ export default function App({
     onClear,
     onExport,
     onModeChange,
+    onSpectrogramAnalysisChange,
     onPitchAlgorithmChange,
     onAnalysisChange,
     onLayerDisplayChange,
@@ -265,6 +276,13 @@ export default function App({
     const [narrowbandScale, setNarrowbandScale] = useState<Scale>(
         saved.narrowbandScale || (saved.mode === 'narrowband' ? saved.scale : undefined) || 'log'
     );
+    const [customScale, setCustomScale] = useState<Scale>(saved.customScale || 'linear');
+    const [customWindowLengthMs, setCustomWindowLengthMs] = useState(
+        saved.customWindowLengthMs ?? 15
+    );
+    const [windowFunction, setWindowFunction] = useState<SpectrogramWindowFunction>(
+        saved.windowFunction || 'gaussian'
+    );
     const [gradientName, setGradientName] = useState(saved.gradientName || 'Aurora');
     const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
     const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
@@ -308,13 +326,25 @@ export default function App({
     const dragStartRef = useRef<number | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
+    const languageRef = useRef<HTMLDivElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
-    const scale = mode === 'broadband' ? broadbandScale : narrowbandScale;
+    const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
+    const scale =
+        mode !== 'narrowband'
+            ? broadbandScale
+            : mode === 'narrowband'
+            ? narrowbandScale
+            : customScale;
     const tr = useCallback((text: string) => translate(text, locale), [locale]);
     const localizedSourceName = sourceName.replace(
         /^(\d+) 个文件$/,
         (_, count: string) => `${count} ${tr('个文件')}`
     );
+    const chooseLocale = useCallback((nextLocale: Locale) => {
+        setActiveLocale(nextLocale);
+        setLocale(nextLocale);
+        setLanguageMenuOpen(false);
+    }, []);
 
     useEffect(() => {
         registerController({
@@ -358,6 +388,29 @@ export default function App({
     }, [locale, tr]);
 
     useEffect(() => {
+        const closeLanguageMenu = (event: MouseEvent) => {
+            if (
+                languageRef.current !== null &&
+                event.target instanceof Node &&
+                !languageRef.current.contains(event.target)
+            ) {
+                setLanguageMenuOpen(false);
+            }
+        };
+        const closeLanguageMenuWithEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setLanguageMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', closeLanguageMenu);
+        document.addEventListener('keydown', closeLanguageMenuWithEscape);
+        return () => {
+            document.removeEventListener('mousedown', closeLanguageMenu);
+            document.removeEventListener('keydown', closeLanguageMenuWithEscape);
+        };
+    }, []);
+
+    useEffect(() => {
         const settings: SavedSettings = {
             mode,
             pitchAlgorithm,
@@ -371,6 +424,9 @@ export default function App({
             maxFrequency,
             broadbandScale,
             narrowbandScale,
+            customScale,
+            customWindowLengthMs,
+            windowFunction,
             gradientName,
             pitchFloor,
             pitchCeiling,
@@ -407,6 +463,9 @@ export default function App({
         maxFrequency,
         broadbandScale,
         narrowbandScale,
+        customScale,
+        customWindowLengthMs,
+        windowFunction,
         gradientName,
         pitchFloor,
         pitchCeiling,
@@ -505,8 +564,20 @@ export default function App({
     }, [maximumFormants]);
 
     useEffect(() => {
-        onOverlayChange(pitchVisible, mode === 'broadband' && formantsVisible, intensityVisible);
+        onOverlayChange(pitchVisible, mode !== 'narrowband' && formantsVisible, intensityVisible);
     }, [pitchVisible, formantsVisible, intensityVisible, mode, onOverlayChange]);
+
+    useEffect(() => {
+        const timeout = window.setTimeout(
+            () =>
+                onSpectrogramAnalysisChange({
+                    customWindowLengthMs,
+                    windowFunction,
+                }),
+            160
+        );
+        return () => window.clearTimeout(timeout);
+    }, [customWindowLengthMs, windowFunction, onSpectrogramAnalysisChange]);
 
     useEffect(() => {
         onModeChange(mode);
@@ -520,7 +591,6 @@ export default function App({
 
     const changeMode = useCallback((newMode: SpectrogramMode) => {
         setMode(newMode);
-        setTimeOffset(0);
     }, []);
 
     const chooseFile = useCallback(() => fileRef.current?.click(), []);
@@ -683,17 +753,18 @@ export default function App({
             if (tab === 'spectrogram') {
                 setSensitivity(0.42);
                 setContrast(0.32);
-                setZoom(1);
-                setTimeOffset(0);
                 setMinFrequency(0);
-                setMaxFrequency(mode === 'broadband' ? 5500 : 1200);
+                setMaxFrequency(mode === 'narrowband' ? 1200 : 5500);
+                setCustomWindowLengthMs(15);
+                setWindowFunction('gaussian');
                 if (mode === 'broadband') {
                     setBroadbandScale('linear');
-                } else {
+                } else if (mode === 'narrowband') {
                     setNarrowbandScale('log');
+                } else {
+                    setCustomScale('linear');
                 }
                 setGradientName('Aurora');
-                onRestoreView();
                 return;
             }
             if (tab === 'pitch') {
@@ -720,7 +791,7 @@ export default function App({
             setIntensityLineWidth(2.5);
             setSplCalibration(0);
         },
-        [mode, onRestoreView]
+        [mode]
     );
 
     const toggleFullscreen = useCallback(() => {
@@ -732,6 +803,8 @@ export default function App({
     }, []);
 
     const selectedGradient = GRADIENTS.find((item) => item.name === gradientName);
+    const activeWindowLengthMs =
+        mode === 'broadband' ? 5 : mode === 'narrowband' ? 30 : customWindowLengthMs;
     const selectedFormantIndex =
         selectedMetric.indexOf('formant') === 0
             ? Number(selectedMetric.replace('formant', '')) - 1
@@ -760,14 +833,6 @@ export default function App({
                   color: 'formant',
                   digits: 0,
               };
-    const availableMetrics: MetricSelection[] =
-        mode === 'broadband'
-            ? ['pitch', 'intensity', 'formant1', 'formant2', 'formant3', 'formant4', 'formant5']
-            : ['pitch', 'intensity'];
-    const cycleSelectedMetric = () => {
-        const currentIndex = availableMetrics.indexOf(selectedMetric);
-        setSelectedMetric(availableMetrics[(currentIndex + 1) % availableMetrics.length]);
-    };
     const cursorAxisTop =
         cursor === null
             ? undefined
@@ -777,7 +842,7 @@ export default function App({
     const cursorPitchCoordinate =
         cursor === null
             ? null
-            : mode === 'broadband'
+            : mode !== 'narrowband'
             ? pitchFloor + (1 - cursor.y) * (pitchCeiling - pitchFloor)
             : cursor.frequencyHz;
     const spectralPitchTop = (frequency: number) => {
@@ -883,19 +948,38 @@ export default function App({
                             {tr('麦克风')}
                         </button>
                     )}
-                    <button
-                        className="icon-button language-button"
-                        onClick={() => {
-                            const nextLocale = locale === 'zh' ? 'en' : 'zh';
-                            setActiveLocale(nextLocale);
-                            setLocale(nextLocale);
-                        }}
-                        aria-label={tr(locale === 'zh' ? '切换到英文' : '切换到中文')}
-                        title={tr(locale === 'zh' ? '切换到英文' : '切换到中文')}
-                    >
-                        <LanguageIcon aria-hidden="true" />
-                        <span>{locale === 'zh' ? 'EN' : '中'}</span>
-                    </button>
+                    <div className="language-control" ref={languageRef}>
+                        <button
+                            className="icon-button language-button"
+                            onClick={() => setLanguageMenuOpen(!languageMenuOpen)}
+                            aria-label={tr('选择语言')}
+                            title={tr('选择语言')}
+                            aria-haspopup="menu"
+                            aria-expanded={languageMenuOpen}
+                        >
+                            <LanguageIcon aria-hidden="true" />
+                        </button>
+                        {languageMenuOpen && (
+                            <div className="language-menu" role="menu">
+                                <button
+                                    role="menuitemradio"
+                                    aria-checked={locale === 'zh'}
+                                    className={locale === 'zh' ? 'active' : ''}
+                                    onClick={() => chooseLocale('zh')}
+                                >
+                                    中文
+                                </button>
+                                <button
+                                    role="menuitemradio"
+                                    aria-checked={locale === 'en'}
+                                    className={locale === 'en' ? 'active' : ''}
+                                    onClick={() => chooseLocale('en')}
+                                >
+                                    English
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <button
                         className="icon-button"
                         onClick={() => setSettingsOpen(!settingsOpen)}
@@ -946,21 +1030,24 @@ export default function App({
                                 title={tr('清空播放列表')}
                             >
                                 <DeleteSweepIcon aria-hidden="true" />
-                                {tr('清空')}
                             </button>
                             <button
                                 onClick={() => setPlaylistCollapsed(!playlistCollapsed)}
                                 aria-label={tr(playlistCollapsed ? '展开播放列表' : '收起播放列表')}
                                 title={tr(playlistCollapsed ? '展开列表' : '收起列表')}
                             >
-                                {playlistCollapsed ? '+' : '−'}
+                                {playlistCollapsed ? (
+                                    <AddIcon aria-hidden="true" />
+                                ) : (
+                                    <RemoveIcon aria-hidden="true" />
+                                )}
                             </button>
                             <button
                                 onClick={() => setPlaylistOpen(false)}
                                 aria-label={tr('关闭播放列表')}
                                 title={tr('关闭播放列表')}
                             >
-                                ×
+                                <CloseIcon aria-hidden="true" />
                             </button>
                         </div>
                     </div>
@@ -1021,7 +1108,6 @@ export default function App({
                                             title={tr('保存WAV')}
                                         >
                                             <SaveAltIcon aria-hidden="true" />
-                                            {tr('保存')}
                                         </button>
                                     )}
                                     <button
@@ -1031,7 +1117,6 @@ export default function App({
                                         aria-label={`${tr('移除')} ${item.name}`}
                                     >
                                         <DeleteOutlineIcon aria-hidden="true" />
-                                        {tr('移除')}
                                     </button>
                                 </div>
                             ))
@@ -1055,6 +1140,15 @@ export default function App({
                                 <strong>{tr('窄带')}</strong>
                                 <span>30 ms · {tr('谐波')}</span>
                             </button>
+                            <button
+                                className={mode === 'custom' ? 'active' : ''}
+                                onClick={() => changeMode('custom')}
+                            >
+                                <strong>{tr('自定义')}</strong>
+                                <span>
+                                    {customWindowLengthMs} ms · {tr('可调窗口')}
+                                </span>
+                            </button>
                         </div>
 
                         <div className="toolbar-center">
@@ -1065,7 +1159,7 @@ export default function App({
                                 >
                                     <i /> {tr('基频')}
                                 </button>
-                                {mode === 'broadband' && (
+                                {mode !== 'narrowband' && (
                                     <button
                                         className={formantsVisible ? 'on formants' : ''}
                                         onClick={() => setFormantsVisible(!formantsVisible)}
@@ -1177,7 +1271,7 @@ export default function App({
                                     {cursorPitchCoordinate.toFixed(1)}
                                 </span>
                             )}
-                            {mode === 'broadband' ? (
+                            {mode !== 'narrowband' ? (
                                 <>
                                     <span className="top pitch-color">{pitchCeiling}</span>
                                     <span className="mid pitch-color">
@@ -1434,27 +1528,19 @@ export default function App({
                                 draggedPanelRef.current = null;
                                 return;
                             }
-                            cycleSelectedMetric();
+                            setMetricsCollapsed(false);
                         }}
                         aria-label={`${collapsedMetric.label} ${formatNumber(
                             collapsedMetric.value,
                             collapsedMetric.digits
                         )} ${collapsedMetric.unit}`}
-                        title={tr('点击切换指标')}
+                        title={tr('展开声学概览')}
                     >
                         <span>{collapsedMetric.label}</span>
                         <strong>
                             {formatNumber(collapsedMetric.value, collapsedMetric.digits)}
                         </strong>
                         <em>{collapsedMetric.unit}</em>
-                    </button>
-                    <button
-                        className="collapsed-expand"
-                        onClick={() => setMetricsCollapsed(false)}
-                        aria-label={tr('展开声学概览')}
-                        title={tr('展开声学概览')}
-                    >
-                        +
                     </button>
                     <div className="metrics-heading">
                         <div
@@ -1528,7 +1614,7 @@ export default function App({
                         </article>
                     </div>
 
-                    {mode === 'broadband' && (
+                    {mode !== 'narrowband' && (
                         <div className="formant-metrics">
                             {snapshot.formantsHz.map((value, index) => (
                                 <article
@@ -1649,6 +1735,47 @@ export default function App({
                             </button>
                             <label className="setting">
                                 <span>
+                                    {tr('语谱窗口长度')} <em>{activeWindowLengthMs} ms</em>
+                                </span>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    value={activeWindowLengthMs}
+                                    disabled={mode !== 'custom'}
+                                    onChange={(event) =>
+                                        setCustomWindowLengthMs(Number(event.target.value))
+                                    }
+                                />
+                                {mode !== 'custom' && (
+                                    <small>{tr('选择自定义模式后可调节窗口长度')}</small>
+                                )}
+                            </label>
+                            <div className="select-row one">
+                                <label>
+                                    {tr('窗口形状')}
+                                    <select
+                                        value={windowFunction}
+                                        onChange={(event) =>
+                                            setWindowFunction(
+                                                event.target.value as SpectrogramWindowFunction
+                                            )
+                                        }
+                                    >
+                                        <option value="rectangular">Square (rectangular)</option>
+                                        <option value="hamming">
+                                            Hamming (raised sine-squared)
+                                        </option>
+                                        <option value="bartlett">Bartlett (triangular)</option>
+                                        <option value="welch">Welch (parabolic)</option>
+                                        <option value="hanning">Hanning (sine-squared)</option>
+                                        <option value="gaussian">Gaussian</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <label className="setting">
+                                <span>
                                     {tr('显示增益')} <em>{Math.round(sensitivity * 100)}%</em>
                                 </span>
                                 <input
@@ -1679,7 +1806,7 @@ export default function App({
                                 </span>
                                 <input
                                     type="range"
-                                    min={mode === 'broadband' ? 3000 : 600}
+                                    min={mode === 'narrowband' ? 600 : 3000}
                                     max={10000}
                                     step={100}
                                     value={maxFrequency}
@@ -1712,8 +1839,10 @@ export default function App({
                                             const nextScale = event.target.value as Scale;
                                             if (mode === 'broadband') {
                                                 setBroadbandScale(nextScale);
-                                            } else {
+                                            } else if (mode === 'narrowband') {
                                                 setNarrowbandScale(nextScale);
+                                            } else {
+                                                setCustomScale(nextScale);
                                             }
                                         }}
                                     >
@@ -2063,12 +2192,22 @@ export default function App({
                 </div>
 
                 <div className="mode-explainer">
-                    <strong>{tr(mode === 'broadband' ? '宽带语谱' : '窄带语谱')}</strong>
+                    <strong>
+                        {tr(
+                            mode === 'broadband'
+                                ? '宽带语谱'
+                                : mode === 'narrowband'
+                                ? '窄带语谱'
+                                : '自定义语谱'
+                        )}
+                    </strong>
                     <p>
                         {tr(
                             mode === 'broadband'
                                 ? '5 ms 有效窗，约 260 Hz 带宽。时间分辨率高，适合观察共振峰运动。'
-                                : '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。'
+                                : mode === 'narrowband'
+                                ? '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。'
+                                : '自定义窗口长度可在 1–100 ms 之间调节，用于比较时间与频率分辨率。'
                         )}
                     </p>
                 </div>

@@ -6,7 +6,7 @@ import {
 } from '../src/analysis';
 import { translate } from '../src/i18n';
 import { frequencyToScale, scaleToFrequency } from '../src/math-util';
-import { generateSpectrogram, Scale } from '../src/spectrogram';
+import { generateSpectrogram, Scale, SpectrogramWindowFunction } from '../src/spectrogram';
 
 const SAMPLE_RATE = 48000;
 const FORMANT_SAMPLE_RATE = 11000;
@@ -25,9 +25,7 @@ const DEFAULT_OPTIONS: AnalysisOptions = {
 
 function assertNear(name: string, actual: number | null, expected: number, tolerance: number) {
     if (actual === null || Math.abs(actual - expected) > tolerance) {
-        throw new Error(
-            `${name}: expected ${expected} ± ${tolerance}, received ${actual}`
-        );
+        throw new Error(`${name}: expected ${expected} ± ${tolerance}, received ${actual}`);
     }
 }
 
@@ -49,8 +47,7 @@ function applyResonator(
 ) {
     const output = new Float64Array(input.length);
     const radius = Math.exp((-Math.PI * bandwidthHz) / sampleRate);
-    const coefficient =
-        2 * radius * Math.cos((2 * Math.PI * frequencyHz) / sampleRate);
+    const coefficient = 2 * radius * Math.cos((2 * Math.PI * frequencyHz) / sampleRate);
     const radiusSquared = radius * radius;
     for (let i = 0; i < input.length; i += 1) {
         output[i] =
@@ -87,54 +84,35 @@ function syntheticTone(frequencyHz: number, rmsPascals: number, seconds = 0.1) {
     const result = new Float32Array(Math.round(SAMPLE_RATE * seconds));
     const peakPascals = rmsPascals * Math.sqrt(2);
     for (let i = 0; i < result.length; i += 1) {
-        result[i] =
-            peakPascals * Math.sin((2 * Math.PI * frequencyHz * i) / SAMPLE_RATE);
+        result[i] = peakPascals * Math.sin((2 * Math.PI * frequencyHz * i) / SAMPLE_RATE);
     }
     return result;
 }
 
 function testPitch(algorithm: PitchAlgorithm) {
-    const result = analyzeAcousticFrame(
-        syntheticTone(200, 0.08),
-        SAMPLE_RATE,
-        { ...DEFAULT_OPTIONS, pitchAlgorithm: algorithm }
-    );
+    const result = analyzeAcousticFrame(syntheticTone(200, 0.08), SAMPLE_RATE, {
+        ...DEFAULT_OPTIONS,
+        pitchAlgorithm: algorithm,
+    });
     assertNear(`${algorithm} pitch`, result.pitchHz, 200, 2);
 }
 
 function testIntensity() {
-    const result = analyzeAcousticFrame(
-        syntheticTone(200, 0.00002),
-        SAMPLE_RATE,
-        DEFAULT_OPTIONS
-    );
+    const result = analyzeAcousticFrame(syntheticTone(200, 0.00002), SAMPLE_RATE, DEFAULT_OPTIONS);
     assertNear('0 dB SPL reference tone', result.intensityDbSpl, 0, 0.2);
 }
 
 function testFormants() {
-    const resampledTone = resampleForFormants(
-        syntheticTone(1500, 0.1, 0.2),
-        SAMPLE_RATE,
-        11000
-    );
+    const resampledTone = resampleForFormants(syntheticTone(1500, 0.1, 0.2), SAMPLE_RATE, 11000);
     let crossings = 0;
     for (let i = 1; i < resampledTone.length; i += 1) {
         if (resampledTone[i - 1] <= 0 && resampledTone[i] > 0) {
             crossings += 1;
         }
     }
-    assertNear(
-        'resampler frequency',
-        crossings / (resampledTone.length / 11000),
-        1500,
-        10
-    );
+    assertNear('resampler frequency', crossings / (resampledTone.length / 11000), 1500, 10);
     const { signal, expected } = syntheticAllPoleVowel();
-    const result = analyzeAcousticFrame(
-        signal,
-        FORMANT_SAMPLE_RATE,
-        DEFAULT_OPTIONS
-    );
+    const result = analyzeAcousticFrame(signal, FORMANT_SAMPLE_RATE, DEFAULT_OPTIONS);
     expected.forEach((frequency, index) => {
         assertNear(
             `F${index + 1}`,
@@ -171,9 +149,8 @@ function testSpectrogramDisplayPreEmphasis() {
     const defaultSensitivity = 10 ** (2 + 0.42 * 2);
     const defaultContrast = 10 ** (0.5 + 0.32 * 3) - 1;
     const lowDisplayIntensity =
-        Math.log(
-            1 + Math.min(1, lowPeak * defaultSensitivity) * defaultContrast
-        ) / Math.log(1 + defaultContrast);
+        Math.log(1 + Math.min(1, lowPeak * defaultSensitivity) * defaultContrast) /
+        Math.log(1 + defaultContrast);
     if (lowDisplayIntensity < 0.15) {
         throw new Error(
             `spectrogram display mapping: expected visible low-frequency energy; received ${lowDisplayIntensity}`
@@ -202,14 +179,50 @@ function testFrequencyScales() {
     }
 }
 
+function testSpectrogramWindowFunctions() {
+    const functions: SpectrogramWindowFunction[] = [
+        'rectangular',
+        'hamming',
+        'bartlett',
+        'welch',
+        'hanning',
+        'gaussian',
+    ];
+    const samples = syntheticTone(440, 0.05, 0.02);
+    const defaultResult = generateSpectrogram(samples, 0, samples.length, {
+        windowSize: 240,
+        fftSize: 512,
+        windowStepSize: 240,
+        sampleRate: SAMPLE_RATE,
+        scaleSize: 128,
+    });
+    if (defaultResult.options.windowFunction !== 'gaussian') {
+        throw new Error('Gaussian must be the default spectrogram window');
+    }
+    for (const windowFunction of functions) {
+        const result = generateSpectrogram(samples, 0, samples.length, {
+            windowSize: 240,
+            fftSize: 512,
+            windowStepSize: 240,
+            sampleRate: SAMPLE_RATE,
+            scaleSize: 128,
+            windowFunction,
+        });
+        if (
+            result.options.windowFunction !== windowFunction ||
+            result.spectrogram.some((value) => !Number.isFinite(value))
+        ) {
+            throw new Error(`invalid ${windowFunction} spectrogram window result`);
+        }
+    }
+}
+
 function testLocalization() {
     if (translate('导入音频', 'en') !== 'Import audio') {
         throw new Error('English localization did not translate a known label');
     }
     if (translate('导入音频', 'zh') !== '导入音频') {
-        throw new Error(
-            'Chinese localization did not preserve its source label'
-        );
+        throw new Error('Chinese localization did not preserve its source label');
     }
     if (translate('user-audio.wav', 'en') !== 'user-audio.wav') {
         throw new Error('Localization changed an unknown user-provided label');
@@ -222,6 +235,7 @@ testIntensity();
 testFormants();
 testSpectrogramDisplayPreEmphasis();
 testFrequencyScales();
+testSpectrogramWindowFunctions();
 testLocalization();
 
 console.log('Synthetic pitch, SPL, formant and spectrogram checks passed.');

@@ -21,6 +21,7 @@ const ENGLISH: { [key: string]: string } = {
     '音频已移除，可开始新的会话': 'Audio removed · Ready for a new session',
     '正在分析整段宽带语谱…': 'Analyzing the full broadband spectrogram…',
     '正在分析整段窄带语谱…': 'Analyzing the full narrowband spectrogram…',
+    '正在分析自定义语谱…': 'Analyzing the custom spectrogram…',
     无法分析此音频: 'Unable to analyze this audio',
     '整段分析完成，可自由拖动播放': 'Full analysis complete · Drag or play freely',
     播放完成: 'Playback complete',
@@ -54,6 +55,8 @@ const ENGLISH: { [key: string]: string } = {
     语谱类型: 'Spectrogram type',
     宽带: 'Broadband',
     窄带: 'Narrowband',
+    自定义: 'Custom',
+    可调窗口: 'Adjustable window',
     共振峰: 'Formants',
     谐波: 'Harmonics',
     基频: 'Pitch',
@@ -101,6 +104,9 @@ const ENGLISH: { [key: string]: string } = {
     语谱图: 'Spectrogram',
     恢复本页默认参数: 'Restore defaults for this tab',
     显示增益: 'Display gain',
+    语谱窗口长度: 'Spectrogram window length',
+    选择自定义模式后可调节窗口长度: 'Select Custom mode to adjust the window length.',
+    窗口形状: 'Window shape',
     层次对比: 'Layer contrast',
     显示频率上限: 'Display frequency ceiling',
     显示频率下限: 'Display frequency floor',
@@ -133,12 +139,16 @@ const ENGLISH: { [key: string]: string } = {
         'Without a sound-level meter calibration, compare relative changes only. Use the offset for microphone systems with a known SPL.',
     宽带语谱: 'Broadband spectrogram',
     窄带语谱: 'Narrowband spectrogram',
+    自定义语谱: 'Custom spectrogram',
     '5 ms 有效窗，约 260 Hz 带宽。时间分辨率高，适合观察共振峰运动。':
         'A 5 ms effective window with about 260 Hz bandwidth. High time resolution is ideal for tracking formant movement.',
     '30 ms 有效窗，约 43 Hz 带宽。频率分辨率高，适合比较 F0 与第一谐波。':
         'A 30 ms effective window with about 43 Hz bandwidth. High frequency resolution is ideal for comparing F0 with the first harmonic.',
+    '自定义窗口长度可在 1–100 ms 之间调节，用于比较时间与频率分辨率。':
+        'Adjust the custom window from 1–100 ms to compare time and frequency resolution.',
     切换到英文: 'Switch to English',
     切换到中文: 'Switch to Chinese',
+    选择语言: 'Choose language',
     录音: 'Recording',
     'Spectro Pro · 实时声学显示器': 'Spectro Pro · Real-time acoustic visualizer',
     'Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具。':

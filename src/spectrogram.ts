@@ -1,14 +1,15 @@
 import { FFT } from 'jsfft';
 
-import {
-    FrequencyScale,
-    frequencyToScale,
-    inverseLerp,
-    lerp,
-    scaleToFrequency,
-} from './math-util';
+import { FrequencyScale, frequencyToScale, inverseLerp, lerp, scaleToFrequency } from './math-util';
 
 export type Scale = FrequencyScale;
+export type SpectrogramWindowFunction =
+    | 'rectangular'
+    | 'hamming'
+    | 'bartlett'
+    | 'welch'
+    | 'hanning'
+    | 'gaussian';
 
 export interface SpectrogramOptions {
     isStart?: boolean;
@@ -21,6 +22,7 @@ export interface SpectrogramOptions {
     sampleRate: number;
     scale?: Scale;
     scaleSize?: number;
+    windowFunction?: SpectrogramWindowFunction;
 }
 
 export interface SpectrogramResult {
@@ -38,7 +40,8 @@ function generateSpectrogramForSingleFrame(
     maxFrequencyHz: number,
     sampleRate: number,
     scale: Scale,
-    scaleSize: number
+    scaleSize: number,
+    windowFunction: SpectrogramWindowFunction
 ) {
     // The effective analysis window can be shorter than the power-of-two FFT.
     // Zero padding preserves the requested Praat-style time window while keeping
@@ -60,14 +63,22 @@ function generateSpectrogramForSingleFrame(
             windowSamples[i] = 0;
         } else {
             const windowIndex = i - padding;
-            const hamming =
-                0.54 -
-                0.46 *
-                    Math.cos(
-                        (2 * Math.PI * windowIndex) /
-                            Math.max(1, effectiveWindowSize - 1)
-                    );
-            windowSamples[i] *= hamming;
+            const denominator = Math.max(1, effectiveWindowSize - 1);
+            const midpoint = denominator / 2;
+            const centered = midpoint === 0 ? 0 : (windowIndex - midpoint) / midpoint;
+            let weight = 1;
+            if (windowFunction === 'hamming') {
+                weight = 0.54 - 0.46 * Math.cos((2 * Math.PI * windowIndex) / denominator);
+            } else if (windowFunction === 'bartlett') {
+                weight = Math.max(0, 1 - Math.abs(centered));
+            } else if (windowFunction === 'welch') {
+                weight = Math.max(0, 1 - centered ** 2);
+            } else if (windowFunction === 'hanning') {
+                weight = 0.5 - 0.5 * Math.cos((2 * Math.PI * windowIndex) / denominator);
+            } else if (windowFunction === 'gaussian') {
+                weight = Math.exp(-0.5 * (centered / 0.4) ** 2);
+            }
+            windowSamples[i] *= weight;
         }
     }
 
@@ -111,6 +122,7 @@ export function generateSpectrogram(
         sampleRate, // Sample rate of the audio
         scale = 'linear', // Frequency scale of the returned spectrogram
         scaleSize, // Number of rows in the returned spectrogram
+        windowFunction = 'gaussian', // Shape applied to each analysis window
     }: SpectrogramOptions
 ): SpectrogramResult {
     if (minFrequencyHz === undefined) {
@@ -132,10 +144,7 @@ export function generateSpectrogram(
             : Math.floor((samplesLength - windowSize) / windowStepSize) + 1;
     let startIdx = samplesStart;
     if (isStart || isEnd) {
-        const additionalWindows = Math.max(
-            0,
-            Math.ceil(windowSize / windowStepSize) - 1
-        );
+        const additionalWindows = Math.max(0, Math.ceil(windowSize / windowStepSize) - 1);
         if (isStart) {
             numWindows += additionalWindows;
             startIdx -= additionalWindows * windowStepSize;
@@ -173,7 +182,8 @@ export function generateSpectrogram(
             maxFrequencyHz,
             sampleRate,
             scale,
-            scaleSize
+            scaleSize,
+            windowFunction
         );
     }
 
@@ -190,6 +200,7 @@ export function generateSpectrogram(
             sampleRate,
             scale,
             scaleSize,
+            windowFunction,
         },
         spectrogram: result,
     };
