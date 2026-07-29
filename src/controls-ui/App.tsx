@@ -677,8 +677,15 @@ export default function App({
                 transport.durationSeconds > 0
             ) {
                 event.preventDefault();
-                const direction = event.key === 'ArrowLeft' ? -1 : 1;
                 heldArrowKeysRef.current.add(event.key);
+                if (event.repeat) {
+                    if (!keyboardAuditionRef.current && !transport.isPlaying) {
+                        keyboardAuditionRef.current = true;
+                        onToggleMediaPlayback();
+                    }
+                    return;
+                }
+                const direction = event.key === 'ArrowLeft' ? -1 : 1;
                 const visibleDurationSeconds = Math.max(
                     0.001,
                     transport.viewEndSeconds - transport.viewStartSeconds
@@ -693,10 +700,6 @@ export default function App({
                         )
                     )
                 );
-                if (event.repeat && !keyboardAuditionRef.current && !transport.isPlaying) {
-                    keyboardAuditionRef.current = true;
-                    onToggleMediaPlayback();
-                }
             }
         };
         const handleKeyboardShortcutRelease = (event: KeyboardEvent) => {
@@ -2744,7 +2747,7 @@ export default function App({
                             </label>
                             <p className="setting-help">
                                 {tr(
-                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按方向键试听，松开自动暂停。'
+                                    '快捷键：空格播放或暂停；左右方向键按当前画面 1% 移动，按住 Shift 时按 5% 移动；长按方向键以正常速度试听，松开自动暂停。'
                                 )}
                             </p>
                         </>
