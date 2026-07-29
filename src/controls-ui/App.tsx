@@ -30,6 +30,7 @@ import ZoomOutMapIcon from '@material-ui/icons/ZoomOutMap';
 import { AnalysisOptions, PitchAlgorithm, RealtimeAnalysisPrecision } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
+import { frequencyToScale } from '../math-util';
 import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
 import {
@@ -148,6 +149,7 @@ export interface LayerDisplayOptions {
     pitchFloorHz: number;
     pitchCeilingHz: number;
     pitchLineWidth: number;
+    pitchFrequencyAligned: boolean;
     formantsToDisplay: number;
     formantDynamicRangeDb: number;
     formantDotSize: number;
@@ -236,6 +238,8 @@ interface SavedSettings {
     spectrogramVisible: boolean;
     waveformShare: number;
     waveformThemeName: WaveformThemeName;
+    darkWaveformThemeName: WaveformThemeName;
+    lightWaveformThemeName: WaveformThemeName;
     waveformScaleMode: WaveformScaleMode;
     waveformGain: number;
     waveformLineWidth: number;
@@ -254,10 +258,13 @@ interface SavedSettings {
     customWindowLengthMs: number;
     windowFunction: SpectrogramWindowFunction;
     gradientName: string;
+    darkGradientName: string;
+    lightGradientName: string;
     pitchFloor: number;
     pitchCeiling: number;
     voicingThreshold: number;
     pitchLineWidth: number;
+    narrowbandPitchFrequencyAligned: boolean;
     maximumFormants: number;
     formantsToDisplay: number;
     formantCeiling: number;
@@ -342,10 +349,26 @@ export default function App({
         savedSettingsRef.current = loadSavedSettings();
     }
     const saved = savedSettingsRef.current || {};
-    const initialWaveformThemeName =
-        WAVEFORM_THEMES.find((item) => item.name === saved.waveformThemeName)?.name || 'Aurora';
-    const initialGradientName =
-        GRADIENTS.find((item) => item.name === saved.gradientName)?.name || 'Aurora';
+    const legacyWaveformThemeName = WAVEFORM_THEMES.find(
+        (item) => item.name === saved.waveformThemeName
+    )?.name;
+    const initialDarkWaveformThemeName =
+        WAVEFORM_THEMES.find((item) => item.name === saved.darkWaveformThemeName)?.name ||
+        (saved.uiTheme !== 'light' ? legacyWaveformThemeName : undefined) ||
+        'Aurora';
+    const initialLightWaveformThemeName =
+        WAVEFORM_THEMES.find((item) => item.name === saved.lightWaveformThemeName)?.name ||
+        (saved.uiTheme === 'light' ? legacyWaveformThemeName : undefined) ||
+        'Praat';
+    const legacyGradientName = GRADIENTS.find((item) => item.name === saved.gradientName)?.name;
+    const initialDarkGradientName =
+        GRADIENTS.find((item) => item.name === saved.darkGradientName)?.name ||
+        (saved.uiTheme !== 'light' ? legacyGradientName : undefined) ||
+        'Aurora';
+    const initialLightGradientName =
+        GRADIENTS.find((item) => item.name === saved.lightGradientName)?.name ||
+        (saved.uiTheme === 'light' ? legacyGradientName : undefined) ||
+        'Praat';
     const [locale, setLocale] = useState<Locale>(() => getActiveLocale());
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
@@ -363,8 +386,24 @@ export default function App({
     const [waveformVisible, setWaveformVisible] = useState(saved.waveformVisible ?? true);
     const [spectrogramVisible, setSpectrogramVisible] = useState(saved.spectrogramVisible ?? true);
     const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
-    const [waveformThemeName, setWaveformThemeName] = useState<WaveformThemeName>(
-        initialWaveformThemeName
+    const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
+    const [darkWaveformThemeName, setDarkWaveformThemeName] = useState<WaveformThemeName>(
+        initialDarkWaveformThemeName
+    );
+    const [lightWaveformThemeName, setLightWaveformThemeName] = useState<WaveformThemeName>(
+        initialLightWaveformThemeName
+    );
+    const waveformThemeName =
+        uiTheme === 'dark' ? darkWaveformThemeName : lightWaveformThemeName;
+    const setWaveformThemeName = useCallback(
+        (themeName: WaveformThemeName) => {
+            if (uiTheme === 'dark') {
+                setDarkWaveformThemeName(themeName);
+            } else {
+                setLightWaveformThemeName(themeName);
+            }
+        },
+        [uiTheme]
     );
     const [waveformScaleMode, setWaveformScaleMode] = useState<WaveformScaleMode>(
         saved.waveformScaleMode || 'dbfs'
@@ -373,7 +412,6 @@ export default function App({
     const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
     const [waveformZeroLine, setWaveformZeroLine] = useState(saved.waveformZeroLine ?? true);
     const [waveformPulses, setWaveformPulses] = useState(saved.waveformPulses ?? false);
-    const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsOpen, setMetricsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
@@ -396,11 +434,26 @@ export default function App({
     const [windowFunction, setWindowFunction] = useState<SpectrogramWindowFunction>(
         saved.windowFunction || 'gaussian'
     );
-    const [gradientName, setGradientName] = useState(initialGradientName);
+    const [darkGradientName, setDarkGradientName] = useState(initialDarkGradientName);
+    const [lightGradientName, setLightGradientName] = useState(initialLightGradientName);
+    const gradientName = uiTheme === 'dark' ? darkGradientName : lightGradientName;
+    const setGradientName = useCallback(
+        (themeName: string) => {
+            if (uiTheme === 'dark') {
+                setDarkGradientName(themeName);
+            } else {
+                setLightGradientName(themeName);
+            }
+        },
+        [uiTheme]
+    );
     const [pitchFloor, setPitchFloor] = useState(saved.pitchFloor ?? 75);
     const [pitchCeiling, setPitchCeiling] = useState(saved.pitchCeiling ?? 500);
     const [voicingThreshold, setVoicingThreshold] = useState(saved.voicingThreshold ?? 0.6);
     const [pitchLineWidth, setPitchLineWidth] = useState(saved.pitchLineWidth ?? 2.5);
+    const [narrowbandPitchFrequencyAligned, setNarrowbandPitchFrequencyAligned] = useState(
+        saved.narrowbandPitchFrequencyAligned ?? true
+    );
     const [maximumFormants, setMaximumFormants] = useState(saved.maximumFormants ?? 5);
     const [formantsToDisplay, setFormantsToDisplay] = useState(saved.formantsToDisplay ?? 5);
     const [formantCeiling, setFormantCeiling] = useState(saved.formantCeiling ?? 5500);
@@ -551,6 +604,8 @@ export default function App({
             spectrogramVisible,
             waveformShare,
             waveformThemeName,
+            darkWaveformThemeName,
+            lightWaveformThemeName,
             waveformScaleMode,
             waveformGain,
             waveformLineWidth,
@@ -568,10 +623,13 @@ export default function App({
             customWindowLengthMs,
             windowFunction,
             gradientName,
+            darkGradientName,
+            lightGradientName,
             pitchFloor,
             pitchCeiling,
             voicingThreshold,
             pitchLineWidth,
+            narrowbandPitchFrequencyAligned,
             maximumFormants,
             formantsToDisplay,
             formantCeiling,
@@ -604,6 +662,8 @@ export default function App({
         spectrogramVisible,
         waveformShare,
         waveformThemeName,
+        darkWaveformThemeName,
+        lightWaveformThemeName,
         waveformScaleMode,
         waveformGain,
         waveformLineWidth,
@@ -621,10 +681,13 @@ export default function App({
         customWindowLengthMs,
         windowFunction,
         gradientName,
+        darkGradientName,
+        lightGradientName,
         pitchFloor,
         pitchCeiling,
         voicingThreshold,
         pitchLineWidth,
+        narrowbandPitchFrequencyAligned,
         maximumFormants,
         formantsToDisplay,
         formantCeiling,
@@ -809,6 +872,7 @@ export default function App({
             pitchFloorHz: pitchFloor,
             pitchCeilingHz: pitchCeiling,
             pitchLineWidth,
+            pitchFrequencyAligned: mode === 'narrowband' && narrowbandPitchFrequencyAligned,
             formantsToDisplay,
             formantDynamicRangeDb: formantDynamicRange,
             formantDotSize,
@@ -820,6 +884,8 @@ export default function App({
         pitchFloor,
         pitchCeiling,
         pitchLineWidth,
+        mode,
+        narrowbandPitchFrequencyAligned,
         formantsToDisplay,
         formantDynamicRange,
         formantDotSize,
@@ -1137,11 +1203,11 @@ export default function App({
                 } else {
                     setCustomScale('linear');
                 }
-                setGradientName('Aurora');
+                setGradientName(uiTheme === 'light' ? 'Praat' : 'Aurora');
                 return;
             }
             if (tab === 'waveform') {
-                setWaveformThemeName('Aurora');
+                setWaveformThemeName(uiTheme === 'light' ? 'Praat' : 'Aurora');
                 setWaveformScaleMode('dbfs');
                 setWaveformGain(1);
                 setWaveformLineWidth(1);
@@ -1155,6 +1221,7 @@ export default function App({
                 setPitchCeiling(500);
                 setVoicingThreshold(0.6);
                 setPitchLineWidth(2.5);
+                setNarrowbandPitchFrequencyAligned(true);
                 return;
             }
             if (tab === 'formants') {
@@ -1180,7 +1247,7 @@ export default function App({
             setIntensityLineWidth(2.5);
             setSplCalibration(0);
         },
-        [mode]
+        [mode, setGradientName, setWaveformThemeName, uiTheme]
     );
 
     const toggleFullscreen = useCallback(() => {
@@ -1228,18 +1295,18 @@ export default function App({
             : {
                   top: `${(cursor.y * 100).toFixed(3)}%`,
               };
-    const pitchAxisTop = (frequency: number) =>
-        `${
-            (1 -
-                Math.min(
-                    1,
-                    Math.max(
-                        0,
-                        (frequency - pitchFloor) / Math.max(1e-9, pitchCeiling - pitchFloor)
-                    )
-                )) *
-            100
-        }%`;
+    const pitchUsesFrequencyAxis =
+        mode === 'narrowband' && narrowbandPitchFrequencyAligned;
+    const pitchAxisTop = (frequency: number) => {
+        const ratio = pitchUsesFrequencyAxis
+            ? (frequencyToScale(frequency, scale) - frequencyToScale(minFrequency, scale)) /
+              Math.max(
+                  1e-9,
+                  frequencyToScale(maxFrequency, scale) - frequencyToScale(minFrequency, scale)
+              )
+            : (frequency - pitchFloor) / Math.max(1e-9, pitchCeiling - pitchFloor);
+        return `${(1 - Math.min(1, Math.max(0, ratio))) * 100}%`;
+    };
     const cursorPitchCoordinate = cursor?.pitchHz ?? null;
     const cursorPitchAxisTop =
         cursorPitchCoordinate === null ? undefined : { top: pitchAxisTop(cursorPitchCoordinate) };
@@ -1769,7 +1836,14 @@ export default function App({
                                 )}
                                 {spectrogramVisible && (
                                     <div className="axis axis-left">
-                                        <span className="axis-title pitch-color">
+                                        <span
+                                            className="axis-title pitch-color"
+                                            style={{
+                                                top: `max(2px, calc(${pitchAxisTop(
+                                                    (pitchFloor + pitchCeiling) / 2
+                                                )} - 24px))`,
+                                            }}
+                                        >
                                             {tr('基频Hz')}
                                         </span>
                                         {cursor !== null && cursorPitchCoordinate !== null && (
@@ -1781,17 +1855,42 @@ export default function App({
                                             </span>
                                         )}
                                         <span
-                                            className="spectral-pitch-mark scale-top pitch-color"
+                                            className={`spectral-pitch-mark pitch-color ${
+                                                pitchUsesFrequencyAxis ? 'aligned' : 'scale-top'
+                                            }`}
+                                            style={
+                                                pitchUsesFrequencyAxis
+                                                    ? { top: pitchAxisTop(pitchCeiling) }
+                                                    : undefined
+                                            }
                                         >
                                             {pitchCeiling}
                                         </span>
                                         <span
-                                            className="spectral-pitch-mark scale-mid pitch-color"
+                                            className={`spectral-pitch-mark pitch-color ${
+                                                pitchUsesFrequencyAxis ? 'aligned' : 'scale-mid'
+                                            }`}
+                                            style={
+                                                pitchUsesFrequencyAxis
+                                                    ? {
+                                                          top: pitchAxisTop(
+                                                              (pitchFloor + pitchCeiling) / 2
+                                                          ),
+                                                      }
+                                                    : undefined
+                                            }
                                         >
                                             {Math.round((pitchFloor + pitchCeiling) / 2)}
                                         </span>
                                         <span
-                                            className="spectral-pitch-mark scale-bottom pitch-color"
+                                            className={`spectral-pitch-mark pitch-color ${
+                                                pitchUsesFrequencyAxis ? 'aligned' : 'scale-bottom'
+                                            }`}
+                                            style={
+                                                pitchUsesFrequencyAxis
+                                                    ? { top: pitchAxisTop(pitchFloor) }
+                                                    : undefined
+                                            }
                                         >
                                             {pitchFloor}
                                         </span>
@@ -2561,6 +2660,21 @@ export default function App({
                                     </select>
                                 </label>
                             </div>
+                            <label className="effect-toggle">
+                                <span>
+                                    <strong>{tr('窄带基频与频率轴对齐')}</strong>
+                                    <small>
+                                        {tr('让基频曲线与语谱频率使用同一纵坐标，以检查第一谐波重叠')}
+                                    </small>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={narrowbandPitchFrequencyAligned}
+                                    onChange={(event) =>
+                                        setNarrowbandPitchFrequencyAligned(event.target.checked)
+                                    }
+                                />
+                            </label>
                             <label className="setting">
                                 <span>
                                     {tr('搜索与显示下限')} <em>{pitchFloor} Hz</em>

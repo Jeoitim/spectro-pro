@@ -60,6 +60,9 @@ const ENGLISH: { [key: string]: string } = {
     共振峰: 'Formants',
     谐波: 'Harmonics',
     基频: 'Pitch',
+    窄带基频与频率轴对齐: 'Align narrowband pitch to frequency axis',
+    '让基频曲线与语谱频率使用同一纵坐标，以检查第一谐波重叠':
+        'Use the spectrogram frequency axis for pitch to check overlap with the first harmonic',
     音强: 'Intensity',
     波形: 'Waveform',
     图层显示: 'Plot visibility',

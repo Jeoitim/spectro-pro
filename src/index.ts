@@ -195,6 +195,7 @@ class SpectroEngine {
         pitchFloorHz: PITCH_FLOOR_HZ,
         pitchCeilingHz: PITCH_CEILING_HZ,
         pitchLineWidth: 2.5,
+        pitchFrequencyAligned: false,
         formantsToDisplay: 5,
         formantDynamicRangeDb: 30,
         formantDotSize: 2.4,
@@ -1930,7 +1931,10 @@ class SpectroEngine {
                 visible.end,
                 xForIndex,
                 (point) => point.pitchHz,
-                (pitch) => pitchY(pitch),
+                (pitch) =>
+                    this.layerDisplayOptions.pitchFrequencyAligned
+                        ? frequencyY(pitch)
+                        : pitchY(pitch),
                 '#2588ff',
                 this.layerDisplayOptions.pitchLineWidth
             );
@@ -1987,7 +1991,9 @@ class SpectroEngine {
             );
             const inspectorPitch = this.analysisHistory[inspectorIndex]?.pitchHz;
             if (this.showPitch && inspectorPitch !== null && inspectorPitch !== undefined) {
-                const inspectorPitchY = pitchY(inspectorPitch);
+                const inspectorPitchY = this.layerDisplayOptions.pitchFrequencyAligned
+                    ? frequencyY(inspectorPitch)
+                    : pitchY(inspectorPitch);
                 if (inspectorPitchY >= 0 && inspectorPitchY <= height) {
                     ctx.strokeStyle = 'rgba(61, 151, 255, 0.72)';
                     ctx.lineWidth = 0.75;
