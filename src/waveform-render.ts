@@ -11,6 +11,8 @@ export type WaveformThemeName =
     | 'Spectrum'
     | 'Black to White';
 
+export type WaveformScaleMode = 'dbfs' | 'dbspl' | 'normalized';
+
 export const WAVEFORM_THEMES: {
     name: WaveformThemeName;
     background: string;
@@ -90,6 +92,8 @@ export interface WaveformDisplayOptions {
     lineWidth: number;
     showZeroLine: boolean;
     showPulses: boolean;
+    scaleMode: WaveformScaleMode;
+    splCalibrationDb: number;
 }
 
 export interface WaveformSelection {
@@ -203,6 +207,8 @@ export class WaveformRenderer {
 
     private offlinePeaks: WaveformPeakCache | null = null;
 
+    private offlinePeak = 1;
+
     private offlinePulseTimes: number[] = [];
 
     private liveSamples = new Float32Array(1);
@@ -228,6 +234,8 @@ export class WaveformRenderer {
         lineWidth: 1,
         showZeroLine: true,
         showPulses: false,
+        scaleMode: 'dbfs',
+        splCalibrationDb: 0,
     };
 
     constructor(canvas: HTMLCanvasElement) {
@@ -261,6 +269,11 @@ export class WaveformRenderer {
         if (this.offlineSamples !== samples) {
             this.offlineSamples = samples;
             this.offlinePeaks = new WaveformPeakCache(samples);
+            let peak = 0;
+            for (let index = 0; index < samples.length; index += 1) {
+                peak = Math.max(peak, Math.abs(samples[index]));
+            }
+            this.offlinePeak = Math.max(1e-9, peak);
         }
         this.offlineSampleRate = sampleRate;
         this.source = 'offline';
@@ -309,6 +322,7 @@ export class WaveformRenderer {
         this.source = 'none';
         this.offlineSamples = null;
         this.offlinePeaks = null;
+        this.offlinePeak = 1;
         this.offlinePulseTimes = [];
         this.liveLength = 0;
         this.livePulseTimes = [];
@@ -352,10 +366,44 @@ export class WaveformRenderer {
             visiblePeak = Math.max(visiblePeak, Math.abs(low), Math.abs(high));
         }
 
-        const amplitude = Math.max(0.01, Math.min(1, visiblePeak * 1.08));
-        const yForAmplitude = (value: number) =>
-            height / 2 -
-            clamp((value / amplitude) * this.displayOptions.gain, -1, 1) * (height * 0.46);
+        const normalizedReference =
+            this.source === 'offline'
+                ? this.offlinePeak
+                : Math.max(1e-9, Math.min(1, visiblePeak * 1.08));
+        const yForAmplitude = (value: number) => {
+            const adjusted = value * this.displayOptions.gain;
+            let signedLevel: number;
+            if (this.displayOptions.scaleMode === 'normalized') {
+                signedLevel = clamp(adjusted / normalizedReference, -1, 1);
+            } else {
+                const magnitude = Math.abs(adjusted);
+                if (magnitude < 1e-12) {
+                    signedLevel = 0;
+                } else if (this.displayOptions.scaleMode === 'dbspl') {
+                    const floorDbSpl = 20;
+                    const ceilingDbSpl =
+                        20 * Math.log10(1 / 0.00002) + this.displayOptions.splCalibrationDb;
+                    const levelDbSpl =
+                        20 * Math.log10(magnitude / 0.00002) +
+                        this.displayOptions.splCalibrationDb;
+                    signedLevel =
+                        Math.sign(adjusted) *
+                        clamp(
+                            (levelDbSpl - floorDbSpl) /
+                                Math.max(1e-9, ceilingDbSpl - floorDbSpl),
+                            0,
+                            1
+                        );
+                } else {
+                    const floorDbFs = -60;
+                    const levelDbFs = 20 * Math.log10(magnitude);
+                    signedLevel =
+                        Math.sign(adjusted) *
+                        clamp((levelDbFs - floorDbFs) / -floorDbFs, 0, 1);
+                }
+            }
+            return height / 2 - signedLevel * (height * 0.46);
+        };
 
         ctx.strokeStyle = theme.waveform;
         ctx.lineWidth = this.displayOptions.lineWidth;

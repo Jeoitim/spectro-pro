@@ -30,10 +30,14 @@ import ZoomOutMapIcon from '@material-ui/icons/ZoomOutMap';
 import { AnalysisOptions, PitchAlgorithm, RealtimeAnalysisPrecision } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
-import { frequencyToScale } from '../math-util';
 import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
-import { WAVEFORM_THEMES, WaveformDisplayOptions, WaveformThemeName } from '../waveform-render';
+import {
+    WAVEFORM_THEMES,
+    WaveformDisplayOptions,
+    WaveformScaleMode,
+    WaveformThemeName,
+} from '../waveform-render';
 
 export type SpectrogramMode = 'broadband' | 'narrowband' | 'custom';
 export type PlayState = 'stopped' | 'loading-file' | 'loading-mic' | 'playing';
@@ -232,6 +236,7 @@ interface SavedSettings {
     spectrogramVisible: boolean;
     waveformShare: number;
     waveformThemeName: WaveformThemeName;
+    waveformScaleMode: WaveformScaleMode;
     waveformGain: number;
     waveformLineWidth: number;
     waveformZeroLine: boolean;
@@ -360,6 +365,9 @@ export default function App({
     const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
     const [waveformThemeName, setWaveformThemeName] = useState<WaveformThemeName>(
         initialWaveformThemeName
+    );
+    const [waveformScaleMode, setWaveformScaleMode] = useState<WaveformScaleMode>(
+        saved.waveformScaleMode || 'dbfs'
     );
     const [waveformGain, setWaveformGain] = useState(saved.waveformGain ?? 1);
     const [waveformLineWidth, setWaveformLineWidth] = useState(saved.waveformLineWidth ?? 1);
@@ -543,6 +551,7 @@ export default function App({
             spectrogramVisible,
             waveformShare,
             waveformThemeName,
+            waveformScaleMode,
             waveformGain,
             waveformLineWidth,
             waveformZeroLine,
@@ -595,6 +604,7 @@ export default function App({
         spectrogramVisible,
         waveformShare,
         waveformThemeName,
+        waveformScaleMode,
         waveformGain,
         waveformLineWidth,
         waveformZeroLine,
@@ -841,12 +851,16 @@ export default function App({
             lineWidth: waveformLineWidth,
             showZeroLine: waveformZeroLine,
             showPulses: waveformPulses,
+            scaleMode: waveformScaleMode,
+            splCalibrationDb: splCalibration,
         });
     }, [
         waveformGain,
         waveformLineWidth,
         waveformZeroLine,
         waveformPulses,
+        waveformScaleMode,
+        splCalibration,
         onWaveformDisplayChange,
     ]);
 
@@ -1128,6 +1142,7 @@ export default function App({
             }
             if (tab === 'waveform') {
                 setWaveformThemeName('Aurora');
+                setWaveformScaleMode('dbfs');
                 setWaveformGain(1);
                 setWaveformLineWidth(1);
                 setWaveformZeroLine(true);
@@ -1211,19 +1226,51 @@ export default function App({
         cursor === null
             ? undefined
             : {
-                  top: `calc(${(cursor.y * 100).toFixed(3)}% - ${(cursor.y * 50).toFixed(2)}px)`,
+                  top: `${(cursor.y * 100).toFixed(3)}%`,
               };
-    const cursorPitchCoordinate = cursor === null ? null : cursor.frequencyHz;
-    const spectralPitchTop = (frequency: number) => {
-        const minimum = frequencyToScale(minFrequency, scale);
-        const maximum = frequencyToScale(maxFrequency, scale);
-        return `${
+    const pitchAxisTop = (frequency: number) =>
+        `${
             (1 -
-                (frequencyToScale(frequency, scale) - minimum) /
-                    Math.max(1e-9, maximum - minimum)) *
+                Math.min(
+                    1,
+                    Math.max(
+                        0,
+                        (frequency - pitchFloor) / Math.max(1e-9, pitchCeiling - pitchFloor)
+                    )
+                )) *
             100
         }%`;
-    };
+    const cursorPitchCoordinate = cursor?.pitchHz ?? null;
+    const cursorPitchAxisTop =
+        cursorPitchCoordinate === null ? undefined : { top: pitchAxisTop(cursorPitchCoordinate) };
+    const waveformGainDb = 20 * Math.log10(Math.max(1e-9, waveformGain));
+    const waveformAxis = (() => {
+        if (waveformScaleMode === 'normalized') {
+            const edge = 1 / Math.max(1e-9, waveformGain);
+            return {
+                title: tr('归一化'),
+                top: edge.toFixed(2),
+                middle: '0',
+                bottom: `−${edge.toFixed(2)}`,
+            };
+        }
+        if (waveformScaleMode === 'dbspl') {
+            const edge = 20 * Math.log10(1 / 0.00002) + splCalibration - waveformGainDb;
+            return {
+                title: 'dB SPL*',
+                top: edge.toFixed(1),
+                middle: '−∞',
+                bottom: edge.toFixed(1),
+            };
+        }
+        const edge = -waveformGainDb;
+        return {
+            title: 'dBFS',
+            top: `${edge > 0 ? '+' : ''}${edge.toFixed(1)}`,
+            middle: '−∞',
+            bottom: `${edge > 0 ? '+' : ''}${edge.toFixed(1)}`,
+        };
+    })();
     const maximumTimeOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
     const scrollbarThumbWidth = 100 / Math.max(1, zoom);
     const scrollbarThumbLeft =
@@ -1728,30 +1775,23 @@ export default function App({
                                         {cursor !== null && cursorPitchCoordinate !== null && (
                                             <span
                                                 className="axis-cursor-value pitch"
-                                                style={cursorAxisTop}
+                                                style={cursorPitchAxisTop}
                                             >
                                                 {cursorPitchCoordinate.toFixed(1)}
                                             </span>
                                         )}
                                         <span
-                                            className="spectral-pitch-mark pitch-color"
-                                            style={{ top: spectralPitchTop(pitchCeiling) }}
+                                            className="spectral-pitch-mark scale-top pitch-color"
                                         >
                                             {pitchCeiling}
                                         </span>
                                         <span
-                                            className="spectral-pitch-mark pitch-color"
-                                            style={{
-                                                top: spectralPitchTop(
-                                                    (pitchFloor + pitchCeiling) / 2
-                                                ),
-                                            }}
+                                            className="spectral-pitch-mark scale-mid pitch-color"
                                         >
                                             {Math.round((pitchFloor + pitchCeiling) / 2)}
                                         </span>
                                         <span
-                                            className="spectral-pitch-mark pitch-color"
-                                            style={{ top: spectralPitchTop(pitchFloor) }}
+                                            className="spectral-pitch-mark scale-bottom pitch-color"
                                         >
                                             {pitchFloor}
                                         </span>
@@ -1952,7 +1992,18 @@ export default function App({
                             <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
                                 {waveformVisible && (
                                     <div className="waveform-axis waveform-axis-right">
-                                        <span>{tr('归一化振幅')}</span>
+                                        <span className="waveform-axis-title">
+                                            {waveformAxis.title}
+                                        </span>
+                                        <span className="waveform-scale-mark scale-top">
+                                            {waveformAxis.top}
+                                        </span>
+                                        <span className="waveform-scale-mark scale-mid">
+                                            {waveformAxis.middle}
+                                        </span>
+                                        <span className="waveform-scale-mark scale-bottom">
+                                            {waveformAxis.bottom}
+                                        </span>
                                     </div>
                                 )}
                                 {waveformVisible && spectrogramVisible && (
@@ -1975,16 +2026,16 @@ export default function App({
                                             </span>
                                         )}
                                         <span className="top">{maxFrequency} Hz</span>
-                                        <span className="spl-top intensity-color">
+                                        <span className="spl-top scale-top intensity-color">
                                             {intensityCeiling} dB SPL*
                                         </span>
-                                        <span className="spl-mid intensity-color">
+                                        <span className="spl-mid scale-mid intensity-color">
                                             {Math.round((intensityFloor + intensityCeiling) / 2)} dB
                                         </span>
-                                        <span className="spl-bottom intensity-color">
+                                        <span className="spl-bottom scale-bottom intensity-color">
                                             {intensityFloor} dB SPL*
                                         </span>
-                                        <span className="bottom">0 Hz</span>
+                                        <span className="bottom">{minFrequency} Hz</span>
                                     </div>
                                 )}
                             </div>
@@ -2393,6 +2444,23 @@ export default function App({
                                 <RestoreIcon aria-hidden="true" />
                                 <span>{tr('恢复本页默认参数')}</span>
                             </button>
+                            <div className="select-row one">
+                                <label>
+                                    {tr('波形纵轴单位')}
+                                    <select
+                                        value={waveformScaleMode}
+                                        onChange={(event) =>
+                                            setWaveformScaleMode(
+                                                event.target.value as WaveformScaleMode
+                                            )
+                                        }
+                                    >
+                                        <option value="dbfs">dBFS</option>
+                                        <option value="dbspl">dB SPL*</option>
+                                        <option value="normalized">{tr('归一化')}</option>
+                                    </select>
+                                </label>
+                            </div>
                             <label className="setting">
                                 <span>
                                     {tr('波形垂直缩放')} <em>{Math.round(waveformGain * 100)}%</em>

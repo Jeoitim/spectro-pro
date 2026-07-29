@@ -1863,6 +1863,15 @@ class SpectroEngine {
                         Math.max(1e-9, frequencyToScale(max, scale) - frequencyToScale(min, scale)))
             );
         };
+        const pitchY = (pitch: number) =>
+            height *
+            (1 -
+                (pitch - this.layerDisplayOptions.pitchFloorHz) /
+                    Math.max(
+                        1e-9,
+                        this.layerDisplayOptions.pitchCeilingHz -
+                            this.layerDisplayOptions.pitchFloorHz
+                    ));
 
         if (this.showFormants) {
             const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
@@ -1921,7 +1930,7 @@ class SpectroEngine {
                 visible.end,
                 xForIndex,
                 (point) => point.pitchHz,
-                (pitch) => frequencyY(pitch),
+                (pitch) => pitchY(pitch),
                 '#2588ff',
                 this.layerDisplayOptions.pitchLineWidth
             );
@@ -1978,14 +1987,14 @@ class SpectroEngine {
             );
             const inspectorPitch = this.analysisHistory[inspectorIndex]?.pitchHz;
             if (this.showPitch && inspectorPitch !== null && inspectorPitch !== undefined) {
-                const pitchY = frequencyY(inspectorPitch);
-                if (pitchY >= 0 && pitchY <= height) {
+                const inspectorPitchY = pitchY(inspectorPitch);
+                if (inspectorPitchY >= 0 && inspectorPitchY <= height) {
                     ctx.strokeStyle = 'rgba(61, 151, 255, 0.72)';
                     ctx.lineWidth = 0.75;
                     ctx.setLineDash([2, 3]);
                     ctx.beginPath();
                     ctx.moveTo(this.inspector.x * width, this.inspector.y * height);
-                    ctx.lineTo(this.inspector.x * width, pitchY);
+                    ctx.lineTo(this.inspector.x * width, inspectorPitchY);
                     ctx.stroke();
                 }
             }

@@ -67,6 +67,8 @@ const ENGLISH: { [key: string]: string } = {
     显示或隐藏语谱图: 'Show or hide spectrogram',
     调整波形和语谱图高度: 'Resize waveform and spectrogram',
     归一化振幅: 'Normalized amplitude',
+    波形纵轴单位: 'Waveform vertical scale',
+    归一化: 'Normalized',
     语谱主题: 'Spectrogram theme',
     波形主题: 'Waveform theme',
     波形垂直缩放: 'Waveform vertical scale',

@@ -1103,6 +1103,37 @@ button.media-row {
     left: 10px;
 }
 
+.waveform-axis .waveform-axis-title {
+    top: 50%;
+    right: 4px;
+    left: auto;
+    writing-mode: vertical-rl;
+    transform: translateY(-50%);
+}
+
+.waveform-axis .waveform-scale-mark {
+    right: auto;
+    left: 10px;
+    line-height: 1;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+    text-transform: none;
+}
+
+.waveform-axis .waveform-scale-mark.scale-top {
+    top: 0;
+}
+
+.waveform-axis .waveform-scale-mark.scale-mid {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.waveform-axis .waveform-scale-mark.scale-bottom {
+    top: 100%;
+    transform: translateY(-100%);
+}
+
 #spectrogramCanvas {
     background: #02040a;
 }
@@ -1364,7 +1395,11 @@ button.media-row {
 }
 
 .axis-left .axis-title {
-    right: 10px;
+    top: 50%;
+    right: auto;
+    left: 3px;
+    writing-mode: vertical-rl;
+    transform: translateY(-50%);
 }
 
 .axis-left .top,
@@ -1386,8 +1421,18 @@ button.media-row {
     bottom: 20px;
 }
 
-.spectral-pitch-mark {
-    transform: translateY(8px);
+.spectral-pitch-mark.scale-top {
+    top: 0;
+}
+
+.spectral-pitch-mark.scale-mid {
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.spectral-pitch-mark.scale-bottom {
+    top: 100%;
+    transform: translateY(-100%);
 }
 
 .axis-right {
@@ -1401,21 +1446,27 @@ button.media-row {
 }
 
 .axis-right .intensity-axis-title {
+    top: 50%;
     right: auto;
-    left: -10px;
-    transform: translateX(-100%);
+    left: -3px;
+    writing-mode: vertical-rl;
+    transform: translateX(-100%) translateY(-50%);
 }
 
 .axis-right .frequency-axis-title {
-    left: 10px;
+    top: 50%;
+    right: 3px;
+    left: auto;
+    writing-mode: vertical-rl;
+    transform: translateY(-50%);
 }
 
 .axis-right .top {
-    top: 20px;
+    top: 0;
 }
 
 .axis-right .bottom {
-    bottom: 20px;
+    bottom: 0;
 }
 
 .axis-right .spl-top,
@@ -1427,15 +1478,18 @@ button.media-row {
 }
 
 .axis-right .spl-top {
-    top: 20px;
+    top: 0;
 }
 
 .axis-right .spl-mid {
-    top: calc(50% - 4px);
+    top: 50%;
+    transform: translateX(-100%) translateY(-50%);
 }
 
 .axis-right .spl-bottom {
-    bottom: 20px;
+    top: 100%;
+    bottom: auto;
+    transform: translateX(-100%) translateY(-100%);
 }
 
 .axis-cursor-value {
@@ -2251,7 +2305,7 @@ html.glass-effects .settings-panel {
     }
 
     .praat-view {
-        grid-template-columns: 44px minmax(0, 1fr) 65px;
+        grid-template-columns: 56px minmax(0, 1fr) 88px;
         min-height: 0;
     }
 
@@ -2286,14 +2340,36 @@ html.glass-effects .settings-panel {
         padding: 16px;
     }
 
-    .axis-right .spl-top,
-    .axis-right .spl-mid,
-    .axis-right .spl-bottom {
-        display: none;
+    .axis {
+        font-size: 9px;
     }
 
     .axis-title {
-        display: none;
+        display: block;
+        font-size: 8px;
+    }
+
+    .axis-left .axis-title {
+        top: 50%;
+        right: auto;
+        left: 2px;
+        writing-mode: vertical-rl;
+        transform: translateY(-50%);
+    }
+
+    .axis-right .frequency-axis-title {
+        top: 50%;
+        right: 2px;
+        left: auto;
+        writing-mode: vertical-rl;
+        transform: translateY(-50%);
+    }
+
+    .axis-right .intensity-axis-title {
+        top: 50%;
+        left: -2px;
+        writing-mode: vertical-rl;
+        transform: translateX(-100%) translateY(-50%);
     }
 
     .primary-metrics strong {
