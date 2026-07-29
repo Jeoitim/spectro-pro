@@ -43,6 +43,8 @@ export const WHITE_BLACK_GRADIENT: Gradient = [
     { stop: 1.0, color: [0, 0, 0] },
 ];
 
+export const PRAAT_GRADIENT: Gradient = WHITE_BLACK_GRADIENT;
+
 export const AURORA_GRADIENT: Gradient = [
     { stop: 0, color: [4, 7, 18] },
     { stop: 0.22, color: [20, 22, 68] },
@@ -72,6 +74,10 @@ export const GRADIENTS: { name: string; gradient: Gradient }[] = [
     {
         name: 'Aurora',
         gradient: AURORA_GRADIENT,
+    },
+    {
+        name: 'Praat',
+        gradient: PRAAT_GRADIENT,
     },
     {
         name: 'Ember',

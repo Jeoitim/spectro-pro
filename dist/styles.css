@@ -994,7 +994,7 @@ button.media-row {
 }
 
 #waveformCanvas {
-    background: #f7f9fc;
+    background: #040712;
 }
 
 #waveformInteraction {
@@ -1101,6 +1101,25 @@ button.media-row {
         transparent calc(50% + 0.5px),
         transparent calc(75% - 0.5px),
         rgba(194, 207, 231, 0.055) 75%,
+        transparent calc(75% + 0.5px)
+    );
+}
+
+.spectrogram-stage[data-theme='praat'] .plot-grid i {
+    border-bottom-color: rgba(37, 49, 65, 0.13);
+}
+
+.spectrogram-stage[data-theme='praat'] .plot-grid::after {
+    background-image: linear-gradient(
+        90deg,
+        transparent calc(25% - 0.5px),
+        rgba(37, 49, 65, 0.11) 25%,
+        transparent calc(25% + 0.5px),
+        transparent calc(50% - 0.5px),
+        rgba(37, 49, 65, 0.11) 50%,
+        transparent calc(50% + 0.5px),
+        transparent calc(75% - 0.5px),
+        rgba(37, 49, 65, 0.11) 75%,
         transparent calc(75% + 0.5px)
     );
 }
@@ -2169,4 +2188,200 @@ html.glass-effects .settings-panel {
         padding: 6px 4px;
         line-height: 1.15;
     }
+}
+
+html.light-ui {
+    color-scheme: light;
+    --bg: #eef2f7;
+    --panel: #ffffff;
+    --panel-raised: #f7f9fc;
+    --line: rgba(54, 68, 91, 0.14);
+    --line-strong: rgba(54, 68, 91, 0.24);
+    --text: #172033;
+    --muted: #667085;
+}
+
+html.light-ui body {
+    background: radial-gradient(circle at 35% -20%, rgba(79, 104, 184, 0.12), transparent 38%),
+        var(--bg);
+}
+
+html.light-ui .topbar,
+html.light-ui.glass-effects .topbar {
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 1px 18px rgba(33, 47, 72, 0.07);
+}
+
+html.light-ui .visualizer-card,
+html.light-ui .visualizer-toolbar,
+html.light-ui .praat-view {
+    background: #f3f6fa;
+}
+
+html.light-ui .visualizer-toolbar {
+    border-bottom-color: rgba(54, 68, 91, 0.16);
+}
+
+html.light-ui .media-panel,
+html.light-ui.glass-effects .media-panel,
+html.light-ui .metrics-panel,
+html.light-ui.glass-effects .metrics-panel,
+html.light-ui .settings-panel,
+html.light-ui.glass-effects .settings-panel {
+    border-color: rgba(54, 68, 91, 0.16);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 20px 60px rgba(36, 50, 76, 0.16);
+}
+
+html.light-ui .language-menu,
+html.light-ui.glass-effects .language-menu {
+    border-color: rgba(54, 68, 91, 0.18);
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 14px 36px rgba(36, 50, 76, 0.16);
+}
+
+html.light-ui .button,
+html.light-ui .icon-button,
+html.light-ui .view-actions button,
+html.light-ui .panel-actions button,
+html.light-ui .media-panel-heading button,
+html.light-ui .settings-header button,
+html.light-ui .reset-tab-button {
+    color: #475467;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+html.light-ui .button:hover,
+html.light-ui .icon-button:hover,
+html.light-ui .view-actions button:hover,
+html.light-ui .panel-actions button:hover {
+    border-color: rgba(53, 105, 181, 0.42);
+    background: #ffffff;
+}
+
+html.light-ui .button.primary {
+    color: #ffffff;
+}
+
+html.light-ui .brand strong,
+html.light-ui .source-status strong,
+html.light-ui .session-clock strong,
+html.light-ui .media-panel-heading strong,
+html.light-ui .metrics-heading h2,
+html.light-ui .settings-header h2,
+html.light-ui .primary-metrics strong,
+html.light-ui .formant-metrics strong {
+    color: #172033;
+}
+
+html.light-ui .source-status span,
+html.light-ui .session-clock span,
+html.light-ui .media-panel-heading strong small,
+html.light-ui .eyebrow,
+html.light-ui .setting > span,
+html.light-ui .setting > small,
+html.light-ui .effect-toggle,
+html.light-ui .effect-toggle small,
+html.light-ui .select-row label,
+html.light-ui .palette-setting > span,
+html.light-ui .palette-setting small,
+html.light-ui .statistics dt,
+html.light-ui .calibration-note,
+html.light-ui .panel-actions button {
+    color: #667085;
+}
+
+html.light-ui .mode-switch,
+html.light-ui .settings-tabs {
+    border-color: rgba(54, 68, 91, 0.16);
+    background: #e8edf4;
+}
+
+html.light-ui .mode-switch button,
+html.light-ui .settings-tabs button {
+    color: #667085;
+}
+
+html.light-ui .mode-switch button.active,
+html.light-ui .settings-tabs button.active {
+    color: #172033;
+    background: #ffffff;
+    box-shadow: 0 2px 10px rgba(36, 50, 76, 0.12);
+}
+
+html.light-ui .toolbar-center .plot-toggles button,
+html.light-ui .overlay-toggles button,
+html.light-ui .view-actions button {
+    color: #667085;
+    background: rgba(255, 255, 255, 0.66);
+}
+
+html.light-ui .toolbar-center .plot-toggles button.on,
+html.light-ui .overlay-toggles button.on {
+    color: #344054;
+}
+
+html.light-ui .media-row {
+    color: #475467;
+    background: #f8fafc;
+}
+
+html.light-ui .media-row:hover,
+html.light-ui .media-row.active {
+    background: #eef5ff;
+}
+
+html.light-ui .axis,
+html.light-ui .waveform-axis {
+    color: #526177;
+}
+
+html.light-ui .plot-divider,
+html.light-ui .axis-divider-space {
+    background: #dce3ec;
+}
+
+html.light-ui .plot-divider span {
+    background: #8796aa;
+}
+
+html.light-ui .zoom-scrollbar {
+    border-color: rgba(54, 68, 91, 0.24);
+    background: #e3e8ef;
+}
+
+html.light-ui .zoom-scrollbar-thumb {
+    border-color: #77869a;
+    background: #aeb9c8;
+}
+
+html.light-ui .primary-metrics article,
+html.light-ui .formant-metrics article {
+    background: #f7f9fc;
+}
+
+html.light-ui .statistics dd,
+html.light-ui .setting em,
+html.light-ui .effect-toggle strong {
+    color: #344054;
+}
+
+html.light-ui .select-row select {
+    border-color: rgba(54, 68, 91, 0.22);
+    color: #344054;
+    background: #ffffff;
+}
+
+html.light-ui .palette-setting button.active {
+    border-color: #344054;
+    box-shadow: 0 0 0 2px rgba(37, 136, 255, 0.36);
+}
+
+html.light-ui .setting-help {
+    color: #5f6f86;
+    background: rgba(37, 136, 255, 0.06);
+}
+
+html.light-ui .settings-backdrop {
+    background: rgba(81, 94, 116, 0.22);
 }

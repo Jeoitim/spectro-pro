@@ -30,7 +30,7 @@ import {
     offThreadAnalyzeEntireFile,
     offThreadGenerateSpectrogram,
 } from './worker-util';
-import { WaveformRenderer } from './waveform-render';
+import { WaveformRenderer, WaveformThemeName } from './waveform-render';
 
 const AUDIO_CHUNK_SIZE = 1024;
 const SPECTROGRAM_HEIGHT = 512;
@@ -216,6 +216,8 @@ class SpectroEngine {
     private waveformVisible = true;
 
     private spectrogramVisible = true;
+
+    private spectrogramThemeName = 'Aurora';
 
     private processing = false;
 
@@ -469,6 +471,12 @@ class SpectroEngine {
         this.waveformVisible = waveform;
         this.spectrogramVisible = spectrogram;
         requestAnimationFrame(() => this.resize());
+    }
+
+    setPlotThemes(spectrogramThemeName: string, waveformThemeName: WaveformThemeName) {
+        this.spectrogramThemeName = spectrogramThemeName;
+        this.waveformRenderer.setTheme(waveformThemeName);
+        this.overlayDirty = true;
     }
 
     async startMicrophone() {
@@ -1751,6 +1759,7 @@ class SpectroEngine {
         }
         const width = this.overlay.width;
         const height = this.overlay.height;
+        const praatTheme = this.spectrogramThemeName === 'Praat';
         ctx.clearRect(0, 0, width, height);
         const visible = this.visibleHistoryRange();
         if (visible.end <= visible.start) {
@@ -1865,9 +1874,13 @@ class SpectroEngine {
             const selectionRight = clamp(rawSelectionRight, 0, width);
             if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
                 ctx.save();
-                ctx.fillStyle = 'rgba(37, 136, 255, 0.14)';
+                ctx.fillStyle = praatTheme
+                    ? 'rgba(255, 105, 120, 0.2)'
+                    : 'rgba(37, 136, 255, 0.14)';
                 ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
-                ctx.strokeStyle = 'rgba(105, 174, 255, 0.95)';
+                ctx.strokeStyle = praatTheme
+                    ? 'rgba(211, 48, 70, 0.92)'
+                    : 'rgba(105, 174, 255, 0.95)';
                 ctx.lineWidth = 1;
                 ctx.setLineDash([4, 4]);
                 ctx.beginPath();
@@ -1884,13 +1897,15 @@ class SpectroEngine {
             const playheadX = xForTime(this.playbackOffsetSeconds);
             if (playheadX >= 0 && playheadX <= width) {
                 ctx.save();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+                ctx.strokeStyle = praatTheme
+                    ? 'rgba(15, 23, 35, 0.92)'
+                    : 'rgba(255, 255, 255, 0.92)';
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
                 ctx.moveTo(playheadX, 0);
                 ctx.lineTo(playheadX, height);
                 ctx.stroke();
-                ctx.fillStyle = '#ffffff';
+                ctx.fillStyle = praatTheme ? '#0f1723' : '#ffffff';
                 ctx.beginPath();
                 ctx.moveTo(playheadX - 5, 0);
                 ctx.lineTo(playheadX + 5, 0);
@@ -2035,6 +2050,8 @@ const ui = initialiseControlsUi(appContainer, {
         engine?.setOverlays(pitch, formants, intensity),
     onPlotVisibilityChange: (waveform, spectrogram) =>
         engine?.setPlotVisibility(waveform, spectrogram),
+    onPlotThemeChange: (spectrogramThemeName, waveformThemeName) =>
+        engine?.setPlotThemes(spectrogramThemeName, waveformThemeName),
     onInspect: (x, y) => engine?.inspect(x, y),
     onSelectRange: (xStart, xEnd) => engine?.selectRange(xStart, xEnd),
     onNavigate: (amount) => engine?.navigate(amount),

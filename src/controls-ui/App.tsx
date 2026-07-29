@@ -8,6 +8,8 @@ import React, {
     useState,
 } from 'react';
 import AddIcon from '@material-ui/icons/Add';
+import Brightness4Icon from '@material-ui/icons/Brightness4';
+import Brightness7Icon from '@material-ui/icons/Brightness7';
 import ClearAllIcon from '@material-ui/icons/ClearAll';
 import CloseIcon from '@material-ui/icons/Close';
 import CloudUploadIcon from '@material-ui/icons/CloudUpload';
@@ -30,6 +32,7 @@ import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
 import { frequencyToScale } from '../math-util';
 import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
+import { WAVEFORM_THEMES, WaveformThemeName } from '../waveform-render';
 
 export type SpectrogramMode = 'broadband' | 'narrowband' | 'custom';
 export type PlayState = 'stopped' | 'loading-file' | 'loading-mic' | 'playing';
@@ -51,6 +54,7 @@ type MetricSelection =
     | 'formant3'
     | 'formant4'
     | 'formant5';
+type UiTheme = 'dark' | 'light';
 
 export interface LiveSnapshot {
     elapsedSeconds: number;
@@ -115,6 +119,7 @@ export interface AppCallbacks {
     onPerformanceChange: (settings: PerformanceSettings) => void;
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
     onPlotVisibilityChange: (waveform: boolean, spectrogram: boolean) => void;
+    onPlotThemeChange: (spectrogramThemeName: string, waveformThemeName: WaveformThemeName) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onSelectRange: (xStartRatio: number, xEndRatio: number) => void;
     onNavigate: (amount: number) => void;
@@ -222,6 +227,8 @@ interface SavedSettings {
     waveformVisible: boolean;
     spectrogramVisible: boolean;
     waveformShare: number;
+    waveformThemeName: WaveformThemeName;
+    uiTheme: UiTheme;
     sensitivity: number;
     contrast: number;
     zoom: number;
@@ -298,6 +305,7 @@ export default function App({
     onPerformanceChange,
     onOverlayChange,
     onPlotVisibilityChange,
+    onPlotThemeChange,
     onInspect,
     onSelectRange,
     onNavigate,
@@ -335,6 +343,10 @@ export default function App({
     const [waveformVisible, setWaveformVisible] = useState(saved.waveformVisible ?? true);
     const [spectrogramVisible, setSpectrogramVisible] = useState(saved.spectrogramVisible ?? true);
     const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
+    const [waveformThemeName, setWaveformThemeName] = useState<WaveformThemeName>(
+        saved.waveformThemeName || 'Aurora'
+    );
+    const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
     const [selectedMetric, setSelectedMetric] = useState<MetricSelection>('pitch');
@@ -507,6 +519,8 @@ export default function App({
             waveformVisible,
             spectrogramVisible,
             waveformShare,
+            waveformThemeName,
+            uiTheme,
             sensitivity,
             contrast,
             zoom,
@@ -553,6 +567,8 @@ export default function App({
         waveformVisible,
         spectrogramVisible,
         waveformShare,
+        waveformThemeName,
+        uiTheme,
         sensitivity,
         contrast,
         zoom,
@@ -598,6 +614,11 @@ export default function App({
         document.documentElement.classList.toggle('glass-effects', glassEffect);
         return () => document.documentElement.classList.remove('glass-effects');
     }, [glassEffect]);
+
+    useEffect(() => {
+        document.documentElement.classList.toggle('light-ui', uiTheme === 'light');
+        return () => document.documentElement.classList.remove('light-ui');
+    }, [uiTheme]);
 
     useEffect(() => {
         const handleKeyboardShortcut = (event: KeyboardEvent) => {
@@ -738,6 +759,10 @@ export default function App({
     useEffect(() => {
         onPlotVisibilityChange(waveformVisible, spectrogramVisible);
     }, [waveformVisible, spectrogramVisible, onPlotVisibilityChange]);
+
+    useEffect(() => {
+        onPlotThemeChange(gradientName, waveformThemeName);
+    }, [gradientName, waveformThemeName, onPlotThemeChange]);
 
     useEffect(() => {
         const timeout = window.setTimeout(
@@ -963,6 +988,7 @@ export default function App({
                     setCustomScale('linear');
                 }
                 setGradientName('Aurora');
+                setWaveformThemeName('Aurora');
                 return;
             }
             if (tab === 'pitch') {
@@ -1152,6 +1178,19 @@ export default function App({
                             {tr('麦克风')}
                         </button>
                     )}
+                    <button
+                        className="icon-button theme-button"
+                        onClick={() => setUiTheme(uiTheme === 'dark' ? 'light' : 'dark')}
+                        aria-label={tr(uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式')}
+                        title={tr(uiTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式')}
+                        aria-pressed={uiTheme === 'light'}
+                    >
+                        {uiTheme === 'dark' ? (
+                            <Brightness7Icon aria-hidden="true" />
+                        ) : (
+                            <Brightness4Icon aria-hidden="true" />
+                        )}
+                    </button>
                     <div className="language-control" ref={languageRef}>
                         <button
                             className="icon-button language-button"
@@ -1601,6 +1640,7 @@ export default function App({
                                 <div
                                     className="spectrogram-stage"
                                     id="spectrogramStage"
+                                    data-theme={gradientName.toLowerCase()}
                                     style={{ display: spectrogramVisible ? undefined : 'none' }}
                                 >
                                     <canvas id="spectrogramCanvas" />
@@ -2109,9 +2149,9 @@ export default function App({
                                 </label>
                             </div>
                             <div className="palette-setting">
-                                <span>{tr('颜色主题')}</span>
+                                <span>{tr('语谱主题')}</span>
                                 <div>
-                                    {GRADIENTS.slice(0, 5).map((item) => (
+                                    {GRADIENTS.slice(0, 6).map((item) => (
                                         <button
                                             key={item.name}
                                             aria-label={item.name}
@@ -2132,6 +2172,24 @@ export default function App({
                                     ))}
                                 </div>
                                 <small>{selectedGradient?.name}</small>
+                            </div>
+                            <div className="palette-setting">
+                                <span>{tr('波形主题')}</span>
+                                <div>
+                                    {WAVEFORM_THEMES.map((item) => (
+                                        <button
+                                            key={item.name}
+                                            aria-label={`${tr('波形主题')} ${item.name}`}
+                                            title={item.name}
+                                            className={
+                                                waveformThemeName === item.name ? 'active' : ''
+                                            }
+                                            style={{ background: item.preview }}
+                                            onClick={() => setWaveformThemeName(item.name)}
+                                        />
+                                    ))}
+                                </div>
+                                <small>{waveformThemeName}</small>
                             </div>
                             <p className="setting-help">
                                 {tr(

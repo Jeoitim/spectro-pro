@@ -1,5 +1,53 @@
 import { clamp } from './math-util';
 
+export type WaveformThemeName = 'Aurora' | 'Praat';
+
+export const WAVEFORM_THEMES: {
+    name: WaveformThemeName;
+    preview: string;
+}[] = [
+    {
+        name: 'Aurora',
+        preview: 'linear-gradient(135deg, #040712, #4a35b4 48%, #15cebe 78%, #d3f774)',
+    },
+    {
+        name: 'Praat',
+        preview: 'linear-gradient(135deg, #ffffff, #bdbdbd 52%, #111111)',
+    },
+];
+
+const WAVEFORM_THEME_COLORS: Record<
+    WaveformThemeName,
+    {
+        background: string;
+        backgroundAccent: string | null;
+        waveform: string;
+        zeroLine: string;
+        selectionFill: string;
+        selectionStroke: string;
+        playhead: string;
+    }
+> = {
+    Aurora: {
+        background: '#040712',
+        backgroundAccent: '#141644',
+        waveform: '#8ee8dc',
+        zeroLine: 'rgba(89, 202, 220, 0.48)',
+        selectionFill: 'rgba(104, 190, 255, 0.24)',
+        selectionStroke: 'rgba(124, 203, 255, 0.95)',
+        playhead: '#f7fff8',
+    },
+    Praat: {
+        background: '#f7f9fc',
+        backgroundAccent: null,
+        waveform: '#11151d',
+        zeroLine: 'rgba(50, 132, 170, 0.55)',
+        selectionFill: 'rgba(105, 188, 255, 0.24)',
+        selectionStroke: 'rgba(52, 145, 210, 0.92)',
+        playhead: '#1385ba',
+    },
+};
+
 export interface WaveformSelection {
     startSeconds: number;
     endSeconds: number;
@@ -126,6 +174,8 @@ export class WaveformRenderer {
 
     private envelope = new Float32Array(0);
 
+    private themeName: WaveformThemeName = 'Aurora';
+
     constructor(canvas: HTMLCanvasElement) {
         const context = canvas.getContext('2d');
         if (context === null) {
@@ -140,6 +190,10 @@ export class WaveformRenderer {
             this.canvas.width = width;
             this.canvas.height = height;
         }
+    }
+
+    setTheme(themeName: WaveformThemeName) {
+        this.themeName = themeName;
     }
 
     setOfflineSamples(samples: Float32Array, sampleRate: number) {
@@ -194,10 +248,19 @@ export class WaveformRenderer {
         }
 
         ctx.clearRect(0, 0, width, height);
-        ctx.fillStyle = '#f7f9fc';
+        const theme = WAVEFORM_THEME_COLORS[this.themeName];
+        ctx.fillStyle = theme.background;
         ctx.fillRect(0, 0, width, height);
+        if (theme.backgroundAccent !== null) {
+            const background = ctx.createLinearGradient(0, 0, width, height);
+            background.addColorStop(0, theme.background);
+            background.addColorStop(0.55, theme.backgroundAccent);
+            background.addColorStop(1, theme.background);
+            ctx.fillStyle = background;
+            ctx.fillRect(0, 0, width, height);
+        }
 
-        ctx.strokeStyle = 'rgba(50, 132, 170, 0.55)';
+        ctx.strokeStyle = theme.zeroLine;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(0, height / 2 + 0.5);
@@ -223,7 +286,7 @@ export class WaveformRenderer {
         const yForAmplitude = (value: number) =>
             height / 2 - (clamp(value, -amplitude, amplitude) / amplitude) * (height * 0.46);
 
-        ctx.strokeStyle = '#11151d';
+        ctx.strokeStyle = theme.waveform;
         ctx.lineWidth = 1;
         ctx.beginPath();
         for (let x = 0; x < width; x += 1) {
@@ -242,9 +305,9 @@ export class WaveformRenderer {
                 selection.endSeconds >= viewStartSeconds &&
                 selection.startSeconds <= viewEndSeconds
             ) {
-                ctx.fillStyle = 'rgba(255, 108, 122, 0.22)';
+                ctx.fillStyle = theme.selectionFill;
                 ctx.fillRect(left, 0, Math.max(1, right - left), height);
-                ctx.strokeStyle = 'rgba(212, 65, 83, 0.85)';
+                ctx.strokeStyle = theme.selectionStroke;
                 ctx.setLineDash([4, 4]);
                 ctx.beginPath();
                 ctx.moveTo(left, 0);
@@ -259,7 +322,7 @@ export class WaveformRenderer {
         if (playheadSeconds !== null) {
             const x = xForTime(playheadSeconds);
             if (x >= 0 && x <= width) {
-                ctx.strokeStyle = '#1385ba';
+                ctx.strokeStyle = theme.playhead;
                 ctx.lineWidth = 1.25;
                 ctx.beginPath();
                 ctx.moveTo(x, 0);
