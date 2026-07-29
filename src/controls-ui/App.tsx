@@ -560,18 +560,23 @@ export default function App({
     ]);
 
     useEffect(() => {
-        onAnalysisChange({
-            pitchAlgorithm,
-            minPitchHz: pitchFloor,
-            maxPitchHz: pitchCeiling,
-            voicingThreshold,
-            maximumFormants,
-            formantCeilingHz: formantCeiling,
-            formantWindowLengthSeconds: formantWindowMs / 1000,
-            preEmphasisFromHz: preEmphasisFrom,
-            intensityPitchFloorHz: intensityPitchFloor,
-            splCalibrationDb: splCalibration,
-        });
+        const timeout = window.setTimeout(
+            () =>
+                onAnalysisChange({
+                    pitchAlgorithm,
+                    minPitchHz: pitchFloor,
+                    maxPitchHz: pitchCeiling,
+                    voicingThreshold,
+                    maximumFormants,
+                    formantCeilingHz: formantCeiling,
+                    formantWindowLengthSeconds: formantWindowMs / 1000,
+                    preEmphasisFromHz: preEmphasisFrom,
+                    intensityPitchFloorHz: intensityPitchFloor,
+                    splCalibrationDb: splCalibration,
+                }),
+            160
+        );
+        return () => window.clearTimeout(timeout);
     }, [
         pitchAlgorithm,
         pitchFloor,
@@ -616,8 +621,8 @@ export default function App({
     }, [maximumFormants]);
 
     useEffect(() => {
-        onOverlayChange(pitchVisible, mode !== 'narrowband' && formantsVisible, intensityVisible);
-    }, [pitchVisible, formantsVisible, intensityVisible, mode, onOverlayChange]);
+        onOverlayChange(pitchVisible, formantsVisible, intensityVisible);
+    }, [pitchVisible, formantsVisible, intensityVisible, onOverlayChange]);
 
     useEffect(() => {
         const timeout = window.setTimeout(
@@ -634,12 +639,6 @@ export default function App({
     useEffect(() => {
         onModeChange(mode);
     }, [mode, onModeChange]);
-
-    useEffect(() => {
-        if (mode === 'narrowband' && selectedMetric.indexOf('formant') === 0) {
-            setSelectedMetric('pitch');
-        }
-    }, [mode, selectedMetric]);
 
     const changeMode = useCallback((newMode: SpectrogramMode) => {
         setMode(newMode);

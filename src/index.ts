@@ -18,7 +18,11 @@ import { t } from './i18n';
 import { Circular2DBuffer, clamp, frequencyToScale, scaleToFrequency } from './math-util';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
-import { offThreadAnalyzeEntireFile, offThreadGenerateSpectrogram } from './worker-util';
+import {
+    offThreadAnalyzeAcoustics,
+    offThreadAnalyzeEntireFile,
+    offThreadGenerateSpectrogram,
+} from './worker-util';
 
 const AUDIO_CHUNK_SIZE = 1024;
 const SPECTROGRAM_HEIGHT = 512;
@@ -51,7 +55,10 @@ interface OfflineModeCache {
     spectrogram: Float32Array;
     analyses: AnalysisPoint[];
     windowCount: number;
+    windowSize: number;
+    windowStepSize: number;
     fftSize: number;
+    analysisRevision: number;
 }
 
 interface MediaViewState {
@@ -140,7 +147,7 @@ class SpectroEngine {
         custom: 0,
     };
 
-    private pitchAlgorithm: PitchAlgorithm = 'yin';
+    private acousticAnalysisRevision = 0;
 
     private sampleRate = 48000;
 
@@ -359,27 +366,32 @@ class SpectroEngine {
     }
 
     setPitchAlgorithm(algorithm: PitchAlgorithm) {
-        this.pitchAlgorithm = algorithm;
-        this.analysisOptions = {
-            ...this.analysisOptions,
-            pitchAlgorithm: algorithm,
-        };
+        this.updateAnalysis({ pitchAlgorithm: algorithm });
     }
 
     updateAnalysis(parameters: Partial<AnalysisOptions>) {
+        const changed = Object.entries(parameters).some(
+            ([key, value]) => this.analysisOptions[key as keyof AnalysisOptions] !== value
+        );
+        if (!changed) {
+            return;
+        }
+        const formantParametersChanged = ([
+            'formantCeilingHz',
+            'maximumFormants',
+            'formantWindowLengthSeconds',
+            'preEmphasisFromHz',
+        ] as (keyof AnalysisOptions)[]).some(
+            (key) => parameters[key] !== undefined && this.analysisOptions[key] !== parameters[key]
+        );
         this.analysisOptions = { ...this.analysisOptions, ...parameters };
-        if (parameters.pitchAlgorithm !== undefined) {
-            this.pitchAlgorithm = parameters.pitchAlgorithm;
-        }
-        for (const item of this.mediaItems) {
-            item.modes = {};
-        }
-        this.spectrogramAnalysisRevision.broadband += 1;
-        this.spectrogramAnalysisRevision.narrowband += 1;
-        this.spectrogramAnalysisRevision.custom += 1;
+        this.acousticAnalysisRevision += 1;
         const activeMedia = this.activeMedia();
         if (activeMedia !== null) {
-            this.showOrAnalyzeMedia(activeMedia);
+            const cache = activeMedia.modes[this.mode];
+            if (cache !== undefined) {
+                this.reanalyzeMediaCache(activeMedia, this.mode, cache, formantParametersChanged);
+            }
         }
     }
 
@@ -885,6 +897,11 @@ class SpectroEngine {
     private async showOrAnalyzeMedia(item: MediaItem) {
         const cache = item.modes[this.mode];
         if (cache !== undefined) {
+            if (cache.analysisRevision !== this.acousticAnalysisRevision) {
+                this.displayMediaCache(item, cache);
+                await this.reanalyzeMediaCache(item, this.mode, cache);
+                return;
+            }
             this.displayMediaCache(item, cache);
             return;
         }
@@ -893,6 +910,7 @@ class SpectroEngine {
 
     private async analyzeMedia(item: MediaItem, mode: SpectrogramMode, displayWhenReady: boolean) {
         const analysisRevision = this.spectrogramAnalysisRevision[mode];
+        const acousticAnalysisRevision = this.acousticAnalysisRevision;
         item.state = 'analyzing';
         this.notifyMediaLibrary();
         if (displayWhenReady && this.activeMediaId === item.id) {
@@ -934,13 +952,19 @@ class SpectroEngine {
                 spectrogram: result.spectrogram,
                 analyses: result.analyses,
                 windowCount: result.windowCount,
+                windowSize: result.options.windowSize,
+                windowStepSize: result.options.windowStepSize,
                 fftSize: config.fftSize,
+                analysisRevision: acousticAnalysisRevision,
             };
             item.modes[mode] = cache;
             item.state = 'ready';
             this.notifyMediaLibrary();
             if (displayWhenReady && this.activeMediaId === item.id && this.mode === mode) {
                 this.displayMediaCache(item, cache);
+                if (cache.analysisRevision !== this.acousticAnalysisRevision) {
+                    this.reanalyzeMediaCache(item, mode, cache);
+                }
             }
         } catch (error) {
             if (analysisRevision !== this.spectrogramAnalysisRevision[mode]) {
@@ -955,6 +979,62 @@ class SpectroEngine {
                     error instanceof Error ? error.message : '无法分析此音频'
                 );
             }
+        }
+    }
+
+    private async reanalyzeMediaCache(
+        item: MediaItem,
+        mode: SpectrogramMode,
+        cache: OfflineModeCache,
+        includeFormants = true
+    ) {
+        const analysisRevision = this.acousticAnalysisRevision;
+        const centreSamples = new Array(cache.windowCount)
+            .fill(0)
+            .map((_, index) => index * cache.windowStepSize + cache.windowSize / 2);
+        try {
+            const result = await offThreadAnalyzeAcoustics(
+                new Float32Array(item.samples),
+                item.sampleRate,
+                centreSamples,
+                this.analysisOptions,
+                includeFormants
+            );
+            if (analysisRevision !== this.acousticAnalysisRevision || item.modes[mode] !== cache) {
+                return;
+            }
+            cache.analyses = result.analyses.map((analysis, index) => {
+                const previous = cache.analyses[index];
+                return {
+                    ...analysis,
+                    formantsHz:
+                        includeFormants || previous === undefined
+                            ? analysis.formantsHz
+                            : previous.formantsHz,
+                    formantBandwidthsHz:
+                        includeFormants || previous === undefined
+                            ? analysis.formantBandwidthsHz
+                            : previous.formantBandwidthsHz,
+                    formantIntensity:
+                        includeFormants || previous === undefined
+                            ? analysis.formantIntensity
+                            : previous.formantIntensity,
+                    drawFormants:
+                        includeFormants || previous === undefined
+                            ? analysis.drawFormants
+                            : previous.drawFormants,
+                    timeSeconds: centreSamples[index] / item.sampleRate,
+                };
+            });
+            cache.analysisRevision = analysisRevision;
+            if (this.activeMediaId === item.id && this.mode === mode) {
+                this.analysisHistory = cache.analyses;
+                this.rebuildStatisticsFromHistory();
+                this.updateSnapshotAtPlaybackOffset(true);
+                this.overlayDirty = true;
+            }
+        } catch (error) {
+            console.warn('Unable to update acoustic overlays', error);
         }
     }
 
@@ -1199,7 +1279,10 @@ class SpectroEngine {
 
     private queueProcessing(request: ProcessRequest) {
         if (this.processing) {
-            this.pendingRequest = request;
+            this.pendingRequest = {
+                ...request,
+                newSamples: request.newSamples + (this.pendingRequest?.newSamples || 0),
+            };
             return;
         }
         this.processRequest(request);
@@ -1220,8 +1303,15 @@ class SpectroEngine {
             const availableFrames =
                 Math.floor((request.samples.length - config.windowSize) / config.hopSize) + 1;
             const frameCount = Math.max(1, Math.min(maximumFrames, availableFrames));
+            const formantLookahead = Math.ceil(
+                this.analysisOptions.formantWindowLengthSeconds * request.sampleRate
+            );
+            const samplesEnd = request.samples.length - formantLookahead;
             const samplesLength = config.windowSize + (frameCount - 1) * config.hopSize;
-            const samplesStart = request.samples.length - samplesLength;
+            const samplesStart = samplesEnd - samplesLength;
+            if (samplesStart < 0) {
+                return;
+            }
             const result = await offThreadGenerateSpectrogram(
                 request.samples,
                 samplesStart,
@@ -1295,14 +1385,8 @@ class SpectroEngine {
             if (analysis.pitchHz !== null) {
                 this.statistics.voicedFrames += 1;
                 this.statistics.pitchSum += analysis.pitchHz;
-                this.statistics.pitchMin = Math.min(
-                    this.statistics.pitchMin,
-                    analysis.pitchHz
-                );
-                this.statistics.pitchMax = Math.max(
-                    this.statistics.pitchMax,
-                    analysis.pitchHz
-                );
+                this.statistics.pitchMin = Math.min(this.statistics.pitchMin, analysis.pitchHz);
+                this.statistics.pitchMax = Math.max(this.statistics.pitchMax, analysis.pitchHz);
             }
         }
         this.sessionElapsedSeconds = firstTime + ((analyses.length - 1) * hopSize) / sampleRate;
@@ -1446,7 +1530,7 @@ class SpectroEngine {
             );
         };
 
-        if (this.showFormants && this.mode !== 'narrowband') {
+        if (this.showFormants) {
             const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
             let maximumVisibleFormantIntensity = 0;
             for (let index = visible.start; index < visible.end; index += 1) {

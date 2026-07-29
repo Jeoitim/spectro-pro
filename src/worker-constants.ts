@@ -3,6 +3,7 @@ import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 
 export const ACTION_COMPUTE_SPECTROGRAM = 'spectrogram-compute';
 export const ACTION_ANALYZE_OFFLINE = 'offline-analyze';
+export const ACTION_ANALYZE_ACOUSTICS = 'acoustics-analyze';
 
 interface MessageBase<T, U, V> {
     request: {
@@ -49,4 +50,19 @@ export type AnalyzeOfflineMessage = MessageBase<
     }
 >;
 
-export type Message = ComputeSpectrogramMessage | AnalyzeOfflineMessage;
+export type AnalyzeAcousticsMessage = MessageBase<
+    typeof ACTION_ANALYZE_ACOUSTICS,
+    {
+        samplesBuffer: ArrayBufferLike;
+        sampleRate: number;
+        centreSamples: number[];
+        analysisOptions: AnalysisOptions;
+        includeFormants: boolean;
+    },
+    {
+        inputBuffer: ArrayBufferLike;
+        analyses: AcousticAnalysis[];
+    }
+>;
+
+export type Message = ComputeSpectrogramMessage | AnalyzeOfflineMessage | AnalyzeAcousticsMessage;

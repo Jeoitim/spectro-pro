@@ -1,15 +1,16 @@
 import {
     AcousticAnalysis,
-    analyzeFormantFrames,
+    analyzeFormantsAtTimes,
     analyzePitchAndIntensityFrame,
     AnalysisOptions,
-    FormantFrameAnalysis,
     TimedAcousticAnalysis,
 } from '../analysis';
 import { generateSpectrogram } from '../spectrogram';
 import {
+    ACTION_ANALYZE_ACOUSTICS,
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
+    AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
     Message,
@@ -17,82 +18,43 @@ import {
 
 const workerScope = (self as unknown) as DedicatedWorkerGlobalScope;
 
-function nearestFormantFrame(
-    frames: FormantFrameAnalysis[],
-    timeSeconds: number
-): FormantFrameAnalysis | null {
-    if (frames.length === 0) {
-        return null;
-    }
-    if (frames.length === 1) {
-        return frames[0];
-    }
-    const step = frames[1].timeSeconds - frames[0].timeSeconds;
-    const index = Math.max(
-        0,
-        Math.min(frames.length - 1, Math.round((timeSeconds - frames[0].timeSeconds) / step))
-    );
-    return frames[index];
-}
-
 function analyzeAtCentres(
     samples: Float32Array,
     sampleRate: number,
     centreSamples: number[],
-    analysisOptions: AnalysisOptions
+    analysisOptions: AnalysisOptions,
+    includeFormants = true
 ) {
-    const formantFrames = analyzeFormantFrames(samples, sampleRate, analysisOptions);
-    const analyses: AcousticAnalysis[] = centreSamples.map((centreSample) => {
-        const pitchAndIntensity = analyzePitchAndIntensityFrame(
-            samples,
-            sampleRate,
-            analysisOptions,
-            centreSample
-        );
-        const formants = nearestFormantFrame(formantFrames, centreSample / sampleRate);
-        return {
-            ...pitchAndIntensity,
-            formantsHz:
-                formants?.formantsHz ||
-                new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
-            formantBandwidthsHz:
-                formants?.formantBandwidthsHz ||
-                new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
-            formantIntensity: formants?.formantIntensity || 0,
-            drawFormants: false,
-        };
-    });
-
-    if (centreSamples.length > 0) {
-        const firstCentre = centreSamples[0];
-        const centreStep =
-            centreSamples.length > 1
-                ? centreSamples[1] - centreSamples[0]
-                : Math.max(
-                      1,
-                      Math.round((analysisOptions.formantWindowLengthSeconds / 4) * sampleRate)
-                  );
-        for (const frame of formantFrames) {
-            const nearestAnalysisIndex = Math.round(
-                (frame.timeSeconds * sampleRate - firstCentre) / centreStep
+    const formantFrames = includeFormants
+        ? analyzeFormantsAtTimes(
+              samples,
+              sampleRate,
+              centreSamples.map((centreSample) => centreSample / sampleRate),
+              analysisOptions
+          )
+        : [];
+    return centreSamples.map(
+        (centreSample, centreIndex): AcousticAnalysis => {
+            const pitchAndIntensity = analyzePitchAndIntensityFrame(
+                samples,
+                sampleRate,
+                analysisOptions,
+                centreSample
             );
-            if (
-                nearestAnalysisIndex >= 0 &&
-                nearestAnalysisIndex < analyses.length &&
-                Math.abs(centreSamples[nearestAnalysisIndex] - frame.timeSeconds * sampleRate) <=
-                    centreStep / 2 + 1
-            ) {
-                analyses[nearestAnalysisIndex] = {
-                    ...analyses[nearestAnalysisIndex],
-                    formantsHz: frame.formantsHz,
-                    formantBandwidthsHz: frame.formantBandwidthsHz,
-                    formantIntensity: frame.formantIntensity,
-                    drawFormants: true,
-                };
-            }
+            const formants = formantFrames[centreIndex];
+            return {
+                ...pitchAndIntensity,
+                formantsHz:
+                    formants?.formantsHz ||
+                    new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
+                formantBandwidthsHz:
+                    formants?.formantBandwidthsHz ||
+                    new Array(Math.ceil(analysisOptions.maximumFormants)).fill(null),
+                formantIntensity: formants?.formantIntensity || 0,
+                drawFormants: includeFormants && (formants?.formantIntensity || 0) > 0,
+            };
         }
-    }
-    return analyses;
+    );
 }
 
 workerScope.addEventListener('message', (event: { data: Message['request'] }) => {
@@ -101,6 +63,38 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
     } = event;
 
     switch (action) {
+        case ACTION_ANALYZE_ACOUSTICS: {
+            const {
+                samplesBuffer,
+                sampleRate,
+                centreSamples,
+                analysisOptions,
+                includeFormants,
+            } = payload as AnalyzeAcousticsMessage['request']['payload'];
+            try {
+                const samples = new Float32Array(samplesBuffer);
+                const analyses = analyzeAtCentres(
+                    samples,
+                    sampleRate,
+                    centreSamples,
+                    analysisOptions,
+                    includeFormants
+                );
+                const response: AnalyzeAcousticsMessage['response'] = {
+                    payload: {
+                        inputBuffer: samples.buffer,
+                        analyses,
+                    },
+                };
+                workerScope.postMessage(response, [samples.buffer as ArrayBuffer]);
+            } catch (error) {
+                const response: AnalyzeAcousticsMessage['response'] = {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                };
+                workerScope.postMessage(response);
+            }
+            break;
+        }
         case ACTION_COMPUTE_SPECTROGRAM: {
             const {
                 samplesBuffer,

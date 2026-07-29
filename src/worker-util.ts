@@ -1,8 +1,10 @@
 import { AcousticAnalysis, AnalysisOptions, TimedAcousticAnalysis } from './analysis';
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 import {
+    ACTION_ANALYZE_ACOUSTICS,
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
+    AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
     Message,
@@ -143,6 +145,31 @@ export async function offThreadAnalyzeEntireFile(
         windowCount: spectrogramWindowCount,
         options: spectrogramOptions,
         spectrogram: new Float32Array(spectrogramBuffer),
+        input: new Float32Array(inputBuffer),
+        analyses,
+    };
+}
+
+export async function offThreadAnalyzeAcoustics(
+    samples: Float32Array,
+    sampleRate: number,
+    centreSamples: number[],
+    analysisOptions: AnalysisOptions,
+    includeFormants: boolean
+): Promise<{ input: Float32Array; analyses: AcousticAnalysis[] }> {
+    const { inputBuffer, analyses } = await queueTask<AnalyzeAcousticsMessage>(
+        ACTION_ANALYZE_ACOUSTICS,
+        {
+            samplesBuffer: samples.buffer,
+            sampleRate,
+            centreSamples,
+            analysisOptions,
+            includeFormants,
+        },
+        [samples.buffer]
+    );
+
+    return {
         input: new Float32Array(inputBuffer),
         analyses,
     };

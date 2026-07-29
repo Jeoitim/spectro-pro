@@ -1,6 +1,7 @@
 import {
     analyzeAcousticFrame,
     analyzeFormantFrames,
+    analyzeFormantsAtTimes,
     analyzePitchAndIntensityFrame,
     AnalysisOptions,
     PitchAlgorithm,
@@ -196,8 +197,15 @@ function testFormants() {
         [576.501617674, 1496.834428503, 2570.068198232, 3549.254298302, 4569.31263075],
         [1497.002437715, 2497.292007516, 3536.117926418, 4505.039454271],
     ];
+    const selectedFrames = analyzeFormantsAtTimes(
+        signal,
+        FORMANT_SAMPLE_RATE,
+        praatReference.map((_, index) => 0.234375 + index * 0.00625),
+        DEFAULT_OPTIONS
+    );
     praatReference.forEach((expectedFormants, referenceIndex) => {
         const frame = frames[33 + referenceIndex];
+        const selectedFrame = selectedFrames[referenceIndex];
         assertNear(
             `Praat frame ${34 + referenceIndex} time`,
             frame.timeSeconds,
@@ -208,6 +216,12 @@ function testFormants() {
             assertNear(
                 `Praat frame ${34 + referenceIndex} F${formantIndex + 1}`,
                 frame.formantsHz[formantIndex],
+                frequency,
+                1e-4
+            );
+            assertNear(
+                `selected frame ${34 + referenceIndex} F${formantIndex + 1}`,
+                selectedFrame.formantsHz[formantIndex],
                 frequency,
                 1e-4
             );

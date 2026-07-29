@@ -696,6 +696,19 @@ export function analyzeFormantFrames(
     return frames;
 }
 
+export function analyzeFormantsAtTimes(
+    samples: Float32Array,
+    sampleRate: number,
+    centreTimesSeconds: number[],
+    partialOptions: Partial<AnalysisOptions> = {}
+) {
+    const options = { ...DEFAULT_OPTIONS, ...partialOptions };
+    const prepared = prepareFormantSignal(samples, sampleRate, options);
+    return centreTimesSeconds.map((centreTimeSeconds) =>
+        estimatePreparedFormants(prepared, centreTimeSeconds, options)
+    );
+}
+
 export function analyzePitchAndIntensityFrame(
     samples: Float32Array,
     sampleRate: number,
