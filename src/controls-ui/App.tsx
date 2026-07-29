@@ -1890,7 +1890,7 @@ export default function App({
                                 onClick={() => resetSettingsTab('spectrogram')}
                             >
                                 <RestoreIcon aria-hidden="true" />
-                                {tr('恢复本页默认参数')}
+                                <span>{tr('恢复本页默认参数')}</span>
                             </button>
                             <label className="setting">
                                 <span>
@@ -2057,7 +2057,7 @@ export default function App({
                                 onClick={() => resetSettingsTab('pitch')}
                             >
                                 <RestoreIcon aria-hidden="true" />
-                                {tr('恢复本页默认参数')}
+                                <span>{tr('恢复本页默认参数')}</span>
                             </button>
                             <div className="select-row one">
                                 <label>
@@ -2138,7 +2138,7 @@ export default function App({
                                 onClick={() => resetSettingsTab('formants')}
                             >
                                 <RestoreIcon aria-hidden="true" />
-                                {tr('恢复本页默认参数')}
+                                <span>{tr('恢复本页默认参数')}</span>
                             </button>
                             <div className="select-row">
                                 <label>
@@ -2264,7 +2264,7 @@ export default function App({
                                 onClick={() => resetSettingsTab('intensity')}
                             >
                                 <RestoreIcon aria-hidden="true" />
-                                {tr('恢复本页默认参数')}
+                                <span>{tr('恢复本页默认参数')}</span>
                             </button>
                             <label className="setting">
                                 <span>
@@ -2360,7 +2360,7 @@ export default function App({
                                 onClick={() => resetSettingsTab('performance')}
                             >
                                 <RestoreIcon aria-hidden="true" />
-                                {tr('恢复本页默认参数')}
+                                <span>{tr('恢复本页默认参数')}</span>
                             </button>
                             <div className="select-row one">
                                 <label>

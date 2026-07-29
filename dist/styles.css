@@ -1710,17 +1710,26 @@ html[lang='en'] .settings-panel {
 }
 
 .reset-tab-button {
-    display: inline-flex;
+    display: inline-grid;
+    grid-template-columns: 15px auto;
     align-items: center;
     justify-content: center;
     gap: 6px;
     min-height: 32px;
+    padding: 0 10px;
     line-height: 1;
 }
 
 .reset-tab-button > svg {
     display: block;
-    align-self: center;
+    width: 15px;
+    height: 15px;
+    transform: translateY(-0.5px);
+}
+
+.reset-tab-button > span {
+    display: block;
+    line-height: 16px;
 }
 
 .setting {
@@ -1760,7 +1769,8 @@ html[lang='en'] .settings-panel {
 .setting > small {
     margin-top: -5px;
     color: #68758a;
-    font-size: 9px;
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .effect-toggle {
@@ -1784,7 +1794,8 @@ html[lang='en'] .settings-panel {
 
 .effect-toggle small {
     color: #68758a;
-    font-size: 9px;
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .effect-toggle input {
@@ -1873,7 +1884,10 @@ html.glass-effects .settings-panel {
     height: 35px;
     padding: 0;
     border: 2px solid transparent;
+    overflow: hidden;
     border-radius: 9px;
+    background-clip: padding-box !important;
+    appearance: none;
     cursor: pointer;
 }
 
@@ -1886,7 +1900,7 @@ html.glass-effects .settings-panel {
     display: block;
     margin-top: 7px;
     color: #68758a;
-    font-size: 10px;
+    font-size: 11px;
 }
 
 .mode-explainer {
@@ -1901,7 +1915,7 @@ html.glass-effects .settings-panel {
     padding: 11px 12px;
     border-left: 2px solid rgba(37, 136, 255, 0.45);
     color: #6d7b90;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.65;
     background: rgba(37, 136, 255, 0.035);
 }
@@ -1914,7 +1928,7 @@ html.glass-effects .settings-panel {
 .mode-explainer p {
     margin: 7px 0 0;
     color: #79879c;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.65;
 }
 
