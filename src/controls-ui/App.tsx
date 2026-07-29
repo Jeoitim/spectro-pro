@@ -1,6 +1,7 @@
 import React, {
     ChangeEvent,
     MouseEvent as ReactMouseEvent,
+    PointerEvent as ReactPointerEvent,
     useCallback,
     useEffect,
     useRef,
@@ -113,6 +114,7 @@ export interface AppCallbacks {
     onDisplayChange: (parameters: Partial<RenderParameters>) => void;
     onPerformanceChange: (settings: PerformanceSettings) => void;
     onOverlayChange: (pitch: boolean, formants: boolean, intensity: boolean) => void;
+    onPlotVisibilityChange: (waveform: boolean, spectrogram: boolean) => void;
     onInspect: (xRatio: number, yRatio: number) => void;
     onSelectRange: (xStartRatio: number, xEndRatio: number) => void;
     onNavigate: (amount: number) => void;
@@ -217,6 +219,9 @@ interface SavedSettings {
     pitchVisible: boolean;
     formantsVisible: boolean;
     intensityVisible: boolean;
+    waveformVisible: boolean;
+    spectrogramVisible: boolean;
+    waveformShare: number;
     sensitivity: number;
     contrast: number;
     zoom: number;
@@ -292,6 +297,7 @@ export default function App({
     onDisplayChange,
     onPerformanceChange,
     onOverlayChange,
+    onPlotVisibilityChange,
     onInspect,
     onSelectRange,
     onNavigate,
@@ -326,6 +332,9 @@ export default function App({
     const [pitchVisible, setPitchVisible] = useState(saved.pitchVisible ?? true);
     const [formantsVisible, setFormantsVisible] = useState(saved.formantsVisible ?? true);
     const [intensityVisible, setIntensityVisible] = useState(saved.intensityVisible ?? true);
+    const [waveformVisible, setWaveformVisible] = useState(saved.waveformVisible ?? true);
+    const [spectrogramVisible, setSpectrogramVisible] = useState(saved.spectrogramVisible ?? true);
+    const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [metricsCollapsed, setMetricsCollapsed] = useState(false);
     const [selectedMetric, setSelectedMetric] = useState<MetricSelection>('pitch');
@@ -395,6 +404,7 @@ export default function App({
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const dragStartRef = useRef<number | null>(null);
+    const plotContainerRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
@@ -494,6 +504,9 @@ export default function App({
             pitchVisible,
             formantsVisible,
             intensityVisible,
+            waveformVisible,
+            spectrogramVisible,
+            waveformShare,
             sensitivity,
             contrast,
             zoom,
@@ -537,6 +550,9 @@ export default function App({
         pitchVisible,
         formantsVisible,
         intensityVisible,
+        waveformVisible,
+        spectrogramVisible,
+        waveformShare,
         sensitivity,
         contrast,
         zoom,
@@ -720,6 +736,10 @@ export default function App({
     }, [pitchVisible, formantsVisible, intensityVisible, onOverlayChange]);
 
     useEffect(() => {
+        onPlotVisibilityChange(waveformVisible, spectrogramVisible);
+    }, [waveformVisible, spectrogramVisible, onPlotVisibilityChange]);
+
+    useEffect(() => {
         const timeout = window.setTimeout(
             () =>
                 onSpectrogramAnalysisChange({
@@ -783,7 +803,11 @@ export default function App({
         (event: ReactMouseEvent<HTMLCanvasElement>) => {
             const point = pointerRatios(event);
             dragStartRef.current = point.x;
-            onInspect(point.x, point.y);
+            if (event.currentTarget.dataset.plot === 'spectrogram') {
+                onInspect(point.x, point.y);
+            } else {
+                onInspect(-1, -1);
+            }
             onSelectRange(-1, -1);
         },
         [onInspect, onSelectRange, pointerRatios]
@@ -792,12 +816,40 @@ export default function App({
     const updatePlotSelection = useCallback(
         (event: ReactMouseEvent<HTMLCanvasElement>) => {
             const point = pointerRatios(event);
-            onInspect(point.x, point.y);
+            if (event.currentTarget.dataset.plot === 'spectrogram') {
+                onInspect(point.x, point.y);
+            } else {
+                onInspect(-1, -1);
+            }
             if (dragStartRef.current !== null) {
                 onSelectRange(dragStartRef.current, point.x);
             }
         },
         [onInspect, onSelectRange, pointerRatios]
+    );
+
+    const beginPlotResize = useCallback(
+        (event: ReactPointerEvent<HTMLDivElement>) => {
+            const container = plotContainerRef.current;
+            if (container === null || !waveformVisible || !spectrogramVisible) {
+                return;
+            }
+            event.preventDefault();
+            const bounds = container.getBoundingClientRect();
+            const update = (clientY: number) => {
+                const ratio = (clientY - bounds.top) / Math.max(1, bounds.height);
+                setWaveformShare(Math.min(0.8, Math.max(0.15, ratio)));
+            };
+            const move = (moveEvent: PointerEvent) => update(moveEvent.clientY);
+            const finish = (upEvent: PointerEvent) => {
+                update(upEvent.clientY);
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', finish);
+            };
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', finish);
+        },
+        [spectrogramVisible, waveformVisible]
     );
 
     const finishPlotSelection = useCallback(
@@ -1026,6 +1078,10 @@ export default function App({
         },
         [maximumTimeOffset, onNavigate, timeOffset, zoom]
     );
+    const plotGridRows =
+        waveformVisible && spectrogramVisible
+            ? `${waveformShare}fr 8px ${1 - waveformShare}fr`
+            : 'minmax(0, 1fr)';
 
     return (
         <div className="app-shell">
@@ -1300,6 +1356,32 @@ export default function App({
                         </div>
 
                         <div className="toolbar-center">
+                            <div className="plot-toggles" aria-label={tr('图层显示')}>
+                                <button
+                                    className={waveformVisible ? 'on waveform' : ''}
+                                    onClick={() => {
+                                        if (!waveformVisible || spectrogramVisible) {
+                                            setWaveformVisible(!waveformVisible);
+                                        }
+                                    }}
+                                    aria-pressed={waveformVisible}
+                                    title={tr('显示或隐藏波形')}
+                                >
+                                    <i /> {tr('波形')}
+                                </button>
+                                <button
+                                    className={spectrogramVisible ? 'on spectrogram' : ''}
+                                    onClick={() => {
+                                        if (!spectrogramVisible || waveformVisible) {
+                                            setSpectrogramVisible(!spectrogramVisible);
+                                        }
+                                    }}
+                                    aria-pressed={spectrogramVisible}
+                                    title={tr('显示或隐藏语谱图')}
+                                >
+                                    <i /> {tr('语谱图')}
+                                </button>
+                            </div>
                             <div className="overlay-toggles">
                                 <button
                                     className={pitchVisible ? 'on pitch' : ''}
@@ -1426,233 +1508,262 @@ export default function App({
                     </div>
 
                     <div className="praat-view">
-                        <div className="axis axis-left">
-                            <span className="axis-title pitch-color">{tr('基频Hz')}</span>
-                            {cursor !== null && cursorPitchCoordinate !== null && (
-                                <span className="axis-cursor-value pitch" style={cursorAxisTop}>
-                                    {cursorPitchCoordinate.toFixed(1)}
-                                </span>
-                            )}
-                            <span
-                                className="spectral-pitch-mark pitch-color"
-                                style={{
-                                    top: spectralPitchTop(pitchCeiling),
-                                }}
-                            >
-                                {pitchCeiling}
-                            </span>
-                            <span
-                                className="spectral-pitch-mark pitch-color"
-                                style={{
-                                    top: spectralPitchTop((pitchFloor + pitchCeiling) / 2),
-                                }}
-                            >
-                                {Math.round((pitchFloor + pitchCeiling) / 2)}
-                            </span>
-                            <span
-                                className="spectral-pitch-mark pitch-color"
-                                style={{
-                                    top: spectralPitchTop(pitchFloor),
-                                }}
-                            >
-                                {pitchFloor}
-                            </span>
-                        </div>
-
-                        <div className="plot-stack">
-                            <div className="spectrogram-stage" id="spectrogramStage">
-                                <canvas id="spectrogramCanvas" />
-                                <canvas
-                                    id="analysisOverlay"
-                                    onMouseDown={startPlotSelection}
-                                    onMouseMove={updatePlotSelection}
-                                    onMouseUp={finishPlotSelection}
-                                    onMouseLeave={() => {
-                                        dragStartRef.current = null;
-                                        onInspect(-1, -1);
-                                    }}
-                                    onWheel={(event) => {
-                                        event.preventDefault();
-                                        onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
-                                    }}
-                                />
-                                <div className="plot-grid" aria-hidden="true">
-                                    <i />
-                                    <i />
-                                    <i />
-                                    <i />
-                                </div>
-                                {cursor && (
-                                    <div
-                                        className="cursor-tooltip"
-                                        style={{
-                                            left: `${Math.min(78, Math.max(2, cursor.x * 100))}%`,
-                                            top: `${Math.min(72, Math.max(2, cursor.y * 100))}%`,
-                                        }}
-                                    >
-                                        <strong>{cursor.timeSeconds.toFixed(3)} s</strong>
-                                        <span>{cursor.frequencyHz.toFixed(0)} Hz</span>
-                                        {cursor.pitchHz !== null && (
-                                            <span>F0 {cursor.pitchHz.toFixed(1)} Hz</span>
-                                        )}
-                                        {cursor.intensityDbSpl !== null && (
-                                            <span>{cursor.intensityDbSpl.toFixed(1)} dB SPL*</span>
-                                        )}
-                                        {selection && (
-                                            <span className="tooltip-selection">
-                                                {selection.durationSeconds.toFixed(1)} s (
-                                                {selection.startSeconds.toFixed(1)}–
-                                                {selection.endSeconds.toFixed(1)} s)
+                        <div className="axis-stack">
+                            <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
+                                {waveformVisible && (
+                                    <div className="waveform-axis waveform-axis-left">
+                                        <span>{tr('波形')}</span>
+                                    </div>
+                                )}
+                                {waveformVisible && spectrogramVisible && (
+                                    <div className="axis-divider-space" />
+                                )}
+                                {spectrogramVisible && (
+                                    <div className="axis axis-left">
+                                        <span className="axis-title pitch-color">
+                                            {tr('基频Hz')}
+                                        </span>
+                                        {cursor !== null && cursorPitchCoordinate !== null && (
+                                            <span
+                                                className="axis-cursor-value pitch"
+                                                style={cursorAxisTop}
+                                            >
+                                                {cursorPitchCoordinate.toFixed(1)}
                                             </span>
                                         )}
+                                        <span
+                                            className="spectral-pitch-mark pitch-color"
+                                            style={{ top: spectralPitchTop(pitchCeiling) }}
+                                        >
+                                            {pitchCeiling}
+                                        </span>
+                                        <span
+                                            className="spectral-pitch-mark pitch-color"
+                                            style={{
+                                                top: spectralPitchTop(
+                                                    (pitchFloor + pitchCeiling) / 2
+                                                ),
+                                            }}
+                                        >
+                                            {Math.round((pitchFloor + pitchCeiling) / 2)}
+                                        </span>
+                                        <span
+                                            className="spectral-pitch-mark pitch-color"
+                                            style={{ top: spectralPitchTop(pitchFloor) }}
+                                        >
+                                            {pitchFloor}
+                                        </span>
                                     </div>
                                 )}
                             </div>
+                            <div className="axis-navigation-space" />
+                        </div>
 
-                            {transport.activeId !== null ? (
-                                <>
-                                    <div className="file-transport">
-                                        <input
-                                            className="history-slider"
-                                            aria-label={tr('播放位置')}
-                                            type="range"
-                                            min={transport.viewStartSeconds}
-                                            max={Math.max(
-                                                transport.viewStartSeconds + 0.001,
-                                                transport.viewEndSeconds
-                                            )}
-                                            step={0.001}
-                                            value={Math.min(
-                                                Math.max(
-                                                    transport.currentSeconds,
-                                                    transport.viewStartSeconds
-                                                ),
-                                                Math.max(
-                                                    transport.viewStartSeconds + 0.001,
-                                                    transport.viewEndSeconds
-                                                )
-                                            )}
-                                            onChange={(event) =>
-                                                onSeekMedia(Number(event.target.value))
-                                            }
-                                        />
-                                        <span className="transport-current">
-                                            {formatTime(transport.currentSeconds)}
-                                        </span>
-                                        <span className="transport-duration">
-                                            {formatTime(transport.durationSeconds)}
-                                        </span>
+                        <div className="plot-stack">
+                            <div
+                                ref={plotContainerRef}
+                                className="acoustic-plots"
+                                style={{ gridTemplateRows: plotGridRows }}
+                            >
+                                <div
+                                    className="waveform-stage"
+                                    id="waveformStage"
+                                    style={{ display: waveformVisible ? undefined : 'none' }}
+                                >
+                                    <canvas id="waveformCanvas" />
+                                    <canvas
+                                        id="waveformInteraction"
+                                        data-plot="waveform"
+                                        onMouseDown={startPlotSelection}
+                                        onMouseMove={updatePlotSelection}
+                                        onMouseUp={finishPlotSelection}
+                                        onMouseLeave={() => {
+                                            dragStartRef.current = null;
+                                            onInspect(-1, -1);
+                                        }}
+                                        onWheel={(event) => {
+                                            event.preventDefault();
+                                            onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
+                                        }}
+                                    />
+                                </div>
+                                {waveformVisible && spectrogramVisible && (
+                                    <div
+                                        className="plot-divider"
+                                        role="separator"
+                                        aria-label={tr('调整波形和语谱图高度')}
+                                        aria-orientation="horizontal"
+                                        onPointerDown={beginPlotResize}
+                                    >
+                                        <span />
                                     </div>
-                                    {zoom > 1 && (
+                                )}
+                                <div
+                                    className="spectrogram-stage"
+                                    id="spectrogramStage"
+                                    style={{ display: spectrogramVisible ? undefined : 'none' }}
+                                >
+                                    <canvas id="spectrogramCanvas" />
+                                    <canvas
+                                        id="analysisOverlay"
+                                        data-plot="spectrogram"
+                                        onMouseDown={startPlotSelection}
+                                        onMouseMove={updatePlotSelection}
+                                        onMouseUp={finishPlotSelection}
+                                        onMouseLeave={() => {
+                                            dragStartRef.current = null;
+                                            onInspect(-1, -1);
+                                        }}
+                                        onWheel={(event) => {
+                                            event.preventDefault();
+                                            onNavigate(event.deltaY > 0 ? 0.05 : -0.05);
+                                        }}
+                                    />
+                                    <div className="plot-grid" aria-hidden="true">
+                                        <i />
+                                        <i />
+                                        <i />
+                                        <i />
+                                    </div>
+                                    {cursor && (
                                         <div
-                                            className="zoom-scrollbar"
-                                            role="scrollbar"
-                                            aria-label={tr('放大后的语谱滚动位置')}
-                                            aria-orientation="horizontal"
-                                            aria-valuemin={0}
-                                            aria-valuemax={maximumTimeOffset}
-                                            aria-valuenow={timeOffset}
-                                            tabIndex={0}
-                                            title={tr('拖动查看放大后未显示的音频')}
-                                            onKeyDown={(event) => {
-                                                const step = maximumTimeOffset / 20;
-                                                if (event.key === 'ArrowLeft') {
-                                                    event.preventDefault();
-                                                    onNavigate(
-                                                        Math.min(
-                                                            maximumTimeOffset,
-                                                            timeOffset + step
-                                                        ) - timeOffset
-                                                    );
-                                                } else if (event.key === 'ArrowRight') {
-                                                    event.preventDefault();
-                                                    onNavigate(
-                                                        Math.max(0, timeOffset - step) - timeOffset
-                                                    );
-                                                } else if (event.key === 'Home') {
-                                                    event.preventDefault();
-                                                    onNavigate(maximumTimeOffset - timeOffset);
-                                                } else if (event.key === 'End') {
-                                                    event.preventDefault();
-                                                    onNavigate(-timeOffset);
-                                                }
+                                            className="cursor-tooltip"
+                                            style={{
+                                                left: `${Math.min(
+                                                    78,
+                                                    Math.max(2, cursor.x * 100)
+                                                )}%`,
+                                                top: `${Math.min(
+                                                    72,
+                                                    Math.max(2, cursor.y * 100)
+                                                )}%`,
                                             }}
-                                            onPointerDown={(event) => {
-                                                event.currentTarget.setPointerCapture(
-                                                    event.pointerId
+                                        >
+                                            <strong>{cursor.timeSeconds.toFixed(3)} s</strong>
+                                            <span>{cursor.frequencyHz.toFixed(0)} Hz</span>
+                                            {cursor.pitchHz !== null && (
+                                                <span>F0 {cursor.pitchHz.toFixed(1)} Hz</span>
+                                            )}
+                                            {cursor.intensityDbSpl !== null && (
+                                                <span>
+                                                    {cursor.intensityDbSpl.toFixed(1)} dB SPL*
+                                                </span>
+                                            )}
+                                            {selection && (
+                                                <span className="tooltip-selection">
+                                                    {selection.durationSeconds.toFixed(1)} s (
+                                                    {selection.startSeconds.toFixed(1)}–
+                                                    {selection.endSeconds.toFixed(1)} s)
+                                                </span>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="plot-navigation">
+                                {zoom > 1 && (
+                                    <div
+                                        className="zoom-scrollbar"
+                                        role="scrollbar"
+                                        aria-label={tr('放大后的图形滚动位置')}
+                                        aria-orientation="horizontal"
+                                        aria-valuemin={0}
+                                        aria-valuemax={maximumTimeOffset}
+                                        aria-valuenow={timeOffset}
+                                        tabIndex={0}
+                                        title={tr('拖动查看放大后未显示的音频')}
+                                        onKeyDown={(event) => {
+                                            const step = maximumTimeOffset / 20;
+                                            if (event.key === 'ArrowLeft') {
+                                                event.preventDefault();
+                                                onNavigate(
+                                                    Math.min(maximumTimeOffset, timeOffset + step) -
+                                                        timeOffset
                                                 );
+                                            } else if (event.key === 'ArrowRight') {
+                                                event.preventDefault();
+                                                onNavigate(
+                                                    Math.max(0, timeOffset - step) - timeOffset
+                                                );
+                                            } else if (event.key === 'Home') {
+                                                event.preventDefault();
+                                                onNavigate(maximumTimeOffset - timeOffset);
+                                            } else if (event.key === 'End') {
+                                                event.preventDefault();
+                                                onNavigate(-timeOffset);
+                                            }
+                                        }}
+                                        onPointerDown={(event) => {
+                                            event.currentTarget.setPointerCapture(event.pointerId);
+                                            navigateScrollbar(event.clientX, event.currentTarget);
+                                        }}
+                                        onPointerMove={(event) => {
+                                            if (
+                                                event.currentTarget.hasPointerCapture(
+                                                    event.pointerId
+                                                )
+                                            ) {
                                                 navigateScrollbar(
                                                     event.clientX,
                                                     event.currentTarget
                                                 );
+                                            }
+                                        }}
+                                    >
+                                        <span
+                                            className="zoom-scrollbar-thumb"
+                                            style={{
+                                                width: `${scrollbarThumbWidth}%`,
+                                                left: `${scrollbarThumbLeft}%`,
                                             }}
-                                            onPointerMove={(event) => {
-                                                if (
-                                                    event.currentTarget.hasPointerCapture(
-                                                        event.pointerId
-                                                    )
-                                                ) {
-                                                    navigateScrollbar(
-                                                        event.clientX,
-                                                        event.currentTarget
-                                                    );
-                                                }
-                                            }}
-                                        >
-                                            <span
-                                                className="zoom-scrollbar-thumb"
-                                                style={{
-                                                    width: `${scrollbarThumbWidth}%`,
-                                                    left: `${scrollbarThumbLeft}%`,
-                                                }}
-                                            />
-                                        </div>
-                                    )}
-                                </>
-                            ) : (
-                                <>
-                                    <div className="timeline">
-                                        <span>−{(8 / zoom).toFixed(1)} s</span>
-                                        <span>{tr('时间')}</span>
-                                        <span>{tr('现在')}</span>
+                                        />
                                     </div>
-                                    <input
-                                        className="history-slider"
-                                        aria-label={tr('回看历史')}
-                                        type="range"
-                                        min={0}
-                                        max={0.9}
-                                        step={0.005}
-                                        value={timeOffset}
-                                        onChange={(event) =>
-                                            onNavigate(Number(event.target.value) - timeOffset)
-                                        }
-                                    />
-                                </>
-                            )}
+                                )}
+                            </div>
                         </div>
 
-                        <div className="axis axis-right">
-                            <span className="axis-title intensity-axis-title intensity-color">
-                                {tr('音强')}
-                            </span>
-                            <span className="axis-title frequency-axis-title">{tr('频率')}</span>
-                            {cursor && (
-                                <span className="axis-cursor-value frequency" style={cursorAxisTop}>
-                                    {cursor.frequencyHz.toFixed(1)} Hz
-                                </span>
-                            )}
-                            <span className="top">{maxFrequency} Hz</span>
-                            <span className="spl-top intensity-color">
-                                {intensityCeiling} dB SPL*
-                            </span>
-                            <span className="spl-mid intensity-color">
-                                {Math.round((intensityFloor + intensityCeiling) / 2)} dB
-                            </span>
-                            <span className="spl-bottom intensity-color">
-                                {intensityFloor} dB SPL*
-                            </span>
-                            <span className="bottom">0 Hz</span>
+                        <div className="axis-stack">
+                            <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
+                                {waveformVisible && (
+                                    <div className="waveform-axis waveform-axis-right">
+                                        <span>{tr('归一化振幅')}</span>
+                                    </div>
+                                )}
+                                {waveformVisible && spectrogramVisible && (
+                                    <div className="axis-divider-space" />
+                                )}
+                                {spectrogramVisible && (
+                                    <div className="axis axis-right">
+                                        <span className="axis-title intensity-axis-title intensity-color">
+                                            {tr('音强')}
+                                        </span>
+                                        <span className="axis-title frequency-axis-title">
+                                            {tr('频率')}
+                                        </span>
+                                        {cursor && (
+                                            <span
+                                                className="axis-cursor-value frequency"
+                                                style={cursorAxisTop}
+                                            >
+                                                {cursor.frequencyHz.toFixed(1)} Hz
+                                            </span>
+                                        )}
+                                        <span className="top">{maxFrequency} Hz</span>
+                                        <span className="spl-top intensity-color">
+                                            {intensityCeiling} dB SPL*
+                                        </span>
+                                        <span className="spl-mid intensity-color">
+                                            {Math.round((intensityFloor + intensityCeiling) / 2)} dB
+                                        </span>
+                                        <span className="spl-bottom intensity-color">
+                                            {intensityFloor} dB SPL*
+                                        </span>
+                                        <span className="bottom">0 Hz</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="axis-navigation-space" />
                         </div>
                     </div>
                 </section>

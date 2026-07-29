@@ -30,6 +30,7 @@ import {
     offThreadAnalyzeEntireFile,
     offThreadGenerateSpectrogram,
 } from './worker-util';
+import { WaveformRenderer } from './waveform-render';
 
 const AUDIO_CHUNK_SIZE = 1024;
 const SPECTROGRAM_HEIGHT = 512;
@@ -138,6 +139,10 @@ class SpectroEngine {
 
     private readonly stage: HTMLElement;
 
+    private readonly waveformStage: HTMLElement;
+
+    private readonly waveformRenderer: WaveformRenderer;
+
     private renderer: SpectrogramGPURenderer;
 
     private spectrogramBuffer: Circular2DBuffer<Float32Array>;
@@ -208,6 +213,10 @@ class SpectroEngine {
 
     private overlayDirty = true;
 
+    private waveformVisible = true;
+
+    private spectrogramVisible = true;
+
     private processing = false;
 
     private pendingRequest: ProcessRequest | null = null;
@@ -264,10 +273,14 @@ class SpectroEngine {
         const canvas = document.querySelector('#spectrogramCanvas');
         const overlay = document.querySelector('#analysisOverlay');
         const stage = document.querySelector('#spectrogramStage');
+        const waveformCanvas = document.querySelector('#waveformCanvas');
+        const waveformStage = document.querySelector('#waveformStage');
         if (
             !(canvas instanceof HTMLCanvasElement) ||
             !(overlay instanceof HTMLCanvasElement) ||
-            !(stage instanceof HTMLElement)
+            !(stage instanceof HTMLElement) ||
+            !(waveformCanvas instanceof HTMLCanvasElement) ||
+            !(waveformStage instanceof HTMLElement)
         ) {
             throw new Error('Unable to initialise the Spectro Pro display');
         }
@@ -275,6 +288,8 @@ class SpectroEngine {
         this.canvas = canvas;
         this.overlay = overlay;
         this.stage = stage;
+        this.waveformStage = waveformStage;
+        this.waveformRenderer = new WaveformRenderer(waveformCanvas);
 
         const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
         this.spectrogramBuffer = new Circular2DBuffer(
@@ -297,6 +312,9 @@ class SpectroEngine {
         this.resize();
         const resize = debounce(() => this.resize(), 150);
         window.addEventListener('resize', resize);
+        const stageResizeObserver = new ResizeObserver(resize);
+        stageResizeObserver.observe(this.stage);
+        stageResizeObserver.observe(this.waveformStage);
         requestAnimationFrame(() => this.renderLoop());
         this.notifyMediaLibrary();
         this.notifyTransport();
@@ -447,6 +465,12 @@ class SpectroEngine {
         this.overlayDirty = true;
     }
 
+    setPlotVisibility(waveform: boolean, spectrogram: boolean) {
+        this.waveformVisible = waveform;
+        this.spectrogramVisible = spectrogram;
+        requestAnimationFrame(() => this.resize());
+    }
+
     async startMicrophone() {
         this.saveActiveView();
         this.stop();
@@ -476,6 +500,7 @@ class SpectroEngine {
             this.recordingChunks = [];
             this.recordingSampleRate = audioCtx.sampleRate;
             this.isRecordingMicrophone = true;
+            this.waveformRenderer.startLive(audioCtx.sampleRate, HISTORY_SECONDS);
 
             const rollingCapacity = Math.ceil(audioCtx.sampleRate * 0.18);
             const rolling = new Float32Array(rollingCapacity);
@@ -502,6 +527,7 @@ class SpectroEngine {
                 receivedSamples += chunk.length;
                 this.recordingChunks.push(chunk);
                 this.sessionElapsedSeconds = receivedSamples / audioCtx.sampleRate;
+                this.waveformRenderer.appendLive(chunk, this.sessionElapsedSeconds);
 
                 if (rollingLength >= Math.round(audioCtx.sampleRate * 0.085)) {
                     this.queueProcessing({
@@ -657,16 +683,10 @@ class SpectroEngine {
         if (item === null || item.state !== 'ready') {
             return;
         }
-        const visible = this.visibleHistoryRange();
-        const index = clamp(
-            Math.floor(
-                visible.start + clamp(xRatio, 0, 1) * Math.max(1, visible.end - visible.start)
-            ),
-            0,
-            Math.max(0, this.analysisHistory.length - 1)
-        );
+        const visible = this.visibleTimeRange();
         const targetSeconds =
-            this.analysisHistory[index]?.timeSeconds ?? clamp(xRatio, 0, 1) * item.durationSeconds;
+            visible.startSeconds +
+            clamp(xRatio, 0, 1) * (visible.endSeconds - visible.startSeconds);
         const minimum = this.playbackRange?.startSeconds ?? 0;
         const maximum = this.playbackRange?.endSeconds ?? item.durationSeconds;
         const continuePlayback = this.playbackIsPlaying;
@@ -761,12 +781,10 @@ class SpectroEngine {
             return;
         }
         this.inspector = { x, y };
-        const visible = this.visibleHistoryRange();
-        const index = clamp(
-            Math.floor(visible.start + x * (visible.end - visible.start)),
-            0,
-            Math.max(0, this.analysisHistory.length - 1)
-        );
+        const visibleTime = this.visibleTimeRange();
+        const timeSeconds =
+            visibleTime.startSeconds + x * (visibleTime.endSeconds - visibleTime.startSeconds);
+        const index = this.analysisIndexAtTime(timeSeconds);
         const point = this.analysisHistory[index];
         if (!point) {
             this.ui.updateCursor(null);
@@ -802,26 +820,29 @@ class SpectroEngine {
             this.overlayDirty = true;
             return;
         }
-        const visible = this.visibleHistoryRange();
+        const visible = this.visibleTimeRange();
         const ratioStart = clamp(Math.min(xStart, xEnd), 0, 1);
         const ratioEnd = clamp(Math.max(xStart, xEnd), 0, 1);
-        const indexForRatio = (ratio: number) =>
-            clamp(
-                Math.floor(visible.start + ratio * Math.max(1, visible.end - visible.start)),
-                0,
-                Math.max(0, this.analysisHistory.length - 1)
-            );
-        const first = this.analysisHistory[indexForRatio(ratioStart)];
-        const last = this.analysisHistory[indexForRatio(ratioEnd)];
-        if (first === undefined || last === undefined) {
-            return;
-        }
+        const visibleDuration = visible.endSeconds - visible.startSeconds;
+        const activeMedia = this.activeMedia();
+        const minimumTime = 0;
+        const maximumTime = activeMedia?.durationSeconds ?? this.sessionElapsedSeconds;
+        const startSeconds = clamp(
+            visible.startSeconds + ratioStart * visibleDuration,
+            minimumTime,
+            maximumTime
+        );
+        const endSeconds = clamp(
+            visible.startSeconds + ratioEnd * visibleDuration,
+            minimumTime,
+            maximumTime
+        );
         this.selection = {
             xStart: ratioStart,
             xEnd: ratioEnd,
-            startSeconds: Math.min(first.timeSeconds, last.timeSeconds),
-            endSeconds: Math.max(first.timeSeconds, last.timeSeconds),
-            durationSeconds: Math.abs(last.timeSeconds - first.timeSeconds),
+            startSeconds,
+            endSeconds,
+            durationSeconds: Math.max(0, endSeconds - startSeconds),
         };
         this.playbackRange = {
             startSeconds: this.selection.startSeconds,
@@ -836,21 +857,29 @@ class SpectroEngine {
         if (item === null || this.selection === null || this.analysisHistory.length < 2) {
             return;
         }
-        const total = this.analysisHistory.length;
-        const startIndex = clamp(
-            Math.floor((this.selection.startSeconds / item.durationSeconds) * total),
-            0,
-            total - 1
+        const cache = item.modes[this.mode];
+        if (cache === undefined) {
+            return;
+        }
+        const hopSeconds = cache.windowStepSize / item.sampleRate;
+        const fullStartSeconds = this.analysisHistory[0].timeSeconds - hopSeconds / 2;
+        const fullEndSeconds =
+            this.analysisHistory[this.analysisHistory.length - 1].timeSeconds + hopSeconds / 2;
+        const fullDuration = Math.max(hopSeconds, fullEndSeconds - fullStartSeconds);
+        const selectionStart = clamp(
+            this.selection.startSeconds,
+            fullStartSeconds,
+            fullEndSeconds - hopSeconds
         );
-        const endIndex = clamp(
-            Math.ceil((this.selection.endSeconds / item.durationSeconds) * total),
-            startIndex + 1,
-            total
+        const selectionEnd = clamp(
+            this.selection.endSeconds,
+            selectionStart + hopSeconds,
+            fullEndSeconds
         );
-        const selectedColumns = Math.max(2, endIndex - startIndex);
-        const zoom = clamp(total / selectedColumns, 1, 64);
+        const selectedDuration = Math.max(hopSeconds * 2, selectionEnd - selectionStart);
+        const zoom = clamp(fullDuration / selectedDuration, 1, 64);
         const maximumOffset = Math.max(0, 1 - 1 / zoom);
-        const offset = clamp((total - endIndex) / total, 0, maximumOffset);
+        const offset = clamp((fullEndSeconds - selectionEnd) / fullDuration, 0, maximumOffset);
         const currentZoom = Math.max(1, this.renderParameters.zoom || 1);
         if (Math.abs(currentZoom - zoom) < 1e-9 && Math.abs(this.timeOffset - offset) < 1e-9) {
             return;
@@ -916,8 +945,20 @@ class SpectroEngine {
     exportImage() {
         this.renderer.render(true);
         this.drawOverlay();
-        const width = this.canvas.width;
-        const height = this.canvas.height;
+        const waveformCanvas = document.querySelector('#waveformCanvas');
+        const waveformHeight =
+            this.waveformVisible && waveformCanvas instanceof HTMLCanvasElement
+                ? waveformCanvas.height
+                : 0;
+        const spectrogramHeight = this.spectrogramVisible ? this.canvas.height : 0;
+        const dividerHeight = waveformHeight > 0 && spectrogramHeight > 0 ? 2 : 0;
+        const width = Math.max(
+            this.spectrogramVisible ? this.canvas.width : 0,
+            this.waveformVisible && waveformCanvas instanceof HTMLCanvasElement
+                ? waveformCanvas.width
+                : 0
+        );
+        const height = waveformHeight + dividerHeight + spectrogramHeight;
         const exportCanvas = document.createElement('canvas');
         exportCanvas.width = width;
         exportCanvas.height = height;
@@ -925,8 +966,20 @@ class SpectroEngine {
         if (!ctx) {
             return;
         }
-        ctx.drawImage(this.canvas, 0, 0);
-        ctx.drawImage(this.overlay, 0, 0);
+        let y = 0;
+        if (waveformHeight > 0 && waveformCanvas instanceof HTMLCanvasElement) {
+            ctx.drawImage(waveformCanvas, 0, y, width, waveformHeight);
+            y += waveformHeight;
+        }
+        if (dividerHeight > 0) {
+            ctx.fillStyle = '#526177';
+            ctx.fillRect(0, y, width, dividerHeight);
+            y += dividerHeight;
+        }
+        if (spectrogramHeight > 0) {
+            ctx.drawImage(this.canvas, 0, y, width, spectrogramHeight);
+            ctx.drawImage(this.overlay, 0, y, width, spectrogramHeight);
+        }
         ctx.fillStyle = 'rgba(4, 7, 18, 0.72)';
         ctx.fillRect(18, 18, 280, 90);
         ctx.fillStyle = '#ffffff';
@@ -1116,6 +1169,7 @@ class SpectroEngine {
         const timeOffset = clamp(savedView.timeOffset, 0, maximumOffset);
         this.sampleRate = item.sampleRate;
         this.analysisHistory = cache.analyses;
+        this.waveformRenderer.setOfflineSamples(item.samples, item.sampleRate);
         this.spectrogramBuffer = new Circular2DBuffer(
             Float32Array,
             Math.max(2, cache.windowCount),
@@ -1314,12 +1368,10 @@ class SpectroEngine {
 
     private notifyTransport() {
         const item = this.activeMedia();
-        const visible = this.visibleHistoryRange();
-        const analysisLength = Math.max(1, this.analysisHistory.length);
+        const visible = this.visibleTimeRange();
         const viewStartSeconds =
-            item === null ? 0 : (item.durationSeconds * visible.start) / analysisLength;
-        const viewEndSeconds =
-            item === null ? 0 : (item.durationSeconds * visible.end) / analysisLength;
+            item === null ? Math.max(0, visible.startSeconds) : visible.startSeconds;
+        const viewEndSeconds = item === null ? Math.max(0, visible.endSeconds) : visible.endSeconds;
         const snapshot: TransportSnapshot = {
             activeId: item?.id || null,
             currentSeconds: item === null ? 0 : this.playbackOffsetSeconds,
@@ -1570,6 +1622,9 @@ class SpectroEngine {
         this.playbackRange = null;
         this.ui.updateSelection(null);
         this.spectrogramBuffer.clear();
+        if (!this.isRecordingMicrophone) {
+            this.waveformRenderer.clear();
+        }
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.timeOffset = 0;
         this.renderer.updateParameters({ timeOffset: 0 });
@@ -1588,12 +1643,18 @@ class SpectroEngine {
     private resize() {
         const width = Math.max(1, this.stage.clientWidth);
         const height = Math.max(1, this.stage.clientHeight);
+        const waveformWidth = Math.max(1, this.waveformStage.clientWidth);
+        const waveformHeight = Math.max(1, this.waveformStage.clientHeight);
         const pixelRatio = this.renderPixelRatio;
         this.renderer.resizeCanvas(Math.round(width * pixelRatio), Math.round(height * pixelRatio));
         this.overlay.width = Math.round(width * pixelRatio);
         this.overlay.height = Math.round(height * pixelRatio);
         this.overlay.style.width = `${width}px`;
         this.overlay.style.height = `${height}px`;
+        this.waveformRenderer.resize(
+            Math.round(waveformWidth * pixelRatio),
+            Math.round(waveformHeight * pixelRatio)
+        );
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.overlayDirty = true;
     }
@@ -1606,10 +1667,22 @@ class SpectroEngine {
                 frameInterval === 0
                     ? timestamp
                     : timestamp - ((timestamp - this.lastRenderTime) % frameInterval);
-            this.renderer.render();
-            if (this.overlayDirty) {
+            if (this.spectrogramVisible) {
+                this.renderer.render();
+            }
+            if (this.spectrogramVisible && this.overlayDirty) {
                 this.drawOverlay();
                 this.overlayDirty = false;
+            }
+            if (this.waveformVisible) {
+                const visible = this.visibleTimeRange();
+                this.waveformRenderer.render({
+                    viewStartSeconds: visible.startSeconds,
+                    viewEndSeconds: visible.endSeconds,
+                    selection: this.selection,
+                    playheadSeconds:
+                        this.activeMedia() === null ? null : this.playbackOffsetSeconds,
+                });
             }
         }
         requestAnimationFrame((nextTimestamp) => this.renderLoop(nextTimestamp));
@@ -1627,6 +1700,50 @@ class SpectroEngine {
         };
     }
 
+    private visibleTimeRange() {
+        const visible = this.visibleHistoryRange();
+        const item = this.activeMedia();
+        const cache = item?.modes[this.mode];
+        const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
+        const hopSeconds =
+            cache === undefined || item === null
+                ? config.hopSize / this.sampleRate
+                : cache.windowStepSize / item.sampleRate;
+        const lastVisiblePoint = this.analysisHistory[Math.max(0, visible.end - 1)];
+        const endSeconds =
+            lastVisiblePoint === undefined
+                ? this.sessionElapsedSeconds
+                : lastVisiblePoint.timeSeconds + hopSeconds / 2;
+        return {
+            startSeconds: endSeconds - visible.span * hopSeconds,
+            endSeconds,
+        };
+    }
+
+    private analysisIndexAtTime(timeSeconds: number) {
+        if (this.analysisHistory.length === 0) {
+            return 0;
+        }
+        let low = 0;
+        let high = this.analysisHistory.length - 1;
+        while (low < high) {
+            const middle = Math.floor((low + high) / 2);
+            if (this.analysisHistory[middle].timeSeconds < timeSeconds) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if (
+            low > 0 &&
+            Math.abs(this.analysisHistory[low - 1].timeSeconds - timeSeconds) <
+                Math.abs(this.analysisHistory[low].timeSeconds - timeSeconds)
+        ) {
+            return low - 1;
+        }
+        return low;
+    }
+
     private drawOverlay() {
         const ctx = this.overlay.getContext('2d');
         if (!ctx) {
@@ -1640,8 +1757,12 @@ class SpectroEngine {
             return;
         }
 
-        const xForIndex = (index: number) =>
-            width - ((visible.end - index - 0.5) / visible.span) * width;
+        const visibleTime = this.visibleTimeRange();
+        const xForTime = (seconds: number) =>
+            ((seconds - visibleTime.startSeconds) /
+                Math.max(0.001, visibleTime.endSeconds - visibleTime.startSeconds)) *
+            width;
+        const xForIndex = (index: number) => xForTime(this.analysisHistory[index].timeSeconds);
         const frequencyY = (frequency: number) => {
             const min = this.renderParameters.minFrequencyHz || 0;
             const max = this.renderParameters.maxFrequencyHz || 5500;
@@ -1736,26 +1857,10 @@ class SpectroEngine {
         }
 
         const activeMedia = this.activeMedia();
-        const analysisLength = Math.max(1, this.analysisHistory.length);
-        const viewStartSeconds =
-            activeMedia === null
-                ? 0
-                : (activeMedia.durationSeconds * visible.start) / analysisLength;
-        const viewEndSeconds =
-            activeMedia === null ? 0 : (activeMedia.durationSeconds * visible.end) / analysisLength;
-        const xForTime = (seconds: number) =>
-            ((seconds - viewStartSeconds) / Math.max(0.001, viewEndSeconds - viewStartSeconds)) *
-            width;
 
         if (this.selection !== null) {
-            const rawSelectionLeft =
-                activeMedia === null
-                    ? this.selection.xStart * width
-                    : xForTime(this.selection.startSeconds);
-            const rawSelectionRight =
-                activeMedia === null
-                    ? this.selection.xEnd * width
-                    : xForTime(this.selection.endSeconds);
+            const rawSelectionLeft = xForTime(this.selection.startSeconds);
+            const rawSelectionRight = xForTime(this.selection.endSeconds);
             const selectionLeft = clamp(rawSelectionLeft, 0, width);
             const selectionRight = clamp(rawSelectionRight, 0, width);
             if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
@@ -1928,6 +2033,8 @@ const ui = initialiseControlsUi(appContainer, {
     onPerformanceChange: (settings) => engine?.updatePerformance(settings),
     onOverlayChange: (pitch, formants, intensity) =>
         engine?.setOverlays(pitch, formants, intensity),
+    onPlotVisibilityChange: (waveform, spectrogram) =>
+        engine?.setPlotVisibility(waveform, spectrogram),
     onInspect: (x, y) => engine?.inspect(x, y),
     onSelectRange: (xStart, xEnd) => engine?.selectRange(xStart, xEnd),
     onNavigate: (amount) => engine?.navigate(amount),

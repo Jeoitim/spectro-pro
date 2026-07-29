@@ -729,12 +729,14 @@ button.media-row {
     font-weight: 600;
 }
 
+.toolbar-center .plot-toggles,
 .overlay-toggles {
     display: flex;
     align-items: center;
     gap: 7px;
 }
 
+.toolbar-center .plot-toggles button,
 .overlay-toggles button {
     min-height: 32px;
     padding: 0 10px;
@@ -748,16 +750,19 @@ button.media-row {
     transition: 150ms ease;
 }
 
+.toolbar-center .plot-toggles button:hover,
 .overlay-toggles button:hover {
     border-color: var(--line-strong);
     color: #aab7ca;
     background: rgba(255, 255, 255, 0.055);
 }
 
+.toolbar-center .plot-toggles button.on,
 .overlay-toggles button.on {
     color: #d5ddea;
 }
 
+.toolbar-center .plot-toggles i,
 .overlay-toggles i {
     display: inline-block;
     width: 6px;
@@ -765,6 +770,18 @@ button.media-row {
     margin-right: 4px;
     border-radius: 50%;
     background: currentColor;
+}
+
+.plot-toggles .on.waveform {
+    border-color: rgba(23, 133, 186, 0.52);
+    color: #8ed8f8;
+    background: rgba(23, 133, 186, 0.12);
+}
+
+.plot-toggles .on.spectrogram {
+    border-color: rgba(170, 186, 214, 0.42);
+    color: #d5ddea;
+    background: rgba(170, 186, 214, 0.1);
 }
 
 .overlay-toggles .on.pitch i {
@@ -928,26 +945,127 @@ button.media-row {
 
 .plot-stack {
     display: grid;
-    grid-template-rows: minmax(500px, calc(100vh - 208px)) 32px 18px;
+    grid-template-rows: minmax(500px, calc(100vh - 176px)) 18px;
     min-width: 0;
     padding-top: 15px;
 }
 
+.axis-stack {
+    display: grid;
+    grid-template-rows: minmax(500px, calc(100vh - 176px)) 18px;
+    min-width: 0;
+    padding-top: 15px;
+}
+
+.axis-plots,
+.acoustic-plots {
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+}
+
+.axis-navigation-space,
+.plot-navigation {
+    min-height: 18px;
+}
+
+.plot-navigation {
+    display: flex;
+    align-items: center;
+}
+
+.waveform-stage,
 .spectrogram-stage {
     position: relative;
-    min-height: 500px;
+    min-height: 0;
     overflow: hidden;
     border: 1px solid rgba(175, 191, 220, 0.2);
     background: #03050b;
     cursor: crosshair;
 }
 
+.waveform-stage canvas,
 .spectrogram-stage canvas,
 .plot-grid {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
+}
+
+#waveformCanvas {
+    background: #f7f9fc;
+}
+
+#waveformInteraction {
+    z-index: 2;
+}
+
+.plot-divider {
+    position: relative;
+    z-index: 7;
+    display: grid;
+    min-height: 8px;
+    place-items: center;
+    background: #101827;
+    cursor: row-resize;
+    touch-action: none;
+    user-select: none;
+}
+
+.plot-divider::before {
+    position: absolute;
+    inset: -3px 0;
+    content: '';
+}
+
+.plot-divider span {
+    width: 42px;
+    height: 2px;
+    border-radius: 2px;
+    background: #667892;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.plot-divider:hover span {
+    background: #8ca6c9;
+}
+
+.axis-divider-space {
+    min-height: 8px;
+    background: #101827;
+}
+
+.waveform-axis {
+    position: relative;
+    min-height: 0;
+    color: #7394aa;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.waveform-axis span {
+    position: absolute;
+    top: 8px;
+    white-space: nowrap;
+}
+
+.waveform-axis-left {
+    border-right: 1px solid var(--line);
+}
+
+.waveform-axis-left span {
+    right: 10px;
+}
+
+.waveform-axis-right {
+    border-left: 1px solid var(--line);
+}
+
+.waveform-axis-right span {
+    left: 10px;
 }
 
 #spectrogramCanvas {
@@ -1175,7 +1293,6 @@ button.media-row {
 }
 
 .axis-left {
-    margin-top: 15px;
     border-right: 1px solid var(--line);
     text-align: right;
 }
@@ -1200,7 +1317,7 @@ button.media-row {
 }
 
 .axis-left .bottom {
-    bottom: 79px;
+    bottom: 20px;
 }
 
 .spectral-pitch-mark {
@@ -1208,7 +1325,6 @@ button.media-row {
 }
 
 .axis-right {
-    margin-top: 15px;
     border-left: 1px solid var(--line);
 }
 
@@ -1233,7 +1349,7 @@ button.media-row {
 }
 
 .axis-right .bottom {
-    bottom: 79px;
+    bottom: 20px;
 }
 
 .axis-right .spl-top,
@@ -1253,7 +1369,7 @@ button.media-row {
 }
 
 .axis-right .spl-bottom {
-    bottom: 79px;
+    bottom: 20px;
 }
 
 .axis-cursor-value {
@@ -2020,11 +2136,11 @@ html.glass-effects .settings-panel {
     }
 
     .plot-stack {
-        grid-template-rows: minmax(400px, calc(100vh - 238px)) 28px 18px;
+        grid-template-rows: minmax(400px, calc(100vh - 206px)) 18px;
     }
 
-    .spectrogram-stage {
-        min-height: 400px;
+    .axis-stack {
+        grid-template-rows: minmax(400px, calc(100vh - 206px)) 18px;
     }
 
     .axis-right .spl-top,
