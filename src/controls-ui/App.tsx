@@ -152,6 +152,54 @@ const formatTime = (seconds: number) => {
     return `${minutes.toString().padStart(2, '0')}:${remainder.toFixed(1).padStart(4, '0')}`;
 };
 
+const installSpectroFavicon = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext('2d');
+    if (context === null) {
+        return;
+    }
+
+    context.beginPath();
+    context.moveTo(14, 3);
+    context.lineTo(50, 3);
+    context.quadraticCurveTo(61, 3, 61, 14);
+    context.lineTo(61, 50);
+    context.quadraticCurveTo(61, 61, 50, 61);
+    context.lineTo(14, 61);
+    context.quadraticCurveTo(3, 61, 3, 50);
+    context.lineTo(3, 14);
+    context.quadraticCurveTo(3, 3, 14, 3);
+    context.closePath();
+    context.fillStyle = '#101a31';
+    context.fill();
+    context.strokeStyle = 'rgba(91, 154, 255, 0.72)';
+    context.lineWidth = 2;
+    context.stroke();
+
+    const gradient = context.createLinearGradient(0, 10, 0, 54);
+    gradient.addColorStop(0, '#45d8e7');
+    gradient.addColorStop(1, '#5179ff');
+    const heights = [14, 32, 46, 32, 14];
+    heights.forEach((height, index) => {
+        const x = 15 + index * 8;
+        context.beginPath();
+        context.roundRect(x, 32 - height / 2, 4, height, 2);
+        context.fillStyle = gradient;
+        context.fill();
+    });
+
+    let favicon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+    if (favicon === null) {
+        favicon = document.createElement('link');
+        favicon.rel = 'icon';
+        document.head.appendChild(favicon);
+    }
+    favicon.type = 'image/png';
+    favicon.href = canvas.toDataURL('image/png');
+};
+
 interface SavedSettings {
     mode: SpectrogramMode;
     pitchAlgorithm: PitchAlgorithm;
@@ -372,6 +420,10 @@ export default function App({
             updateSelection: setSelection,
         });
     }, [registerController]);
+
+    useEffect(() => {
+        installSpectroFavicon();
+    }, []);
 
     useEffect(() => {
         document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';

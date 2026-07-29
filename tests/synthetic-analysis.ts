@@ -1,6 +1,7 @@
 import {
     analyzeAcousticFrame,
     analyzeFormantFrames,
+    analyzePitchAndIntensityFrame,
     AnalysisOptions,
     PitchAlgorithm,
     resampleForFormants,
@@ -87,16 +88,86 @@ function syntheticTone(frequencyHz: number, rmsPascals: number, seconds = 0.1) {
 }
 
 function testPitch(algorithm: PitchAlgorithm) {
-    const result = analyzeAcousticFrame(syntheticTone(200, 0.08), SAMPLE_RATE, {
+    for (const frequency of [80, 120, 200, 440]) {
+        const result = analyzeAcousticFrame(syntheticTone(frequency, 0.00002), SAMPLE_RATE, {
+            ...DEFAULT_OPTIONS,
+            pitchAlgorithm: algorithm,
+        });
+        assertNear(`${algorithm} ${frequency} Hz pitch`, result.pitchHz, frequency, 1.2);
+    }
+
+    const missingFundamental = new Float32Array(Math.round(SAMPLE_RATE * 0.1));
+    for (let index = 0; index < missingFundamental.length; index += 1) {
+        missingFundamental[index] =
+            0.03 *
+            (0.65 * Math.sin((2 * Math.PI * 2 * 120 * index) / SAMPLE_RATE) +
+                0.5 * Math.sin((2 * Math.PI * 3 * 120 * index) / SAMPLE_RATE) +
+                0.3 * Math.sin((2 * Math.PI * 4 * 120 * index) / SAMPLE_RATE) +
+                1.2 * Math.sin((2 * Math.PI * 10000 * index) / SAMPLE_RATE));
+    }
+    const harmonicResult = analyzeAcousticFrame(missingFundamental, SAMPLE_RATE, {
         ...DEFAULT_OPTIONS,
         pitchAlgorithm: algorithm,
     });
-    assertNear(`${algorithm} pitch`, result.pitchHz, 200, 2);
+    assertNear(
+        `${algorithm} missing fundamental with high-frequency contaminant`,
+        harmonicResult.pitchHz,
+        120,
+        1
+    );
+
+    const noise = new Float32Array(deterministicNoise(Math.round(SAMPLE_RATE * 0.1)));
+    const noiseResult = analyzeAcousticFrame(noise, SAMPLE_RATE, {
+        ...DEFAULT_OPTIONS,
+        pitchAlgorithm: algorithm,
+    });
+    if (noiseResult.pitchHz !== null) {
+        throw new Error(
+            `${algorithm} white noise: expected unvoiced, received ${noiseResult.pitchHz}`
+        );
+    }
 }
 
 function testIntensity() {
     const result = analyzeAcousticFrame(syntheticTone(200, 0.00002), SAMPLE_RATE, DEFAULT_OPTIONS);
-    assertNear('0 dB SPL reference tone', result.intensityDbSpl, 0, 0.2);
+    assertNear('0 dB SPL reference tone', result.intensityDbSpl, 0, 0.0005);
+
+    const praatReferenceTone = syntheticTone(200, 0.00002, 0.2);
+    const praatReferenceResult = analyzePitchAndIntensityFrame(
+        praatReferenceTone,
+        SAMPLE_RATE,
+        DEFAULT_OPTIONS,
+        0.1 * SAMPLE_RATE
+    );
+    assertNear(
+        'Praat 6.6.30 intensity reference',
+        praatReferenceResult.intensityDbSpl,
+        0.000000002641,
+        0.000001
+    );
+
+    const silence = new Float32Array(Math.round(SAMPLE_RATE * 0.1));
+    const silentResult = analyzePitchAndIntensityFrame(silence, SAMPLE_RATE, DEFAULT_OPTIONS);
+    assertNear('Praat silence floor', silentResult.intensityDbSpl, -300, 1e-12);
+
+    const toneWithDc = syntheticTone(200, 0.00002, 0.2);
+    for (let index = 0; index < toneWithDc.length; index += 1) {
+        toneWithDc[index] += 0.1;
+    }
+    const dcResult = analyzePitchAndIntensityFrame(
+        toneWithDc,
+        SAMPLE_RATE,
+        DEFAULT_OPTIONS,
+        0.1 * SAMPLE_RATE
+    );
+    assertNear(
+        'intensity subtract mean pressure',
+        dcResult.intensityDbSpl,
+        0,
+        // A large DC offset quantizes the much smaller pressure waveform in
+        // Float32 audio, so validate mean subtraction at Float32 precision.
+        0.0001
+    );
 }
 
 function testFormants() {

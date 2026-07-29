@@ -13,7 +13,7 @@ Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具�
 - 麦克风实时输入或播放本地音频
 - 宽带语谱：5 ms 有效分析窗，显示 F0、LPC 共振峰和音强曲线
 - 窄带语谱：30 ms 有效分析窗，显示谐波与按同一频率坐标绘制的 F0
-- YIN、自相关两种 F0 算法
+- YIN、窗函数校正自相关两种 F0 算法
 - 按 Praat 定义换算的 dB SPL 参考读数
 - 实时 F0、F1–F3、音强读数和会话统计
 - 鼠标时间/频率取值、缩放、历史回看与配色主题
@@ -27,7 +27,8 @@ Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具�
 - **宽带**使用 5 ms 有效窗，对应约 260 Hz 带宽。时间分辨率较高，适合观察音节边界和共振峰运动。
 - **窄带**使用 30 ms 有效窗，对应约 43 Hz 带宽。频率分辨率较高，适合观察谐波；F0 在此模式中使用语谱图的频率坐标，可直接检查它与第一谐波的位置。
 
-实际 FFT 使用不小于有效窗的最小二次幂并进行零填充；窗函数使用 Hamming。
+实际 FFT 使用不小于有效窗的最小二次幂并进行零填充。默认使用 Gaussian 窗，
+也可以选择 Rectangular、Hamming、Bartlett、Welch、Hanning 或自定义窗长。
 
 ## 关于 dB SPL
 
@@ -42,6 +43,8 @@ Praat Sound 的计算约定，将 `1.0` 样本单位视为 `1 Pa`。因此曲线
 Praat 公式一致，但未经声级计和麦克风标定时，绝对 dB SPL 只可作相对参考。
 
 ## 开发
+
+推荐使用与本项目本地验证及 GitHub Actions 一致的 **Node.js 24**。
 
 ```bash
 npm ci
@@ -67,8 +70,8 @@ HTTPS；下列 Pages 平台均满足这一要求。
 | 平台 | 适合程度 | 推荐用途 | 构建配置 |
 | --- | --- | --- | --- |
 | GitHub Pages | 很适合 | 与源码、Action 集成的公开演示站 | Action 自动执行 `npm ci`、检查、测试和构建，再发布 `dist` |
-| Cloudflare Pages | 很适合 | 独立域名、预览部署和全球静态分发 | Build command: `npm run build`; Output directory: `dist`; Node.js: `20` |
-| EdgeOne Pages | 适合 | 希望增加另一套 Pages/CDN 发布入口 | Framework preset: Custom; Build command: `npm run build`; Output directory: `dist`; Node.js: `20` |
+| Cloudflare Pages | 很适合 | 独立域名、预览部署和全球静态分发 | Build command: `npm run build`; Output directory: `dist`; Node.js: `24` |
+| EdgeOne Pages | 适合 | 希望增加另一套 Pages/CDN 发布入口 | Framework preset: Custom; Build command: `npm run build`; Output directory: `dist`; Node.js: `24` |
 
 ### GitHub Pages
 
@@ -93,7 +96,7 @@ Framework preset: None
 Build command: npm run build
 Build output directory: dist
 Root directory: /
-Node.js version: 20
+Node.js version: 24
 ```
 
 该项目不使用前端路由，不需要额外 SPA rewrite、Pages Functions 或环境变量。
@@ -111,7 +114,7 @@ Install command: npm ci
 Build command: npm run build
 Output directory: dist
 Root directory: /
-Node.js version: 20
+Node.js version: 24
 ```
 
 不要直接采用 React preset 默认的 `build` 输出目录：Spectro Pro 使用自定义
@@ -120,19 +123,26 @@ Webpack 配置，实际产物位于 `dist`。当前没有客户端路由，也�
 
 ## 算法说明
 
-- 语谱：Hamming 窗、零填充 FFT、Web Worker 计算、WebGL 绘制
-- F0：YIN 或归一化自相关，默认有声范围 75–500 Hz
-- 共振峰：先重采样至 `2 × formant ceiling`，再执行 50 Hz 预加重、
-  25 ms 有效 Gaussian-like 窗、Burg LPC 与根分析；默认用 10 个极点分析
-  5 条共振峰，并保留每条带宽
-- 音强：按 `3.2 / pitchFloor` 有效窗与 Kaiser-20 加权后换算为 dB SPL
+- 语谱：可选分析窗、零填充 FFT、Web Worker 计算、WebGL 绘制；默认 Gaussian 窗
+- F0：分析前执行低通 FIR 抗混叠降采样并去除局部直流。YIN 使用差分函数、
+  累积均值归一化与抛物线插值；自相关模式使用 Hanning 窗，并以窗函数自身的
+  自相关校正边缘衰减，再对候选峰插值和轻微偏好高频候选。默认有声范围
+  75–500 Hz，最终由可调周期性阈值判断有声/无声
+- 共振峰：整段声音先按 Praat 方式重采样至 `2 × formant ceiling`，包括 FFT
+  抗混叠和深度 50 sinc 插值；随后整段执行 50 Hz 预加重，以 25 ms 有效
+  Gaussian 窗居中分帧，运行 Childers Burg LPC、伴随矩阵特征值求根和 Newton
+  残差校验。默认 10 个极点、5 条共振峰，并保留每条带宽和帧强度
+- 音强：先减去分析窗内平均声压，再用物理时长 `6.4 / pitchFloor`、有效时长
+  `3.2 / pitchFloor` 的 Kaiser-20 窗居中加权平方声压，最后相对
+  `2×10⁻⁵ Pa` 换算为 dB SPL；静音按 Praat 语义记为 −300 dB
 - 音强统计：按能量域平均后换算为 dB
 
 这些实时估计优先保证响应速度和可视反馈。用于论文数据、临床或其他精密测量时，
 请使用经过校准的设备，并以 Praat 等专业分析工具复核。
 
-`npm test` 会用合成信号检查 YIN、自相关、SPL 参考值、重采样频率，以及五条
-已知共振峰。后续仍需增加与真实语音的 Praat 对照数据集。
+`npm test` 会检查 YIN 与校正自相关在 80–440 Hz、低幅度、缺失基频和高频干扰
+条件下的结果，验证 Kaiser 音强、减均值与静音下限，并使用官方 Praat 6.6.30
+生成的连续帧基准核对 11 kHz 和 48 kHz 输入的五条共振峰。
 
 ## 致谢与许可
 

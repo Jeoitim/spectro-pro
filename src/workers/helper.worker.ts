@@ -42,17 +42,12 @@ function analyzeAtCentres(
     analysisOptions: AnalysisOptions
 ) {
     const formantFrames = analyzeFormantFrames(samples, sampleRate, analysisOptions);
-    const analysisWindowLength = Math.max(64, Math.round(sampleRate * 0.085));
     const analyses: AcousticAnalysis[] = centreSamples.map((centreSample) => {
-        const analysisStart = Math.max(0, Math.round(centreSample - analysisWindowLength / 2));
-        const analysisEnd = Math.min(
-            samples.length,
-            Math.round(centreSample + analysisWindowLength / 2)
-        );
         const pitchAndIntensity = analyzePitchAndIntensityFrame(
-            samples.subarray(analysisStart, Math.max(analysisStart + 1, analysisEnd)),
+            samples,
             sampleRate,
-            analysisOptions
+            analysisOptions,
+            centreSample
         );
         const formants = nearestFormantFrame(formantFrames, centreSample / sampleRate);
         return {

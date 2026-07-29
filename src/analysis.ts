@@ -81,51 +81,102 @@ function calculateIntensityDbSpl(
     samples: Float32Array,
     sampleRate: number,
     pitchFloorHz: number,
-    calibrationDb: number
+    calibrationDb: number,
+    centreSample = 0.5 * (samples.length - 1)
 ) {
-    // Praat's effective intensity window is 3.2 / pitchFloor and uses a
-    // Kaiser-20 window before converting mean-square pressure to dB SPL.
-    const windowLength = Math.min(
-        samples.length,
-        Math.max(1, Math.round((3.2 * sampleRate) / pitchFloorHz))
-    );
-    const start = samples.length - windowLength;
-    const denominator = besselI0(20);
+    // Praat's Kaiser-20 window has a 3.2 / pitchFloor effective duration
+    // and a 6.4 / pitchFloor physical duration.
+    const halfWindowDuration = 3.2 / pitchFloorHz;
+    const halfWindowSamples = Math.floor(halfWindowDuration * sampleRate);
+    const soundCentreSample = Math.round(centreSample);
+    const start = Math.max(0, soundCentreSample - halfWindowSamples);
+    const end = Math.min(samples.length - 1, soundCentreSample + halfWindowSamples);
+    if (end < start) {
+        return -300 + calibrationDb;
+    }
+
+    let localMean = 0;
+    for (let index = start; index <= end; index += 1) {
+        localMean += samples[index];
+    }
+    localMean /= end - start + 1;
+
+    const kaiserParameter = 2 * Math.PI * Math.PI + 0.5;
     let weightedPower = 0;
     let weightSum = 0;
-    for (let i = 0; i < windowLength; i += 1) {
-        const ratio = windowLength === 1 ? 0 : (2 * i) / (windowLength - 1) - 1;
-        const weight = besselI0(20 * Math.sqrt(Math.max(0, 1 - ratio * ratio))) / denominator;
-        weightedPower += samples[start + i] * samples[start + i] * weight;
+    for (let index = start; index <= end; index += 1) {
+        const relativeTime = (index - soundCentreSample) / sampleRate / halfWindowDuration;
+        const weight = besselI0(
+            kaiserParameter * Math.sqrt(Math.max(0, 1 - relativeTime * relativeTime))
+        );
+        const pressure = samples[index] - localMean;
+        weightedPower += pressure * pressure * weight;
         weightSum += weight;
     }
-    const rms = Math.sqrt(weightedPower / Math.max(1e-12, weightSum));
-    return 20 * Math.log10(Math.max(1e-7, rms) / 0.00002) + calibrationDb;
+    const pressureSquared = weightedPower / Math.max(1e-300, weightSum);
+    const relativeIntensity = pressureSquared / (0.00002 * 0.00002);
+    return (relativeIntensity < 1e-30 ? -300 : 10 * Math.log10(relativeIntensity)) + calibrationDb;
 }
 
-function preparePitchSignal(samples: Float32Array, sampleRate: number) {
-    const targetRate = 16000;
+function lowPassDecimate(samples: Float32Array, stride: number) {
+    if (stride === 1) {
+        return new Float64Array(samples);
+    }
+    const length = Math.max(1, Math.floor(samples.length / stride));
+    const result = new Float64Array(length);
+    const halfWidth = 4 * stride;
+    for (let outputIndex = 0; outputIndex < length; outputIndex += 1) {
+        const centre = outputIndex * stride + 0.5 * (stride - 1);
+        const first = Math.max(0, Math.ceil(centre - halfWidth));
+        const last = Math.min(samples.length - 1, Math.floor(centre + halfWidth));
+        let weightedSample = 0;
+        let weightSum = 0;
+        for (let inputIndex = first; inputIndex <= last; inputIndex += 1) {
+            const distance = inputIndex - centre;
+            const window = 0.5 + 0.5 * Math.cos((Math.PI * distance) / (halfWidth + 1));
+            const weight = sinc(distance / stride) * window;
+            weightedSample += samples[inputIndex] * weight;
+            weightSum += weight;
+        }
+        result[outputIndex] = weightedSample / Math.max(Number.EPSILON, weightSum);
+    }
+    return result;
+}
+
+function preparePitchSignal(
+    samples: Float32Array,
+    sampleRate: number,
+    minPitchHz: number,
+    maxPitchHz: number,
+    centreSample: number
+) {
+    const physicalWindowLength = Math.max(16, Math.floor((3 * sampleRate) / minPitchHz));
+    const halfWindowLength = Math.floor(physicalWindowLength / 2);
+    const nearestCentreSample = Math.round(centreSample);
+    const start = Math.max(0, nearestCentreSample - halfWindowLength);
+    const end = Math.min(samples.length, nearestCentreSample + halfWindowLength);
+    const pitchSamples = samples.subarray(start, Math.max(start + 1, end));
+    const targetRate = Math.max(8000, maxPitchHz * 8);
     const stride = Math.max(1, Math.floor(sampleRate / targetRate));
-    const length = Math.floor(samples.length / stride);
-    const signal = new Float64Array(length);
+    const signal = lowPassDecimate(pitchSamples, stride);
+    const preparedSampleRate = sampleRate / stride;
     let mean = 0;
 
-    for (let i = 0; i < length; i += 1) {
-        signal[i] = samples[i * stride];
+    for (let i = 0; i < signal.length; i += 1) {
         mean += signal[i];
     }
-    mean /= Math.max(1, length);
+    mean /= Math.max(1, signal.length);
 
     let energy = 0;
-    for (let i = 0; i < length; i += 1) {
+    for (let i = 0; i < signal.length; i += 1) {
         signal[i] -= mean;
         energy += signal[i] * signal[i];
     }
 
     return {
         signal,
-        sampleRate: sampleRate / stride,
-        rms: Math.sqrt(energy / Math.max(1, length)),
+        sampleRate: preparedSampleRate,
+        rms: Math.sqrt(energy / Math.max(1, signal.length)),
     };
 }
 
@@ -147,54 +198,75 @@ function detectPitchAutocorrelation(
     samples: Float32Array,
     sampleRate: number,
     minPitchHz: number,
-    maxPitchHz: number
+    maxPitchHz: number,
+    centreSample: number
 ): { pitchHz: number | null; confidence: number } {
-    const prepared = preparePitchSignal(samples, sampleRate);
-    if (prepared.rms < 0.002) {
+    const prepared = preparePitchSignal(samples, sampleRate, minPitchHz, maxPitchHz, centreSample);
+    if (prepared.rms < 1e-12) {
         return { pitchHz: null, confidence: 0 };
     }
 
     const minLag = Math.max(2, Math.floor(prepared.sampleRate / maxPitchHz));
     const maxLag = Math.min(
         Math.floor(prepared.sampleRate / minPitchHz),
-        prepared.signal.length - 2
+        prepared.signal.length - 3
     );
-    const correlations = new Float64Array(maxLag + 1);
+    if (maxLag <= minLag) {
+        return { pitchHz: null, confidence: 0 };
+    }
+
+    const window = new Float64Array(prepared.signal.length);
+    const windowedSignal = new Float64Array(prepared.signal.length);
+    let signalPower = 0;
+    let windowPower = 0;
+    for (let index = 0; index < prepared.signal.length; index += 1) {
+        window[index] =
+            0.5 - 0.5 * Math.cos((2 * Math.PI * (index + 1)) / (prepared.signal.length + 1));
+        windowedSignal[index] = prepared.signal[index] * window[index];
+        signalPower += windowedSignal[index] * windowedSignal[index];
+        windowPower += window[index] * window[index];
+    }
+
+    const correlations = new Float64Array(maxLag + 2);
     let bestLag = minLag;
-    let bestCorrelation = -1;
-
-    for (let lag = minLag; lag <= maxLag; lag += 1) {
-        let numerator = 0;
-        let energyA = 0;
-        let energyB = 0;
-        for (let i = 0; i < prepared.signal.length - lag; i += 1) {
-            const a = prepared.signal[i];
-            const b = prepared.signal[i + lag];
-            numerator += a * b;
-            energyA += a * a;
-            energyB += b * b;
+    let bestScore = Number.NEGATIVE_INFINITY;
+    for (let lag = 1; lag <= maxLag + 1; lag += 1) {
+        let signalCorrelation = 0;
+        let windowCorrelation = 0;
+        for (let index = 0; index < prepared.signal.length - lag; index += 1) {
+            signalCorrelation += windowedSignal[index] * windowedSignal[index + lag];
+            windowCorrelation += window[index] * window[index + lag];
         }
-        const correlation = numerator / Math.sqrt(Math.max(1e-12, energyA * energyB));
-        correlations[lag] = correlation;
-
-        const isLocalPeak =
-            lag > minLag &&
+        const normalizedWindowCorrelation =
+            windowCorrelation / Math.max(Number.EPSILON, windowPower);
+        const rawCorrelation =
+            signalCorrelation / Math.max(Number.EPSILON, signalPower * normalizedWindowCorrelation);
+        correlations[lag] = rawCorrelation > 1 ? 1 / rawCorrelation : rawCorrelation;
+    }
+    for (let lag = minLag; lag <= maxLag; lag += 1) {
+        const correlation = correlations[lag];
+        if (
+            correlation > 0.3 &&
             correlation > correlations[lag - 1] &&
-            (correlation > bestCorrelation || bestCorrelation < 0.82);
-        if (isLocalPeak && correlation > 0.35) {
-            bestCorrelation = correlation;
-            bestLag = lag;
+            correlation >= correlations[lag + 1]
+        ) {
+            const frequency = prepared.sampleRate / lag;
+            const score = correlation + 0.01 * Math.log2(Math.max(1, frequency / minPitchHz));
+            if (score > bestScore) {
+                bestScore = score;
+                bestLag = lag;
+            }
         }
     }
 
-    if (bestCorrelation < 0.35) {
-        return { pitchHz: null, confidence: Math.max(0, bestCorrelation) };
+    if (!Number.isFinite(bestScore)) {
+        return { pitchHz: null, confidence: 0 };
     }
 
     const lag = parabolicPeak(correlations, bestLag);
     return {
         pitchHz: prepared.sampleRate / lag,
-        confidence: clamp(bestCorrelation, 0, 1),
+        confidence: clamp(correlations[bestLag], 0, 1),
     };
 }
 
@@ -202,10 +274,11 @@ function detectPitchYin(
     samples: Float32Array,
     sampleRate: number,
     minPitchHz: number,
-    maxPitchHz: number
+    maxPitchHz: number,
+    centreSample: number
 ): { pitchHz: number | null; confidence: number } {
-    const prepared = preparePitchSignal(samples, sampleRate);
-    if (prepared.rms < 0.002) {
+    const prepared = preparePitchSignal(samples, sampleRate, minPitchHz, maxPitchHz, centreSample);
+    if (prepared.rms < 1e-12) {
         return { pitchHz: null, confidence: 0 };
     }
 
@@ -626,14 +699,16 @@ export function analyzeFormantFrames(
 export function analyzePitchAndIntensityFrame(
     samples: Float32Array,
     sampleRate: number,
-    partialOptions: Partial<AnalysisOptions> = {}
+    partialOptions: Partial<AnalysisOptions> = {},
+    centreSample = 0.5 * (samples.length - 1)
 ) {
     const options = { ...DEFAULT_OPTIONS, ...partialOptions };
     const intensityDbSpl = calculateIntensityDbSpl(
         samples,
         sampleRate,
         options.intensityPitchFloorHz,
-        options.splCalibrationDb
+        options.splCalibrationDb,
+        centreSample
     );
     const pitch =
         options.pitchAlgorithm === 'autocorrelation'
@@ -641,9 +716,16 @@ export function analyzePitchAndIntensityFrame(
                   samples,
                   sampleRate,
                   options.minPitchHz,
-                  options.maxPitchHz
+                  options.maxPitchHz,
+                  centreSample
               )
-            : detectPitchYin(samples, sampleRate, options.minPitchHz, options.maxPitchHz);
+            : detectPitchYin(
+                  samples,
+                  sampleRate,
+                  options.minPitchHz,
+                  options.maxPitchHz,
+                  centreSample
+              );
     const voiced = pitch.pitchHz !== null && pitch.confidence >= options.voicingThreshold;
     return {
         pitchHz: voiced ? pitch.pitchHz : null,
