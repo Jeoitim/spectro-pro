@@ -1177,6 +1177,12 @@ button.media-row {
     text-transform: none;
 }
 
+.waveform-axis-left .waveform-scale-mark {
+    right: 6px;
+    left: auto;
+    text-align: right;
+}
+
 .waveform-axis .waveform-scale-mark.scale-top {
     top: 0;
 }
@@ -1773,7 +1779,9 @@ button.media-row {
 .metrics-heading h2,
 .settings-header h2 {
     margin: 5px 0 0;
-    font-size: 17px;
+    font-size: 19px;
+    font-weight: 680;
+    line-height: 1.2;
     letter-spacing: -0.035em;
 }
 
@@ -1967,7 +1975,7 @@ button.media-row {
     display: flex;
     width: min(460px, calc(100vw - 36px));
     min-height: 0;
-    gap: 17px;
+    gap: 20px;
     flex-direction: column;
     padding: 22px;
     overflow-x: hidden;
@@ -2006,7 +2014,7 @@ html[lang='en'] .settings-tabs button {
     border-radius: 7px;
     color: #6f7d93;
     font-size: 11px;
-    font-weight: 650;
+    font-weight: 680;
     background: transparent;
     cursor: pointer;
     overflow-wrap: anywhere;
@@ -2020,7 +2028,7 @@ html[lang='en'] .settings-tabs button {
 
 .settings-tab-content {
     display: grid;
-    gap: 18px;
+    gap: 20px;
 }
 
 .reset-tab-button {
@@ -2075,17 +2083,31 @@ html[lang='en'] .settings-tabs button {
     line-height: 16px;
 }
 
+.settings-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.select-row select:disabled {
+    opacity: 0.48;
+    cursor: not-allowed;
+}
+
 .setting {
     display: grid;
-    gap: 11px;
+    gap: 9px;
 }
 
 .setting > span {
     display: flex;
     justify-content: space-between;
     gap: 14px;
-    color: #9aa6b9;
+    color: #b4bfce;
     font-size: 12px;
+    font-weight: 620;
+    line-height: 1.4;
     overflow-wrap: anywhere;
 }
 
@@ -2093,6 +2115,8 @@ html[lang='en'] .settings-tabs button {
     flex: 0 0 auto;
     color: #d5dce8;
     font-style: normal;
+    font-size: 11px;
+    font-weight: 700;
     font-variant-numeric: tabular-nums;
 }
 
@@ -2110,10 +2134,10 @@ html[lang='en'] .settings-tabs button {
 }
 
 .setting > small {
-    margin-top: -5px;
+    margin-top: -3px;
     color: #68758a;
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: 10px;
+    line-height: 1.55;
 }
 
 .effect-toggle {
@@ -2126,19 +2150,20 @@ html[lang='en'] .settings-tabs button {
 
 .effect-toggle > span {
     display: grid;
-    gap: 4px;
+    gap: 3px;
 }
 
 .effect-toggle strong {
     color: #cbd5e4;
     font-size: 12px;
     font-weight: 650;
+    line-height: 1.4;
 }
 
 .effect-toggle small {
     color: #68758a;
-    font-size: 11px;
-    line-height: 1.45;
+    font-size: 10px;
+    line-height: 1.55;
 }
 
 .effect-toggle input {
@@ -2204,8 +2229,10 @@ html.glass-effects .settings-panel {
 }
 
 .select-row label {
-    color: #8895aa;
+    color: #a8b4c5;
     font-size: 11px;
+    font-weight: 620;
+    line-height: 1.4;
     overflow-wrap: anywhere;
 }
 
@@ -2217,12 +2244,15 @@ html.glass-effects .settings-panel {
     border: 1px solid var(--line-strong);
     border-radius: 8px;
     color: #d4ddea;
+    font-size: 12px;
+    font-weight: 500;
     background: #0c111d;
 }
 
 .palette-setting > span {
-    color: #8895aa;
+    color: #a8b4c5;
     font-size: 11px;
+    font-weight: 620;
 }
 
 .palette-setting > div {
@@ -2253,7 +2283,7 @@ html.glass-effects .settings-panel {
     display: block;
     margin-top: 7px;
     color: #68758a;
-    font-size: 11px;
+    font-size: 10px;
 }
 
 .waveform-palette-setting button {
@@ -2278,7 +2308,7 @@ html.glass-effects .settings-panel {
     padding: 11px 12px;
     border-left: 2px solid rgba(37, 136, 255, 0.45);
     color: #6d7b90;
-    font-size: 12px;
+    font-size: 10.5px;
     line-height: 1.65;
     background: rgba(37, 136, 255, 0.035);
 }

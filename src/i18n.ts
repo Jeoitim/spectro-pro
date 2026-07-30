@@ -71,8 +71,18 @@ const ENGLISH: { [key: string]: string } = {
     调整波形和语谱图高度: 'Resize waveform and spectrogram',
     波形尺度: 'Waveform scale',
     线性振幅: 'Linear amplitude',
-    'dBFS 参考': 'dBFS reference',
     对数增强: 'Log enhancement',
+    左轴参考单位: 'Left-axis reference unit',
+    不显示: 'Hidden',
+    振幅满刻度参考: 'Amplitude full-scale reference',
+    固定数字满刻度: 'Fixed digital full scale',
+    整段录音峰值满刻度: 'Whole-recording peak full scale',
+    'Live 录音固定使用 PCM ±1.0 数字满刻度，不能切换':
+        'Live recording uses fixed PCM ±1.0 digital full scale and cannot be changed',
+    '整段录音的绝对峰值映射到纵轴 ±1.0':
+        'Map the absolute peak of the whole recording to ±1.0 on the axis',
+    'PCM ±1.0 对应纵轴 ±1.0，保留实际电平，便于跨录音比较':
+        'Map PCM ±1.0 to axis ±1.0, preserving actual levels for comparisons across recordings',
     '固定数字满刻度，保留真实波形比例':
         'Fixed digital full scale that preserves the true waveform proportions',
     '线性绘制波形，以 dBFS 标注振幅位置': 'Draw linearly and label amplitude positions in dBFS',
@@ -82,7 +92,7 @@ const ENGLISH: { [key: string]: string } = {
     自动适配当前视图: 'Auto-fit current view',
     '根据可见区域峰值调整，不用于比较真实电平':
         'Adjust from the visible peak; not suitable for true level comparisons',
-    适配一次: 'Fit once',
+    适配当前视图: 'Fit current view',
     电平显示: 'Level display',
     峰值保持: 'Peak hold',
     削波提示: 'Clipping warning',

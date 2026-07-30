@@ -35,7 +35,11 @@ import { Scale, SpectrogramWindowFunction } from '../spectrogram';
 import { RenderParameters } from '../spectrogram-render';
 import {
     WAVEFORM_THEMES,
+    amplitudeToDbspl,
+    expandAmplitude,
+    WaveformAxisState,
     WaveformDisplayOptions,
+    WaveformReferenceUnit,
     WaveformScaleMode,
     WaveformThemeName,
 } from '../waveform-render';
@@ -67,7 +71,9 @@ interface SourceSettingsProfile {
     mode: SpectrogramMode;
     pitchAlgorithm: PitchAlgorithm;
     waveformScaleMode: WaveformScaleMode;
+    waveformReferenceUnit: WaveformReferenceUnit;
     waveformGainDb: number;
+    waveformNormalizeRecordingPeak: boolean;
     waveformAutoFitView: boolean;
     waveformShowPeak: boolean;
     waveformShowRms: boolean;
@@ -308,6 +314,8 @@ interface SavedSettings {
     waveformScaleMode: WaveformScaleMode;
     waveformGain: number;
     waveformGainDb?: number;
+    waveformReferenceUnit?: WaveformReferenceUnit;
+    waveformNormalizeRecordingPeak?: boolean;
     waveformAutoFitView?: boolean;
     waveformShowPeak?: boolean;
     waveformShowRms?: boolean;
@@ -397,6 +405,7 @@ export interface UiController {
     updateMediaLibrary: (items: MediaListItem[], activeId: string | null) => void;
     updateTransport: (snapshot: TransportSnapshot) => void;
     updateSelection: (snapshot: SelectionSnapshot | null) => void;
+    updateWaveformAxis: (state: WaveformAxisState) => void;
 }
 
 export default function App({
@@ -508,10 +517,21 @@ export default function App({
     );
     const legacyScaleMode = saved.liveProfile?.waveformScaleMode || saved.waveformScaleMode;
     const [waveformScaleMode, setWaveformScaleMode] = useState<WaveformScaleMode>(
-        legacyScaleMode === 'logarithmic' || legacyScaleMode === 'dbfs-reference'
-            ? legacyScaleMode
-            : 'linear'
+        legacyScaleMode === 'logarithmic' ? 'logarithmic' : 'linear'
     );
+    const [waveformReferenceUnit, setWaveformReferenceUnit] = useState<WaveformReferenceUnit>(
+        saved.liveProfile?.waveformReferenceUnit ??
+            saved.waveformReferenceUnit ??
+            ((legacyScaleMode as string) === 'dbspl' ? 'dbspl' : 'dbfs')
+    );
+    const [waveformNormalizeRecordingPeak, setWaveformNormalizeRecordingPeak] = useState(
+        saved.liveProfile?.waveformNormalizeRecordingPeak ??
+            saved.waveformNormalizeRecordingPeak ??
+            false
+    );
+    const [waveformAxisState, setWaveformAxisState] = useState<WaveformAxisState>({
+        effectiveGain: 1,
+    });
     const [waveformGainDb, setWaveformGainDb] = useState(
         saved.liveProfile?.waveformGainDb ??
             saved.waveformGainDb ??
@@ -665,7 +685,9 @@ export default function App({
         mode,
         pitchAlgorithm,
         waveformScaleMode,
+        waveformReferenceUnit,
         waveformGainDb,
+        waveformNormalizeRecordingPeak,
         waveformAutoFitView,
         waveformShowPeak,
         waveformShowRms,
@@ -705,58 +727,65 @@ export default function App({
         analysisPrecision,
     };
     currentSourceProfileRef.current = currentSourceProfile;
-    const applySourceProfile = useCallback((profile: SourceSettingsProfile) => {
-        const legacyProfile = profile as SourceSettingsProfile & { waveformGain?: number };
-        setMode(profile.mode);
-        setPitchAlgorithm(profile.pitchAlgorithm);
-        setWaveformScaleMode(
-            profile.waveformScaleMode === 'logarithmic' ||
-                profile.waveformScaleMode === 'dbfs-reference'
-                ? profile.waveformScaleMode
-                : 'linear'
-        );
-        setWaveformGainDb(
-            profile.waveformGainDb ??
-                20 * Math.log10(Math.max(1e-9, legacyProfile.waveformGain ?? 1))
-        );
-        setWaveformAutoFitView(profile.waveformAutoFitView ?? false);
-        setWaveformShowPeak(profile.waveformShowPeak ?? true);
-        setWaveformShowRms(profile.waveformShowRms ?? true);
-        setWaveformShowPeakHold(profile.waveformShowPeakHold ?? false);
-        setWaveformShowClipping(profile.waveformShowClipping ?? true);
-        setWaveformLineWidth(profile.waveformLineWidth);
-        setWaveformZeroLine(profile.waveformZeroLine);
-        setWaveformPulses(profile.waveformPulses);
-        setSensitivity(profile.sensitivity);
-        setContrast(profile.contrast);
-        setMinFrequency(profile.minFrequency);
-        setMaxFrequency(profile.maxFrequency);
-        setBroadbandScale(profile.broadbandScale);
-        setNarrowbandScale(profile.narrowbandScale);
-        setCustomScale(profile.customScale);
-        setCustomWindowLengthMs(profile.customWindowLengthMs);
-        setWindowFunction(profile.windowFunction);
-        setPitchFloor(profile.pitchFloor);
-        setPitchCeiling(profile.pitchCeiling);
-        setVoicingThreshold(profile.voicingThreshold);
-        setPitchLineWidth(profile.pitchLineWidth);
-        setNarrowbandPitchFrequencyAligned(profile.narrowbandPitchFrequencyAligned);
-        setMaximumFormants(profile.maximumFormants);
-        setFormantsToDisplay(profile.formantsToDisplay);
-        setFormantCeiling(profile.formantCeiling);
-        setFormantWindowMs(profile.formantWindowMs);
-        setPreEmphasisFrom(profile.preEmphasisFrom);
-        setFormantDynamicRange(profile.formantDynamicRange);
-        setFormantDotSize(profile.formantDotSize);
-        setIntensityPitchFloor(profile.intensityPitchFloor);
-        setIntensityFloor(profile.intensityFloor);
-        setIntensityCeiling(profile.intensityCeiling);
-        setIntensityLineWidth(profile.intensityLineWidth);
-        setSplCalibration(profile.splCalibration);
-        setFramesPerSecond(profile.framesPerSecond);
-        setRenderPixelRatio(profile.renderPixelRatio);
-        setAnalysisPrecision(profile.analysisPrecision);
-    }, []);
+    const applySourceProfile = useCallback(
+        (profile: SourceSettingsProfile, profileMode: SourceProfileMode) => {
+            const legacyProfile = profile as SourceSettingsProfile & { waveformGain?: number };
+            setMode(profile.mode);
+            setPitchAlgorithm(profile.pitchAlgorithm);
+            setWaveformScaleMode(
+                profile.waveformScaleMode === 'logarithmic' ? 'logarithmic' : 'linear'
+            );
+            setWaveformReferenceUnit(
+                profile.waveformReferenceUnit ??
+                    ((profile.waveformScaleMode as string) === 'dbspl' ? 'dbspl' : 'dbfs')
+            );
+            setWaveformGainDb(
+                profile.waveformGainDb ??
+                    20 * Math.log10(Math.max(1e-9, legacyProfile.waveformGain ?? 1))
+            );
+            setWaveformNormalizeRecordingPeak(
+                profile.waveformNormalizeRecordingPeak ?? profileMode === 'file'
+            );
+            setWaveformAutoFitView(profile.waveformAutoFitView ?? false);
+            setWaveformShowPeak(profile.waveformShowPeak ?? true);
+            setWaveformShowRms(profile.waveformShowRms ?? true);
+            setWaveformShowPeakHold(profile.waveformShowPeakHold ?? false);
+            setWaveformShowClipping(profile.waveformShowClipping ?? true);
+            setWaveformLineWidth(profile.waveformLineWidth);
+            setWaveformZeroLine(profile.waveformZeroLine);
+            setWaveformPulses(profile.waveformPulses);
+            setSensitivity(profile.sensitivity);
+            setContrast(profile.contrast);
+            setMinFrequency(profile.minFrequency);
+            setMaxFrequency(profile.maxFrequency);
+            setBroadbandScale(profile.broadbandScale);
+            setNarrowbandScale(profile.narrowbandScale);
+            setCustomScale(profile.customScale);
+            setCustomWindowLengthMs(profile.customWindowLengthMs);
+            setWindowFunction(profile.windowFunction);
+            setPitchFloor(profile.pitchFloor);
+            setPitchCeiling(profile.pitchCeiling);
+            setVoicingThreshold(profile.voicingThreshold);
+            setPitchLineWidth(profile.pitchLineWidth);
+            setNarrowbandPitchFrequencyAligned(profile.narrowbandPitchFrequencyAligned);
+            setMaximumFormants(profile.maximumFormants);
+            setFormantsToDisplay(profile.formantsToDisplay);
+            setFormantCeiling(profile.formantCeiling);
+            setFormantWindowMs(profile.formantWindowMs);
+            setPreEmphasisFrom(profile.preEmphasisFrom);
+            setFormantDynamicRange(profile.formantDynamicRange);
+            setFormantDotSize(profile.formantDotSize);
+            setIntensityPitchFloor(profile.intensityPitchFloor);
+            setIntensityFloor(profile.intensityFloor);
+            setIntensityCeiling(profile.intensityCeiling);
+            setIntensityLineWidth(profile.intensityLineWidth);
+            setSplCalibration(profile.splCalibration);
+            setFramesPerSecond(profile.framesPerSecond);
+            setRenderPixelRatio(profile.renderPixelRatio);
+            setAnalysisPrecision(profile.analysisPrecision);
+        },
+        []
+    );
 
     useEffect(() => {
         registerController({
@@ -783,6 +812,7 @@ export default function App({
             },
             updateTransport: setTransport,
             updateSelection: setSelection,
+            updateWaveformAxis: setWaveformAxisState,
         });
     }, [registerController]);
 
@@ -838,7 +868,7 @@ export default function App({
             const savedProfile = sourceProfilesRef.current[sourceProfileMode];
             if (savedProfile !== undefined) {
                 sourceProfileSwitchingRef.current = true;
-                applySourceProfile(savedProfile);
+                applySourceProfile(savedProfile, sourceProfileMode);
             }
             return;
         }
@@ -853,13 +883,15 @@ export default function App({
                 ...current,
                 analysisPrecision: sourceProfileMode === 'live' ? 'balanced' : 'accurate',
                 waveformScaleMode: 'linear',
+                waveformReferenceUnit: 'dbfs',
                 waveformGainDb: 0,
+                waveformNormalizeRecordingPeak: sourceProfileMode === 'file',
                 waveformAutoFitView: false,
             } as SourceSettingsProfile);
         sourceProfilesRef.current[sourceProfileMode] = target;
         sourceProfileModeRef.current = sourceProfileMode;
         sourceProfileSwitchingRef.current = true;
-        applySourceProfile(target);
+        applySourceProfile(target, sourceProfileMode);
     }, [applySourceProfile, sourceProfileMode]);
 
     useEffect(() => {
@@ -873,14 +905,18 @@ export default function App({
                 ...currentSourceProfile,
                 analysisPrecision: 'balanced',
                 waveformScaleMode: 'linear',
+                waveformReferenceUnit: 'dbfs',
                 waveformGainDb: 0,
+                waveformNormalizeRecordingPeak: false,
                 waveformAutoFitView: false,
             },
             fileProfile: sourceProfilesRef.current.file || {
                 ...currentSourceProfile,
                 analysisPrecision: 'accurate',
                 waveformScaleMode: 'linear',
+                waveformReferenceUnit: 'dbfs',
                 waveformGainDb: 0,
+                waveformNormalizeRecordingPeak: true,
                 waveformAutoFitView: false,
             },
             mode,
@@ -895,8 +931,10 @@ export default function App({
             darkWaveformThemeName,
             lightWaveformThemeName,
             waveformScaleMode,
+            waveformReferenceUnit,
             waveformGain: 10 ** (waveformGainDb / 20),
             waveformGainDb,
+            waveformNormalizeRecordingPeak,
             waveformAutoFitView,
             waveformShowPeak,
             waveformShowRms,
@@ -960,7 +998,9 @@ export default function App({
         darkWaveformThemeName,
         lightWaveformThemeName,
         waveformScaleMode,
+        waveformReferenceUnit,
         waveformGainDb,
+        waveformNormalizeRecordingPeak,
         waveformAutoFitView,
         waveformShowPeak,
         waveformShowRms,
@@ -1218,6 +1258,9 @@ export default function App({
             showZeroLine: waveformZeroLine,
             showPulses: waveformPulses,
             scaleMode: waveformScaleMode,
+            referenceUnit: waveformReferenceUnit,
+            splCalibrationDb: splCalibration,
+            normalizeRecordingPeak: sourceProfileMode === 'file' && waveformNormalizeRecordingPeak,
             autoFitView: waveformAutoFitView,
             showPeak: waveformShowPeak,
             showRms: waveformShowRms,
@@ -1230,6 +1273,10 @@ export default function App({
         waveformZeroLine,
         waveformPulses,
         waveformScaleMode,
+        waveformReferenceUnit,
+        splCalibration,
+        sourceProfileMode,
+        waveformNormalizeRecordingPeak,
         waveformAutoFitView,
         waveformShowPeak,
         waveformShowRms,
@@ -1648,7 +1695,9 @@ export default function App({
             if (tab === 'waveform') {
                 setWaveformThemeName(uiTheme === 'light' ? 'Praat' : 'Aurora');
                 setWaveformScaleMode('linear');
+                setWaveformReferenceUnit('dbfs');
                 setWaveformGainDb(0);
+                setWaveformNormalizeRecordingPeak(sourceProfileMode === 'file');
                 setWaveformAutoFitView(false);
                 setWaveformShowPeak(true);
                 setWaveformShowRms(true);
@@ -1777,48 +1826,64 @@ export default function App({
                       ).toFixed(3)}%`
                   ),
               };
-    const waveformAxisGain = 10 ** (waveformGainDb / 20);
+    const waveformAxisGain = Math.max(1e-9, waveformAxisState.effectiveGain);
+    const waveformInputAtDisplayLevel = (displayLevel: number) =>
+        (waveformScaleMode === 'logarithmic' ? expandAmplitude(displayLevel) : displayLevel) /
+        waveformAxisGain;
     const formatAxisAmplitude = (amplitude: number) =>
         amplitude >= 0.01 ? amplitude.toFixed(2) : amplitude.toExponential(1);
-    const formatAxisDbfs = (decibels: number, includeUnit: boolean = false) =>
-        `${decibels > 0 ? '+' : decibels < 0 ? '−' : ''}${Math.abs(decibels).toFixed(0)}${
-            includeUnit ? ' dBFS' : ''
+    const waveformAxisMarks = [
+        {
+            top: 2,
+            label: `+${formatAxisAmplitude(waveformInputAtDisplayLevel(1))}`,
+        },
+        {
+            top: 26,
+            label: `+${formatAxisAmplitude(waveformInputAtDisplayLevel(0.5))}`,
+        },
+        { top: 50, label: '0' },
+        {
+            top: 74,
+            label: `−${formatAxisAmplitude(waveformInputAtDisplayLevel(0.5))}`,
+        },
+        {
+            top: 98,
+            label: `−${formatAxisAmplitude(waveformInputAtDisplayLevel(1))}`,
+        },
+    ];
+    const formatWaveformReference = (amplitude: number, includeUnit: boolean = false) => {
+        let decibels = 20 * Math.log10(Math.max(1e-12, amplitude));
+        let unit = 'dBFS';
+        if (waveformReferenceUnit === 'dbspl') {
+            decibels = amplitudeToDbspl(amplitude, splCalibration);
+            unit = splUnitLabel;
+        }
+        return `${decibels > 0 ? '+' : decibels < 0 ? '−' : ''}${Math.abs(decibels).toFixed(1)}${
+            includeUnit ? ` ${unit}` : ''
         }`;
-    const waveformAxisMarks = waveformAutoFitView
-        ? [
-              { top: 2, label: '+Peak' },
-              { top: 50, label: '0' },
-              { top: 98, label: '−Peak' },
-          ]
-        : waveformScaleMode === 'dbfs-reference'
-        ? [
-              { top: 2, label: formatAxisDbfs(-waveformGainDb, true) },
-              { top: 26, label: formatAxisDbfs(-6.02 - waveformGainDb) },
-              { top: 38, label: formatAxisDbfs(-12.04 - waveformGainDb) },
-              { top: 45.2, label: formatAxisDbfs(-20 - waveformGainDb) },
-              { top: 50, label: '−∞' },
-              { top: 54.8, label: formatAxisDbfs(-20 - waveformGainDb) },
-              { top: 62, label: formatAxisDbfs(-12.04 - waveformGainDb) },
-              { top: 74, label: formatAxisDbfs(-6.02 - waveformGainDb) },
-              { top: 98, label: formatAxisDbfs(-waveformGainDb, true) },
-          ]
-        : waveformScaleMode === 'logarithmic'
-        ? [
-              { top: 2, label: `+${formatAxisAmplitude(1 / waveformAxisGain)}` },
-              { top: 10.6, label: `+${formatAxisAmplitude(0.5 / waveformAxisGain)}` },
-              { top: 30.3, label: `+${formatAxisAmplitude(0.1 / waveformAxisGain)}` },
-              { top: 50, label: '0' },
-              { top: 69.7, label: `−${formatAxisAmplitude(0.1 / waveformAxisGain)}` },
-              { top: 89.4, label: `−${formatAxisAmplitude(0.5 / waveformAxisGain)}` },
-              { top: 98, label: `−${formatAxisAmplitude(1 / waveformAxisGain)}` },
-          ]
-        : [
-              { top: 2, label: `+${formatAxisAmplitude(1 / waveformAxisGain)}` },
-              { top: 26, label: `+${formatAxisAmplitude(0.5 / waveformAxisGain)}` },
-              { top: 50, label: '0' },
-              { top: 74, label: `−${formatAxisAmplitude(0.5 / waveformAxisGain)}` },
-              { top: 98, label: `−${formatAxisAmplitude(1 / waveformAxisGain)}` },
-          ];
+    };
+    const waveformReferenceMarks =
+        waveformReferenceUnit === 'none'
+            ? []
+            : [
+                  {
+                      top: 2,
+                      label: formatWaveformReference(waveformInputAtDisplayLevel(1), true),
+                  },
+                  {
+                      top: 26,
+                      label: formatWaveformReference(waveformInputAtDisplayLevel(0.5)),
+                  },
+                  { top: 50, label: '−∞' },
+                  {
+                      top: 74,
+                      label: formatWaveformReference(waveformInputAtDisplayLevel(0.5)),
+                  },
+                  {
+                      top: 98,
+                      label: formatWaveformReference(waveformInputAtDisplayLevel(1), true),
+                  },
+              ];
     const maximumTimeOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
     const scrollbarThumbWidth = 100 / Math.max(1, zoom);
     const scrollbarThumbLeft =
@@ -2440,7 +2505,27 @@ export default function App({
                         <div className="axis-stack">
                             <div className="axis-plots" style={{ gridTemplateRows: plotGridRows }}>
                                 {waveformVisible && (
-                                    <div className="waveform-axis waveform-axis-left" />
+                                    <div className="waveform-axis waveform-axis-left">
+                                        {waveformReferenceMarks.map((mark, index) => (
+                                            <span
+                                                key={`${mark.label}-${index}`}
+                                                className="waveform-scale-mark"
+                                                data-axis-label
+                                                data-axis-priority={mark.top === 50 ? '20' : '80'}
+                                                style={{
+                                                    top: `${mark.top}%`,
+                                                    transform:
+                                                        mark.top === 2
+                                                            ? undefined
+                                                            : mark.top === 98
+                                                            ? 'translateY(-100%)'
+                                                            : 'translateY(-50%)',
+                                                }}
+                                            >
+                                                {mark.label}
+                                            </span>
+                                        ))}
+                                    </div>
                                 )}
                                 {waveformVisible && spectrogramVisible && (
                                     <div className="axis-divider-space" />
@@ -3196,13 +3281,26 @@ export default function App({
 
                     {settingsTab === 'waveform' && (
                         <>
-                            <button
-                                className="reset-tab-button"
-                                onClick={() => resetSettingsTab('waveform')}
-                            >
-                                <RestoreIcon aria-hidden="true" />
-                                <span>{tr('恢复本页默认参数')}</span>
-                            </button>
+                            <div className="settings-action-row">
+                                <button
+                                    className="reset-tab-button"
+                                    onClick={() => resetSettingsTab('waveform')}
+                                >
+                                    <RestoreIcon aria-hidden="true" />
+                                    <span>{tr('恢复本页默认参数')}</span>
+                                </button>
+                                <button
+                                    className="reset-tab-button"
+                                    onClick={() => {
+                                        setWaveformAutoFitView(false);
+                                        setWaveformNormalizeRecordingPeak(false);
+                                        setWaveformGainDb(onFitWaveformView());
+                                    }}
+                                >
+                                    <ZoomOutMapIcon aria-hidden="true" />
+                                    <span>{tr('适配当前视图')}</span>
+                                </button>
+                            </div>
                             <div className="select-row one">
                                 <label>
                                     {tr('波形尺度')}
@@ -3215,7 +3313,6 @@ export default function App({
                                         }
                                     >
                                         <option value="linear">{tr('线性振幅')}</option>
-                                        <option value="dbfs-reference">{tr('dBFS 参考')}</option>
                                         <option value="logarithmic">{tr('对数增强')}</option>
                                     </select>
                                 </label>
@@ -3224,9 +3321,62 @@ export default function App({
                                 {tr(
                                     waveformScaleMode === 'linear'
                                         ? '固定数字满刻度，保留真实波形比例'
-                                        : waveformScaleMode === 'dbfs-reference'
-                                        ? '线性绘制波形，以 dBFS 标注振幅位置'
                                         : '放大弱信号，仅改变视觉显示'
+                                )}
+                            </p>
+                            <div className="select-row one">
+                                <label>
+                                    {tr('左轴参考单位')}
+                                    <select
+                                        value={waveformReferenceUnit}
+                                        onChange={(event) =>
+                                            setWaveformReferenceUnit(
+                                                event.target.value as WaveformReferenceUnit
+                                            )
+                                        }
+                                    >
+                                        <option value="dbfs">dBFS</option>
+                                        <option value="dbspl">{splUnitLabel}</option>
+                                        <option value="none">{tr('不显示')}</option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div className="select-row one">
+                                <label>
+                                    {tr('振幅满刻度参考')}
+                                    <select
+                                        value={
+                                            sourceProfileMode === 'live' ||
+                                            !waveformNormalizeRecordingPeak
+                                                ? 'digital-full-scale'
+                                                : 'recording-peak'
+                                        }
+                                        disabled={sourceProfileMode === 'live'}
+                                        onChange={(event) => {
+                                            const normalize =
+                                                event.target.value === 'recording-peak';
+                                            setWaveformNormalizeRecordingPeak(normalize);
+                                            if (normalize) {
+                                                setWaveformAutoFitView(false);
+                                            }
+                                        }}
+                                    >
+                                        <option value="digital-full-scale">
+                                            {tr('固定数字满刻度')}
+                                        </option>
+                                        <option value="recording-peak">
+                                            {tr('整段录音峰值满刻度')}
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+                            <p className="setting-help">
+                                {tr(
+                                    sourceProfileMode === 'live'
+                                        ? 'Live 录音固定使用 PCM ±1.0 数字满刻度，不能切换'
+                                        : waveformNormalizeRecordingPeak
+                                        ? '整段录音的绝对峰值映射到纵轴 ±1.0'
+                                        : 'PCM ±1.0 对应纵轴 ±1.0，保留实际电平，便于跨录音比较'
                                 )}
                             </p>
                             <label className="setting">
@@ -3257,21 +3407,14 @@ export default function App({
                                 <input
                                     type="checkbox"
                                     checked={waveformAutoFitView}
-                                    onChange={(event) =>
-                                        setWaveformAutoFitView(event.target.checked)
-                                    }
+                                    onChange={(event) => {
+                                        setWaveformAutoFitView(event.target.checked);
+                                        if (event.target.checked) {
+                                            setWaveformNormalizeRecordingPeak(false);
+                                        }
+                                    }}
                                 />
                             </label>
-                            <button
-                                className="reset-tab-button"
-                                onClick={() => {
-                                    setWaveformAutoFitView(false);
-                                    setWaveformGainDb(onFitWaveformView());
-                                }}
-                            >
-                                <ZoomOutMapIcon aria-hidden="true" />
-                                <span>{tr('适配一次')}</span>
-                            </button>
                             <div className="waveform-setting-section-label">{tr('电平显示')}</div>
                             <label className="effect-toggle">
                                 <span>

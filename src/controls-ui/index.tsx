@@ -38,5 +38,7 @@ export default function initialiseControlsUi(
             withController((controller) => controller.updateTransport(snapshot)),
         updateSelection: (snapshot) =>
             withController((controller) => controller.updateSelection(snapshot)),
+        updateWaveformAxis: (state) =>
+            withController((controller) => controller.updateWaveformAxis(state)),
     };
 }

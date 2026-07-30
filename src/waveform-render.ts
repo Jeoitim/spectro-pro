@@ -11,15 +11,22 @@ export type WaveformThemeName =
     | 'Spectrum'
     | 'Black to White';
 
-export type WaveformScaleMode = 'linear' | 'dbfs-reference' | 'logarithmic';
+export type WaveformScaleMode = 'linear' | 'logarithmic';
+export type WaveformReferenceUnit = 'dbfs' | 'dbspl' | 'none';
 
 export const dbToLinear = (decibels: number) => 10 ** (decibels / 20);
 
 export const amplitudeToDbfs = (amplitude: number) =>
     amplitude <= 1e-12 ? Number.NEGATIVE_INFINITY : 20 * Math.log10(amplitude);
 
+export const amplitudeToDbspl = (amplitude: number, calibrationDb: number = 0) =>
+    amplitudeToDbfs(amplitude) + 20 * Math.log10(1 / 0.00002) + calibrationDb;
+
 export const compressAmplitude = (sample: number, mu: number = 31) =>
     Math.sign(sample) * (Math.log1p(mu * Math.abs(sample)) / Math.log1p(mu));
+
+export const expandAmplitude = (displayed: number, mu: number = 31) =>
+    Math.sign(displayed) * (Math.expm1(Math.abs(displayed) * Math.log1p(mu)) / mu);
 
 export const WAVEFORM_THEMES: {
     name: WaveformThemeName;
@@ -101,6 +108,9 @@ export interface WaveformDisplayOptions {
     showZeroLine: boolean;
     showPulses: boolean;
     scaleMode: WaveformScaleMode;
+    referenceUnit: WaveformReferenceUnit;
+    splCalibrationDb: number;
+    normalizeRecordingPeak: boolean;
     autoFitView: boolean;
     showPeak: boolean;
     showRms: boolean;
@@ -117,6 +127,10 @@ export interface WaveformRenderParameters {
     viewStartSeconds: number;
     viewEndSeconds: number;
     selection: WaveformSelection | null;
+}
+
+export interface WaveformAxisState {
+    effectiveGain: number;
 }
 
 interface PeakLevel {
@@ -274,6 +288,8 @@ export class WaveformRenderer {
 
     private offlinePeaks: WaveformPeakCache | null = null;
 
+    private offlinePeak = 1;
+
     private offlinePulseTimes: number[] = [];
 
     private liveSamples = new Float32Array(1);
@@ -310,6 +326,9 @@ export class WaveformRenderer {
         showZeroLine: true,
         showPulses: false,
         scaleMode: 'linear',
+        referenceUnit: 'dbfs',
+        splCalibrationDb: 0,
+        normalizeRecordingPeak: false,
         autoFitView: false,
         showPeak: true,
         showRms: true,
@@ -348,6 +367,11 @@ export class WaveformRenderer {
         if (this.offlineSamples !== samples) {
             this.offlineSamples = samples;
             this.offlinePeaks = new WaveformPeakCache(samples);
+            let peak = 0;
+            for (let index = 0; index < samples.length; index += 1) {
+                peak = Math.max(peak, Math.abs(samples[index]));
+            }
+            this.offlinePeak = Math.max(1e-9, peak);
             this.resetAdaptiveDisplay();
         }
         this.offlineSampleRate = sampleRate;
@@ -398,6 +422,7 @@ export class WaveformRenderer {
         this.source = 'none';
         this.offlineSamples = null;
         this.offlinePeaks = null;
+        this.offlinePeak = 1;
         this.offlinePulseTimes = [];
         this.liveLength = 0;
         this.livePulseTimes = [];
@@ -412,12 +437,16 @@ export class WaveformRenderer {
         return clamp(amplitudeToDbfs(0.9 / this.lastVisiblePeak), -24, 24);
     }
 
-    render({ viewStartSeconds, viewEndSeconds, selection }: WaveformRenderParameters) {
+    render({
+        viewStartSeconds,
+        viewEndSeconds,
+        selection,
+    }: WaveformRenderParameters): WaveformAxisState {
         const { context: ctx, canvas } = this;
         const width = canvas.width;
         const height = canvas.height;
         if (width <= 0 || height <= 0) {
-            return;
+            return { effectiveGain: 1 };
         }
 
         ctx.clearRect(0, 0, width, height);
@@ -455,9 +484,14 @@ export class WaveformRenderer {
         }
 
         this.lastVisiblePeak = visiblePeak;
-        const gain = dbToLinear(this.displayOptions.gainDb);
+        const fixedGain = dbToLinear(this.displayOptions.gainDb);
+        const recordingPeakGain =
+            this.displayOptions.normalizeRecordingPeak && this.source === 'offline'
+                ? 1 / this.offlinePeak
+                : 1;
+        const baseGain = fixedGain * recordingPeakGain;
         if (this.displayOptions.autoFitView && visiblePeak >= 1e-8) {
-            const targetGain = 0.9 / Math.max(1e-8, visiblePeak * gain);
+            const targetGain = 0.9 / Math.max(1e-8, visiblePeak * baseGain);
             this.autoGain = this.autoFitWasEnabled
                 ? this.autoGain * 0.9 + targetGain * 0.1
                 : targetGain;
@@ -466,8 +500,9 @@ export class WaveformRenderer {
             this.autoGain = 1;
             this.autoFitWasEnabled = false;
         }
+        const effectiveGain = baseGain * this.autoGain;
         const yForAmplitude = (value: number) => {
-            const adjusted = value * gain * this.autoGain;
+            const adjusted = value * effectiveGain;
             const displayed =
                 this.displayOptions.scaleMode === 'logarithmic'
                     ? compressAmplitude(adjusted)
@@ -487,7 +522,7 @@ export class WaveformRenderer {
         ctx.stroke();
 
         const rms = visibleSampleCount <= 0 ? 0 : Math.sqrt(visibleSumSquares / visibleSampleCount);
-        this.drawLevelReadout(visiblePeak, rms, gain * this.autoGain);
+        this.drawLevelReadout(visiblePeak, rms, effectiveGain);
 
         const xForTime = (seconds: number) => ((seconds - viewStartSeconds) / duration) * width;
         if (this.displayOptions.showPulses) {
@@ -535,6 +570,7 @@ export class WaveformRenderer {
                 ctx.setLineDash([]);
             }
         }
+        return { effectiveGain };
     }
 
     private range(startTimeSeconds: number, endTimeSeconds: number): WaveformRangeStatistics {
@@ -608,19 +644,27 @@ export class WaveformRenderer {
             this.heldPeakUpdatedAt = now;
         }
 
-        const formatDbfs = (value: number) => {
-            const decibels = amplitudeToDbfs(value);
-            return Number.isFinite(decibels) ? `${decibels.toFixed(1)} dBFS` : '−∞ dBFS';
+        const formatLevel = (value: number) => {
+            if (this.displayOptions.referenceUnit === 'none') {
+                return value.toFixed(4);
+            }
+            let decibels = amplitudeToDbfs(value);
+            let unit = 'dBFS';
+            if (this.displayOptions.referenceUnit === 'dbspl') {
+                decibels = amplitudeToDbspl(value, this.displayOptions.splCalibrationDb);
+                unit = this.displayOptions.splCalibrationDb === 0 ? 'dB SPL*' : 'dB SPL';
+            }
+            return Number.isFinite(decibels) ? `${decibels.toFixed(1)} ${unit}` : `−∞ ${unit}`;
         };
         const lines: { label: string; alert?: boolean }[] = [];
         if (showPeak) {
-            lines.push({ label: `Peak  ${formatDbfs(peak)}` });
+            lines.push({ label: `Peak  ${formatLevel(peak)}` });
         }
         if (showRms) {
-            lines.push({ label: `RMS  ${formatDbfs(rms)}` });
+            lines.push({ label: `RMS  ${formatLevel(rms)}` });
         }
         if (showPeakHold) {
-            lines.push({ label: `Hold  ${formatDbfs(this.heldPeak)}` });
+            lines.push({ label: `Hold  ${formatLevel(this.heldPeak)}` });
         }
         if (showClipping && clipped) {
             lines.push({ label: 'CLIP', alert: true });

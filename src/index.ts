@@ -236,6 +236,10 @@ class SpectroEngine {
 
     private lastRenderTime = 0;
 
+    private lastWaveformAxisUpdate = 0;
+
+    private lastWaveformAxisGain = Number.NaN;
+
     private renderFramesPerSecond = 30;
 
     private renderPixelRatio = 1.5;
@@ -1771,11 +1775,24 @@ class SpectroEngine {
             }
             if (this.waveformVisible) {
                 const visible = this.visibleTimeRange();
-                this.waveformRenderer.render({
+                const waveformAxisState = this.waveformRenderer.render({
                     viewStartSeconds: visible.startSeconds,
                     viewEndSeconds: visible.endSeconds,
                     selection: this.selection,
                 });
+                const axisGainChanged =
+                    !Number.isFinite(this.lastWaveformAxisGain) ||
+                    Math.abs(
+                        Math.log(
+                            waveformAxisState.effectiveGain /
+                                Math.max(1e-9, this.lastWaveformAxisGain)
+                        )
+                    ) > 0.0005;
+                if (axisGainChanged && timestamp - this.lastWaveformAxisUpdate >= 50) {
+                    this.lastWaveformAxisUpdate = timestamp;
+                    this.lastWaveformAxisGain = waveformAxisState.effectiveGain;
+                    this.ui.updateWaveformAxis(waveformAxisState);
+                }
             }
         }
         requestAnimationFrame((nextTimestamp) => this.renderLoop(nextTimestamp));
