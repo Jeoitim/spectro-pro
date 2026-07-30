@@ -12,8 +12,10 @@
         "src/analysis.ts",
         "src/i18n.ts",
         "src/math-util.ts",
+        "src/plot-theme.ts",
         "src/pulse-analysis.ts",
         "src/spectrogram.ts",
+        "src/waveform-render.ts",
         "src/types/jsfft*.d.ts",
         "tests/synthetic-analysis.ts"
     ]

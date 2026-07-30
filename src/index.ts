@@ -491,6 +491,10 @@ class SpectroEngine {
         this.overlayDirty = true;
     }
 
+    fitWaveformView() {
+        return this.waveformRenderer.recommendedGainDb();
+    }
+
     async startMicrophone() {
         this.saveActiveView();
         this.stop();
@@ -2119,6 +2123,7 @@ const ui = initialiseControlsUi(appContainer, {
     onPlotThemeChange: (spectrogramThemeName, waveformThemeName) =>
         engine?.setPlotThemes(spectrogramThemeName, waveformThemeName),
     onWaveformDisplayChange: (parameters) => engine?.updateWaveformDisplay(parameters),
+    onFitWaveformView: () => engine?.fitWaveformView() ?? 0,
     onInspect: (x, y) => engine?.inspect(x, y),
     onSelectRange: (xStart, xEnd) => engine?.selectRange(xStart, xEnd),
     onNavigate: (amount) => engine?.navigate(amount),

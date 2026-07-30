@@ -11,7 +11,15 @@ export type WaveformThemeName =
     | 'Spectrum'
     | 'Black to White';
 
-export type WaveformScaleMode = 'dbfs' | 'dbspl' | 'normalized';
+export type WaveformScaleMode = 'linear' | 'dbfs-reference' | 'logarithmic';
+
+export const dbToLinear = (decibels: number) => 10 ** (decibels / 20);
+
+export const amplitudeToDbfs = (amplitude: number) =>
+    amplitude <= 1e-12 ? Number.NEGATIVE_INFINITY : 20 * Math.log10(amplitude);
+
+export const compressAmplitude = (sample: number, mu: number = 31) =>
+    Math.sign(sample) * (Math.log1p(mu * Math.abs(sample)) / Math.log1p(mu));
 
 export const WAVEFORM_THEMES: {
     name: WaveformThemeName;
@@ -88,12 +96,16 @@ const WAVEFORM_THEME_COLORS: Record<
 };
 
 export interface WaveformDisplayOptions {
-    gain: number;
+    gainDb: number;
     lineWidth: number;
     showZeroLine: boolean;
     showPulses: boolean;
     scaleMode: WaveformScaleMode;
-    splCalibrationDb: number;
+    autoFitView: boolean;
+    showPeak: boolean;
+    showRms: boolean;
+    showPeakHold: boolean;
+    showClipping: boolean;
 }
 
 export interface WaveformSelection {
@@ -111,6 +123,15 @@ interface PeakLevel {
     blockSize: number;
     minimum: Float32Array;
     maximum: Float32Array;
+    sumSquares: Float64Array;
+    sampleCounts: Uint32Array;
+}
+
+interface WaveformRangeStatistics {
+    minimum: number;
+    maximum: number;
+    sumSquares: number;
+    sampleCount: number;
 }
 
 class WaveformPeakCache {
@@ -124,45 +145,61 @@ class WaveformPeakCache {
         const blockCount = Math.ceil(samples.length / blockSize);
         const minimum = new Float32Array(blockCount);
         const maximum = new Float32Array(blockCount);
+        const sumSquares = new Float64Array(blockCount);
+        const sampleCounts = new Uint32Array(blockCount);
         for (let block = 0; block < blockCount; block += 1) {
             let low = Number.POSITIVE_INFINITY;
             let high = Number.NEGATIVE_INFINITY;
+            let squareTotal = 0;
             const start = block * blockSize;
             const end = Math.min(samples.length, start + blockSize);
             for (let index = start; index < end; index += 1) {
                 low = Math.min(low, samples[index]);
                 high = Math.max(high, samples[index]);
+                squareTotal += samples[index] ** 2;
             }
             minimum[block] = Number.isFinite(low) ? low : 0;
             maximum[block] = Number.isFinite(high) ? high : 0;
+            sumSquares[block] = squareTotal;
+            sampleCounts[block] = end - start;
         }
-        this.levels.push({ blockSize, minimum, maximum });
+        this.levels.push({ blockSize, minimum, maximum, sumSquares, sampleCounts });
 
         let previous = this.levels[0];
         while (previous.minimum.length > 1) {
             const nextCount = Math.ceil(previous.minimum.length / 2);
             const nextMinimum = new Float32Array(nextCount);
             const nextMaximum = new Float32Array(nextCount);
+            const nextSumSquares = new Float64Array(nextCount);
+            const nextSampleCounts = new Uint32Array(nextCount);
             for (let index = 0; index < nextCount; index += 1) {
                 const first = index * 2;
                 const second = Math.min(previous.minimum.length - 1, first + 1);
                 nextMinimum[index] = Math.min(previous.minimum[first], previous.minimum[second]);
                 nextMaximum[index] = Math.max(previous.maximum[first], previous.maximum[second]);
+                nextSumSquares[index] =
+                    previous.sumSquares[first] +
+                    (second === first ? 0 : previous.sumSquares[second]);
+                nextSampleCounts[index] =
+                    previous.sampleCounts[first] +
+                    (second === first ? 0 : previous.sampleCounts[second]);
             }
             previous = {
                 blockSize: previous.blockSize * 2,
                 minimum: nextMinimum,
                 maximum: nextMaximum,
+                sumSquares: nextSumSquares,
+                sampleCounts: nextSampleCounts,
             };
             this.levels.push(previous);
         }
     }
 
-    range(start: number, end: number): [number, number] {
+    range(start: number, end: number): WaveformRangeStatistics {
         const firstSample = clamp(Math.floor(start), 0, this.samples.length);
         const lastSample = clamp(Math.ceil(end), firstSample, this.samples.length);
         if (lastSample <= firstSample) {
-            return [0, 0];
+            return { minimum: 0, maximum: 0, sumSquares: 0, sampleCount: 0 };
         }
 
         const samplesInRange = lastSample - firstSample;
@@ -177,22 +214,52 @@ class WaveformPeakCache {
         if (level === null) {
             let low = Number.POSITIVE_INFINITY;
             let high = Number.NEGATIVE_INFINITY;
+            let sumSquares = 0;
             for (let index = firstSample; index < lastSample; index += 1) {
                 low = Math.min(low, this.samples[index]);
                 high = Math.max(high, this.samples[index]);
+                sumSquares += this.samples[index] ** 2;
             }
-            return [low, high];
+            return {
+                minimum: low,
+                maximum: high,
+                sumSquares,
+                sampleCount: lastSample - firstSample,
+            };
         }
 
-        const firstBlock = Math.floor(firstSample / level.blockSize);
-        const lastBlock = Math.min(level.minimum.length, Math.ceil(lastSample / level.blockSize));
+        const firstBlock = Math.ceil(firstSample / level.blockSize);
+        const lastBlock = Math.min(level.minimum.length, Math.floor(lastSample / level.blockSize));
         let low = Number.POSITIVE_INFINITY;
         let high = Number.NEGATIVE_INFINITY;
+        let sumSquares = 0;
+        let sampleCount = 0;
+        const addSample = (sample: number) => {
+            low = Math.min(low, sample);
+            high = Math.max(high, sample);
+            sumSquares += sample ** 2;
+            sampleCount += 1;
+        };
+        const leadingEnd = Math.min(lastSample, firstBlock * level.blockSize);
+        for (let index = firstSample; index < leadingEnd; index += 1) {
+            addSample(this.samples[index]);
+        }
         for (let block = firstBlock; block < lastBlock; block += 1) {
             low = Math.min(low, level.minimum[block]);
             high = Math.max(high, level.maximum[block]);
+            sumSquares += level.sumSquares[block];
+            sampleCount += level.sampleCounts[block];
         }
-        return [low, high];
+        const trailingStart = Math.max(leadingEnd, lastBlock * level.blockSize);
+        for (let index = trailingStart; index < lastSample; index += 1) {
+            addSample(this.samples[index]);
+        }
+        return {
+            minimum: low,
+            maximum: high,
+            sumSquares,
+            sampleCount,
+        };
     }
 }
 
@@ -206,8 +273,6 @@ export class WaveformRenderer {
     private offlineSampleRate = 48000;
 
     private offlinePeaks: WaveformPeakCache | null = null;
-
-    private offlinePeak = 1;
 
     private offlinePulseTimes: number[] = [];
 
@@ -229,13 +294,27 @@ export class WaveformRenderer {
 
     private themeName: WaveformThemeName = 'Aurora';
 
+    private autoGain = 1;
+
+    private autoFitWasEnabled = false;
+
+    private lastVisiblePeak = 0;
+
+    private heldPeak = 0;
+
+    private heldPeakUpdatedAt = 0;
+
     private displayOptions: WaveformDisplayOptions = {
-        gain: 1,
+        gainDb: 0,
         lineWidth: 1,
         showZeroLine: true,
         showPulses: false,
-        scaleMode: 'dbfs',
-        splCalibrationDb: 0,
+        scaleMode: 'linear',
+        autoFitView: false,
+        showPeak: true,
+        showRms: true,
+        showPeakHold: false,
+        showClipping: true,
     };
 
     constructor(canvas: HTMLCanvasElement) {
@@ -269,11 +348,7 @@ export class WaveformRenderer {
         if (this.offlineSamples !== samples) {
             this.offlineSamples = samples;
             this.offlinePeaks = new WaveformPeakCache(samples);
-            let peak = 0;
-            for (let index = 0; index < samples.length; index += 1) {
-                peak = Math.max(peak, Math.abs(samples[index]));
-            }
-            this.offlinePeak = Math.max(1e-9, peak);
+            this.resetAdaptiveDisplay();
         }
         this.offlineSampleRate = sampleRate;
         this.source = 'offline';
@@ -291,6 +366,7 @@ export class WaveformRenderer {
         this.liveEndTimeSeconds = 0;
         this.livePulseTimes = [];
         this.source = 'live';
+        this.resetAdaptiveDisplay();
     }
 
     appendLive(samples: Float32Array, endTimeSeconds: number) {
@@ -322,11 +398,18 @@ export class WaveformRenderer {
         this.source = 'none';
         this.offlineSamples = null;
         this.offlinePeaks = null;
-        this.offlinePeak = 1;
         this.offlinePulseTimes = [];
         this.liveLength = 0;
         this.livePulseTimes = [];
         this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.resetAdaptiveDisplay();
+    }
+
+    recommendedGainDb() {
+        if (this.lastVisiblePeak < 1e-8) {
+            return 0;
+        }
+        return clamp(amplitudeToDbfs(0.9 / this.lastVisiblePeak), -24, 24);
     }
 
     render({ viewStartSeconds, viewEndSeconds, selection }: WaveformRenderParameters) {
@@ -357,52 +440,39 @@ export class WaveformRenderer {
         }
         const envelope = this.envelope;
         let visiblePeak = 0;
+        let visibleSumSquares = 0;
+        let visibleSampleCount = 0;
         for (let x = 0; x < width; x += 1) {
             const startTime = viewStartSeconds + (x / width) * duration;
             const endTime = viewStartSeconds + ((x + 1) / width) * duration;
-            const [low, high] = this.range(startTime, endTime);
+            const statistics = this.range(startTime, endTime);
+            const { minimum: low, maximum: high } = statistics;
             envelope[x * 2] = low;
             envelope[x * 2 + 1] = high;
             visiblePeak = Math.max(visiblePeak, Math.abs(low), Math.abs(high));
+            visibleSumSquares += statistics.sumSquares;
+            visibleSampleCount += statistics.sampleCount;
         }
 
-        const normalizedReference =
-            this.source === 'offline'
-                ? this.offlinePeak
-                : Math.max(1e-9, Math.min(1, visiblePeak * 1.08));
+        this.lastVisiblePeak = visiblePeak;
+        const gain = dbToLinear(this.displayOptions.gainDb);
+        if (this.displayOptions.autoFitView && visiblePeak >= 1e-8) {
+            const targetGain = 0.9 / Math.max(1e-8, visiblePeak * gain);
+            this.autoGain = this.autoFitWasEnabled
+                ? this.autoGain * 0.9 + targetGain * 0.1
+                : targetGain;
+            this.autoFitWasEnabled = true;
+        } else {
+            this.autoGain = 1;
+            this.autoFitWasEnabled = false;
+        }
         const yForAmplitude = (value: number) => {
-            const adjusted = value * this.displayOptions.gain;
-            let signedLevel: number;
-            if (this.displayOptions.scaleMode === 'normalized') {
-                signedLevel = clamp(adjusted / normalizedReference, -1, 1);
-            } else {
-                const magnitude = Math.abs(adjusted);
-                if (magnitude < 1e-12) {
-                    signedLevel = 0;
-                } else if (this.displayOptions.scaleMode === 'dbspl') {
-                    const floorDbSpl = 20;
-                    const ceilingDbSpl =
-                        20 * Math.log10(1 / 0.00002) + this.displayOptions.splCalibrationDb;
-                    const levelDbSpl =
-                        20 * Math.log10(magnitude / 0.00002) +
-                        this.displayOptions.splCalibrationDb;
-                    signedLevel =
-                        Math.sign(adjusted) *
-                        clamp(
-                            (levelDbSpl - floorDbSpl) /
-                                Math.max(1e-9, ceilingDbSpl - floorDbSpl),
-                            0,
-                            1
-                        );
-                } else {
-                    const floorDbFs = -60;
-                    const levelDbFs = 20 * Math.log10(magnitude);
-                    signedLevel =
-                        Math.sign(adjusted) *
-                        clamp((levelDbFs - floorDbFs) / -floorDbFs, 0, 1);
-                }
-            }
-            return height / 2 - signedLevel * (height * 0.46);
+            const adjusted = value * gain * this.autoGain;
+            const displayed =
+                this.displayOptions.scaleMode === 'logarithmic'
+                    ? compressAmplitude(adjusted)
+                    : adjusted;
+            return height / 2 - clamp(displayed, -1, 1) * (height * 0.48);
         };
 
         ctx.strokeStyle = theme.waveform;
@@ -415,6 +485,9 @@ export class WaveformRenderer {
             ctx.lineTo(x + 0.5, yForAmplitude(low));
         }
         ctx.stroke();
+
+        const rms = visibleSampleCount <= 0 ? 0 : Math.sqrt(visibleSumSquares / visibleSampleCount);
+        this.drawLevelReadout(visiblePeak, rms, gain * this.autoGain);
 
         const xForTime = (seconds: number) => ((seconds - viewStartSeconds) / duration) * width;
         if (this.displayOptions.showPulses) {
@@ -464,7 +537,7 @@ export class WaveformRenderer {
         }
     }
 
-    private range(startTimeSeconds: number, endTimeSeconds: number): [number, number] {
+    private range(startTimeSeconds: number, endTimeSeconds: number): WaveformRangeStatistics {
         if (
             this.source === 'offline' &&
             this.offlineSamples !== null &&
@@ -476,7 +549,7 @@ export class WaveformRenderer {
             );
         }
         if (this.source !== 'live' || this.liveLength === 0) {
-            return [0, 0];
+            return { minimum: 0, maximum: 0, sumSquares: 0, sampleCount: 0 };
         }
 
         const liveStartTime = this.liveEndTimeSeconds - this.liveLength / this.liveSampleRate;
@@ -491,7 +564,7 @@ export class WaveformRenderer {
             this.liveLength
         );
         if (last <= first) {
-            return [0, 0];
+            return { minimum: 0, maximum: 0, sumSquares: 0, sampleCount: 0 };
         }
 
         const oldestIndex =
@@ -499,11 +572,86 @@ export class WaveformRenderer {
             this.liveSamples.length;
         let low = Number.POSITIVE_INFINITY;
         let high = Number.NEGATIVE_INFINITY;
+        let sumSquares = 0;
         for (let logicalIndex = first; logicalIndex < last; logicalIndex += 1) {
             const sample = this.liveSamples[(oldestIndex + logicalIndex) % this.liveSamples.length];
             low = Math.min(low, sample);
             high = Math.max(high, sample);
+            sumSquares += sample ** 2;
         }
-        return [Number.isFinite(low) ? low : 0, Number.isFinite(high) ? high : 0];
+        return {
+            minimum: Number.isFinite(low) ? low : 0,
+            maximum: Number.isFinite(high) ? high : 0,
+            sumSquares,
+            sampleCount: last - first,
+        };
+    }
+
+    private resetAdaptiveDisplay() {
+        this.autoGain = 1;
+        this.autoFitWasEnabled = false;
+        this.lastVisiblePeak = 0;
+        this.heldPeak = 0;
+        this.heldPeakUpdatedAt = 0;
+    }
+
+    private drawLevelReadout(peak: number, rms: number, displayGain: number) {
+        const { showPeak, showRms, showPeakHold, showClipping } = this.displayOptions;
+        const clipped = peak * displayGain > 1;
+        if (!showPeak && !showRms && !showPeakHold && !(showClipping && clipped)) {
+            return;
+        }
+
+        const now = performance.now();
+        if (peak >= this.heldPeak || now - this.heldPeakUpdatedAt > 1500) {
+            this.heldPeak = peak;
+            this.heldPeakUpdatedAt = now;
+        }
+
+        const formatDbfs = (value: number) => {
+            const decibels = amplitudeToDbfs(value);
+            return Number.isFinite(decibels) ? `${decibels.toFixed(1)} dBFS` : '−∞ dBFS';
+        };
+        const lines: { label: string; alert?: boolean }[] = [];
+        if (showPeak) {
+            lines.push({ label: `Peak  ${formatDbfs(peak)}` });
+        }
+        if (showRms) {
+            lines.push({ label: `RMS  ${formatDbfs(rms)}` });
+        }
+        if (showPeakHold) {
+            lines.push({ label: `Hold  ${formatDbfs(this.heldPeak)}` });
+        }
+        if (showClipping && clipped) {
+            lines.push({ label: 'CLIP', alert: true });
+        }
+
+        const pixelRatio = Math.max(1, this.canvas.width / Math.max(1, this.canvas.clientWidth));
+        const fontSize = 11 * pixelRatio;
+        const lineHeight = 16 * pixelRatio;
+        const padding = 8 * pixelRatio;
+        const gap = 8 * pixelRatio;
+        const { context: ctx, canvas } = this;
+        ctx.save();
+        ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Consolas, monospace`;
+        const contentWidth = Math.max(...lines.map(({ label }) => ctx.measureText(label).width));
+        const boxWidth = contentWidth + padding * 2;
+        const boxHeight = lines.length * lineHeight + padding * 1.5;
+        const left = canvas.width - boxWidth - gap;
+        const top = gap;
+        ctx.fillStyle =
+            this.themeName === 'Praat' || this.themeName === 'Audacity®'
+                ? 'rgba(255,255,255,0.82)'
+                : 'rgba(2,6,15,0.72)';
+        ctx.fillRect(left, top, boxWidth, boxHeight);
+        lines.forEach(({ label, alert }, index) => {
+            ctx.fillStyle = alert
+                ? '#ff3b30'
+                : this.themeName === 'Praat' || this.themeName === 'Audacity®'
+                ? '#172033'
+                : '#dce8f8';
+            ctx.fillText(label, left + padding, top + padding + (index + 0.72) * lineHeight);
+        });
+        ctx.restore();
     }
 }

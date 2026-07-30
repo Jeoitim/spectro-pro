@@ -12,6 +12,7 @@ import { translate } from '../src/i18n';
 import { frequencyToScale, scaleToFrequency } from '../src/math-util';
 import { detectPulseTimes } from '../src/pulse-analysis';
 import { generateSpectrogram, Scale, SpectrogramWindowFunction } from '../src/spectrogram';
+import { amplitudeToDbfs, compressAmplitude, dbToLinear } from '../src/waveform-render';
 
 const SAMPLE_RATE = 48000;
 const FORMANT_SAMPLE_RATE = 11000;
@@ -378,6 +379,13 @@ function testFrequencyScales() {
     }
 }
 
+function testWaveformDisplayMath() {
+    assertNear('−6 dB linear gain', dbToLinear(-6), 0.501187, 0.000001);
+    assertNear('half-scale dBFS', amplitudeToDbfs(0.5), -6.0206, 0.0001);
+    assertNear('log enhancement sign', compressAmplitude(-0.1), -0.407125, 0.000001);
+    assertNear('log enhancement full scale', compressAmplitude(1), 1, 1e-12);
+}
+
 function testSpectrogramWindowFunctions() {
     const functions: SpectrogramWindowFunction[] = [
         'rectangular',
@@ -430,6 +438,12 @@ function testLocalization() {
         throw new Error('Spectrogram view controls localization is incomplete');
     }
     if (
+        translate('线性振幅', 'en') !== 'Linear amplitude' ||
+        translate('自动适配当前视图', 'en') !== 'Auto-fit current view'
+    ) {
+        throw new Error('Waveform settings localization is incomplete');
+    }
+    if (
         !translate(
             '自定义语音建议：较短窗口突出时间变化与共振峰，较长窗口突出基频与谐波；可从 15 ms 开始按目标调节。',
             'en'
@@ -450,6 +464,7 @@ testRealtimeAnalysisPrecision();
 testFormants();
 testSpectrogramDisplayPreEmphasis();
 testFrequencyScales();
+testWaveformDisplayMath();
 testSpectrogramWindowFunctions();
 testLocalization();
 

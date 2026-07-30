@@ -69,9 +69,23 @@ const ENGLISH: { [key: string]: string } = {
     显示或隐藏波形: 'Show or hide waveform',
     显示或隐藏语谱图: 'Show or hide spectrogram',
     调整波形和语谱图高度: 'Resize waveform and spectrogram',
-    归一化振幅: 'Normalized amplitude',
-    波形纵轴单位: 'Waveform vertical scale',
-    归一化: 'Normalized',
+    波形尺度: 'Waveform scale',
+    线性振幅: 'Linear amplitude',
+    'dBFS 参考': 'dBFS reference',
+    对数增强: 'Log enhancement',
+    '固定数字满刻度，保留真实波形比例':
+        'Fixed digital full scale that preserves the true waveform proportions',
+    '线性绘制波形，以 dBFS 标注振幅位置': 'Draw linearly and label amplitude positions in dBFS',
+    '放大弱信号，仅改变视觉显示': 'Enhance weak signals for display only',
+    '调整波形可视高度，不改变录音内容':
+        'Adjust the visible waveform height without changing the recording',
+    自动适配当前视图: 'Auto-fit current view',
+    '根据可见区域峰值调整，不用于比较真实电平':
+        'Adjust from the visible peak; not suitable for true level comparisons',
+    适配一次: 'Fit once',
+    电平显示: 'Level display',
+    峰值保持: 'Peak hold',
+    削波提示: 'Clipping warning',
     语谱主题: 'Spectrogram theme',
     波形主题: 'Waveform theme',
     波形垂直缩放: 'Waveform vertical scale',
@@ -192,6 +206,8 @@ const ENGLISH: { [key: string]: string } = {
     SPL校准偏移: 'SPL calibration offset',
     '未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。':
         'Without a sound-level meter calibration, compare relative changes only. Use the offset for microphone systems with a known SPL.',
+    '当前按 Praat 约定假定 1.0 样本单位 = 1 Pa。未经声级计校准时，绝对 dB SPL 仅作参考；校准偏移用于已知声压级的麦克风系统。':
+        'Following the Praat convention, 1.0 sample unit is treated as 1 Pa. Without sound-level meter calibration, absolute dB SPL is only a reference; use the offset for systems with a known SPL.',
     宽带语谱: 'Broadband spectrogram',
     窄带语谱: 'Narrowband spectrogram',
     自定义语谱: 'Custom spectrogram',
