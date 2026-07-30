@@ -1081,7 +1081,7 @@ export default function App({
                 event.metaKey ||
                 (target instanceof HTMLElement &&
                     (target.isContentEditable ||
-                        target.closest('input, select, textarea, button') !== null))
+                        target.closest('input, select, textarea') !== null))
             ) {
                 return;
             }

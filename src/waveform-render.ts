@@ -681,11 +681,13 @@ export class WaveformRenderer {
             lines.push({ label: 'CLIP', alert: true });
         }
 
-        const pixelRatio = Math.max(1, this.canvas.width / Math.max(1, this.canvas.clientWidth));
-        const fontSize = 11 * pixelRatio;
-        const lineHeight = 16 * pixelRatio;
-        const padding = 8 * pixelRatio;
-        const gap = 8 * pixelRatio;
+        const clientWidth = Math.max(1, this.canvas.clientWidth);
+        const pixelRatio = Math.max(1, this.canvas.width / clientWidth);
+        const narrow = clientWidth < 760;
+        const fontSize = (narrow ? 9 : 11) * pixelRatio;
+        const lineHeight = (narrow ? 13 : 16) * pixelRatio;
+        const padding = (narrow ? 5 : 8) * pixelRatio;
+        const gap = (narrow ? 5 : 8) * pixelRatio;
         const { context: ctx, canvas } = this;
         ctx.save();
         ctx.font = `600 ${fontSize}px ui-monospace, SFMono-Regular, Consolas, monospace`;
