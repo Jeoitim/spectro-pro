@@ -1863,9 +1863,12 @@ export default function App({
             decibels = amplitudeToDbspl(rawAmplitude, splCalibration);
             unit = splUnitLabel;
         }
-        return `${decibels > 0 ? '+' : decibels < 0 ? '−' : ''}${Math.abs(decibels).toFixed(1)}${
-            includeUnit ? ` ${unit}` : ''
-        }`;
+        return {
+            value: `${decibels > 0 ? '+' : decibels < 0 ? '−' : ''}${Math.abs(decibels).toFixed(
+                1
+            )}`,
+            unit: includeUnit ? unit : undefined,
+        };
     };
     const waveformReferenceMarks =
         waveformReferenceUnit === 'none'
@@ -1879,7 +1882,7 @@ export default function App({
                       top: 26,
                       label: formatWaveformReference(waveformInputAtDisplayLevel(0.5)),
                   },
-                  { top: 50, label: '−∞' },
+                  { top: 50, label: { value: '−∞', unit: undefined } },
                   {
                       top: 74,
                       label: formatWaveformReference(waveformInputAtDisplayLevel(0.5)),
@@ -2513,8 +2516,14 @@ export default function App({
                                     <div className="waveform-axis waveform-axis-left">
                                         {waveformReferenceMarks.map((mark, index) => (
                                             <span
-                                                key={`${mark.label}-${index}`}
-                                                className="waveform-scale-mark"
+                                                key={`${mark.label.value}-${
+                                                    mark.label.unit ?? ''
+                                                }-${index}`}
+                                                className={`waveform-scale-mark${
+                                                    mark.label.unit
+                                                        ? ' waveform-scale-mark-unit'
+                                                        : ''
+                                                }`}
                                                 data-axis-label
                                                 data-axis-priority={mark.top === 50 ? '20' : '80'}
                                                 style={{
@@ -2527,7 +2536,10 @@ export default function App({
                                                             : 'translateY(-50%)',
                                                 }}
                                             >
-                                                {mark.label}
+                                                <b>{mark.label.value}</b>
+                                                {mark.label.unit && (
+                                                    <small>{mark.label.unit}</small>
+                                                )}
                                             </span>
                                         ))}
                                     </div>

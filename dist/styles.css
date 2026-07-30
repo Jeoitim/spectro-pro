@@ -1183,6 +1183,36 @@ button.media-row {
     text-align: right;
 }
 
+.waveform-axis-left .waveform-scale-mark-unit {
+    display: flex;
+    width: max-content;
+    max-width: calc(100% - 10px);
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    column-gap: 3px;
+    row-gap: 1px;
+    white-space: normal;
+}
+
+.waveform-scale-mark b,
+.waveform-scale-mark small {
+    display: block;
+    flex: 0 0 auto;
+    font: inherit;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.waveform-scale-mark b {
+    font-weight: inherit;
+}
+
+.waveform-scale-mark small {
+    color: #66859a;
+    font-size: 8px;
+}
+
 .waveform-axis .waveform-scale-mark.scale-top {
     top: 0;
 }
