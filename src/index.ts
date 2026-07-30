@@ -240,6 +240,8 @@ class SpectroEngine {
 
     private lastWaveformAxisGain = Number.NaN;
 
+    private lastWaveformAmplitudeReference = Number.NaN;
+
     private renderFramesPerSecond = 30;
 
     private renderPixelRatio = 1.5;
@@ -1788,9 +1790,18 @@ class SpectroEngine {
                                 Math.max(1e-9, this.lastWaveformAxisGain)
                         )
                     ) > 0.0005;
-                if (axisGainChanged && timestamp - this.lastWaveformAxisUpdate >= 50) {
+                const amplitudeReferenceChanged =
+                    !Number.isFinite(this.lastWaveformAmplitudeReference) ||
+                    Math.abs(
+                        waveformAxisState.amplitudeReference - this.lastWaveformAmplitudeReference
+                    ) > 1e-9;
+                if (
+                    (axisGainChanged || amplitudeReferenceChanged) &&
+                    timestamp - this.lastWaveformAxisUpdate >= 50
+                ) {
                     this.lastWaveformAxisUpdate = timestamp;
                     this.lastWaveformAxisGain = waveformAxisState.effectiveGain;
+                    this.lastWaveformAmplitudeReference = waveformAxisState.amplitudeReference;
                     this.ui.updateWaveformAxis(waveformAxisState);
                 }
             }

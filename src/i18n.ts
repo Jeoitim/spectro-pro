@@ -74,15 +74,15 @@ const ENGLISH: { [key: string]: string } = {
     对数增强: 'Log enhancement',
     左轴参考单位: 'Left-axis reference unit',
     不显示: 'Hidden',
-    振幅满刻度参考: 'Amplitude full-scale reference',
-    固定数字满刻度: 'Fixed digital full scale',
-    整段录音峰值满刻度: 'Whole-recording peak full scale',
-    'Live 录音固定使用 PCM ±1.0 数字满刻度，不能切换':
-        'Live recording uses fixed PCM ±1.0 digital full scale and cannot be changed',
-    '整段录音的绝对峰值映射到纵轴 ±1.0':
-        'Map the absolute peak of the whole recording to ±1.0 on the axis',
-    'PCM ±1.0 对应纵轴 ±1.0，保留实际电平，便于跨录音比较':
-        'Map PCM ±1.0 to axis ±1.0, preserving actual levels for comparisons across recordings',
+    振幅单位基准: 'Amplitude unit reference',
+    '原始 PCM 电平基准': 'Raw PCM level reference',
+    整段录音峰值基准: 'Whole-recording peak reference',
+    'Live 录音固定使用原始 PCM 电平基准，不能切换':
+        'Live recording uses the raw PCM level reference and cannot be changed',
+    '整段录音绝对峰值定义为振幅 1.0，右轴仍使用 ±1.0 振幅单位':
+        'Define the whole recording’s absolute peak as amplitude 1.0; the right axis remains in ±1.0 amplitude units',
+    '原始 PCM ±1.0 定义为振幅 ±1.0，保留文件实际数字电平':
+        'Define raw PCM ±1.0 as amplitude ±1.0, preserving the file’s actual digital level',
     '固定数字满刻度，保留真实波形比例':
         'Fixed digital full scale that preserves the true waveform proportions',
     '线性绘制波形，以 dBFS 标注振幅位置': 'Draw linearly and label amplitude positions in dBFS',
@@ -213,7 +213,12 @@ const ENGLISH: { [key: string]: string } = {
     音强窗Pitchfloor: 'Intensity window pitch floor',
     显示下限: 'Display floor',
     显示上限: 'Display ceiling',
-    SPL校准偏移: 'SPL calibration offset',
+    设备校准偏移: 'Device calibration offset',
+    波形内容基准补偿: 'Waveform content-reference compensation',
+    '根据当前录音峰值自动计算，仅用于波形坐标换算':
+        'Calculated automatically from the current recording peak; used only for waveform-axis conversion',
+    '使用整段录音峰值基准时，波形坐标自动使用 20 log10（录音峰值）的内容基准补偿；使用原始 PCM 电平基准时补偿为 0 dB。音强曲线始终根据原始样本实际电平计算，不受波形显示基准影响。设备校准偏移应使用相同录音增益下的已知声压参考信号确定。':
+        'With the whole-recording peak reference, the waveform axis automatically uses 20 log10(recording peak) as content-reference compensation; the raw PCM level reference uses 0 dB. The intensity contour is always calculated from the actual level of the original samples and is unaffected by the waveform display reference. Determine the device calibration offset from a known sound-pressure reference recorded at the same gain.',
     '未经声级计校准时只比较相对变化；校准偏移用于已知声压级的麦克风系统。':
         'Without a sound-level meter calibration, compare relative changes only. Use the offset for microphone systems with a known SPL.',
     '当前按 Praat 约定假定 1.0 样本单位 = 1 Pa。未经声级计校准时，绝对 dB SPL 仅作参考；校准偏移用于已知声压级的麦克风系统。':

@@ -448,7 +448,7 @@ function testLocalization() {
     if (
         translate('线性振幅', 'en') !== 'Linear amplitude' ||
         translate('自动适配当前视图', 'en') !== 'Auto-fit current view' ||
-        translate('整段录音峰值满刻度', 'en') !== 'Whole-recording peak full scale'
+        translate('整段录音峰值基准', 'en') !== 'Whole-recording peak reference'
     ) {
         throw new Error('Waveform settings localization is incomplete');
     }

@@ -131,6 +131,8 @@ export interface WaveformRenderParameters {
 
 export interface WaveformAxisState {
     effectiveGain: number;
+    amplitudeUnitGain: number;
+    amplitudeReference: number;
 }
 
 interface PeakLevel {
@@ -446,7 +448,11 @@ export class WaveformRenderer {
         const width = canvas.width;
         const height = canvas.height;
         if (width <= 0 || height <= 0) {
-            return { effectiveGain: 1 };
+            return {
+                effectiveGain: 1,
+                amplitudeUnitGain: 1,
+                amplitudeReference: 1,
+            };
         }
 
         ctx.clearRect(0, 0, width, height);
@@ -485,10 +491,11 @@ export class WaveformRenderer {
 
         this.lastVisiblePeak = visiblePeak;
         const fixedGain = dbToLinear(this.displayOptions.gainDb);
-        const recordingPeakGain =
+        const amplitudeReference =
             this.displayOptions.normalizeRecordingPeak && this.source === 'offline'
-                ? 1 / this.offlinePeak
+                ? this.offlinePeak
                 : 1;
+        const recordingPeakGain = 1 / amplitudeReference;
         const baseGain = fixedGain * recordingPeakGain;
         if (this.displayOptions.autoFitView && visiblePeak >= 1e-8) {
             const targetGain = 0.9 / Math.max(1e-8, visiblePeak * baseGain);
@@ -570,7 +577,11 @@ export class WaveformRenderer {
                 ctx.setLineDash([]);
             }
         }
-        return { effectiveGain };
+        return {
+            effectiveGain,
+            amplitudeUnitGain: fixedGain * this.autoGain,
+            amplitudeReference,
+        };
     }
 
     private range(startTimeSeconds: number, endTimeSeconds: number): WaveformRangeStatistics {

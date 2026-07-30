@@ -531,6 +531,8 @@ export default function App({
     );
     const [waveformAxisState, setWaveformAxisState] = useState<WaveformAxisState>({
         effectiveGain: 1,
+        amplitudeUnitGain: 1,
+        amplitudeReference: 1,
     });
     const [waveformGainDb, setWaveformGainDb] = useState(
         saved.liveProfile?.waveformGainDb ??
@@ -1826,7 +1828,9 @@ export default function App({
                       ).toFixed(3)}%`
                   ),
               };
-    const waveformAxisGain = Math.max(1e-9, waveformAxisState.effectiveGain);
+    const waveformAxisGain = Math.max(1e-9, waveformAxisState.amplitudeUnitGain);
+    const waveformContentReferenceDb =
+        20 * Math.log10(Math.max(1e-9, waveformAxisState.amplitudeReference));
     const waveformInputAtDisplayLevel = (displayLevel: number) =>
         (waveformScaleMode === 'logarithmic' ? expandAmplitude(displayLevel) : displayLevel) /
         waveformAxisGain;
@@ -1852,10 +1856,11 @@ export default function App({
         },
     ];
     const formatWaveformReference = (amplitude: number, includeUnit: boolean = false) => {
-        let decibels = 20 * Math.log10(Math.max(1e-12, amplitude));
+        const rawAmplitude = amplitude * waveformAxisState.amplitudeReference;
+        let decibels = 20 * Math.log10(Math.max(1e-12, rawAmplitude));
         let unit = 'dBFS';
         if (waveformReferenceUnit === 'dbspl') {
-            decibels = amplitudeToDbspl(amplitude, splCalibration);
+            decibels = amplitudeToDbspl(rawAmplitude, splCalibration);
             unit = splUnitLabel;
         }
         return `${decibels > 0 ? '+' : decibels < 0 ? '−' : ''}${Math.abs(decibels).toFixed(1)}${
@@ -3343,7 +3348,7 @@ export default function App({
                             </div>
                             <div className="select-row one">
                                 <label>
-                                    {tr('振幅满刻度参考')}
+                                    {tr('振幅单位基准')}
                                     <select
                                         value={
                                             sourceProfileMode === 'live' ||
@@ -3362,10 +3367,10 @@ export default function App({
                                         }}
                                     >
                                         <option value="digital-full-scale">
-                                            {tr('固定数字满刻度')}
+                                            {tr('原始 PCM 电平基准')}
                                         </option>
                                         <option value="recording-peak">
-                                            {tr('整段录音峰值满刻度')}
+                                            {tr('整段录音峰值基准')}
                                         </option>
                                     </select>
                                 </label>
@@ -3373,10 +3378,10 @@ export default function App({
                             <p className="setting-help">
                                 {tr(
                                     sourceProfileMode === 'live'
-                                        ? 'Live 录音固定使用 PCM ±1.0 数字满刻度，不能切换'
+                                        ? 'Live 录音固定使用原始 PCM 电平基准，不能切换'
                                         : waveformNormalizeRecordingPeak
-                                        ? '整段录音的绝对峰值映射到纵轴 ±1.0'
-                                        : 'PCM ±1.0 对应纵轴 ±1.0，保留实际电平，便于跨录音比较'
+                                        ? '整段录音绝对峰值定义为振幅 1.0，右轴仍使用 ±1.0 振幅单位'
+                                        : '原始 PCM ±1.0 定义为振幅 ±1.0，保留文件实际数字电平'
                                 )}
                             </p>
                             <label className="setting">
@@ -3811,7 +3816,7 @@ export default function App({
                             </label>
                             <label className="setting">
                                 <span>
-                                    {tr('SPL校准偏移')}{' '}
+                                    {tr('设备校准偏移')}{' '}
                                     <em>
                                         {splCalibration > 0 ? '+' : ''}
                                         {splCalibration} dB
@@ -3828,6 +3833,18 @@ export default function App({
                                     }
                                 />
                             </label>
+                            <div className="calibration-readout">
+                                <span>
+                                    <strong>{tr('波形内容基准补偿')}</strong>
+                                    <small>
+                                        {tr('根据当前录音峰值自动计算，仅用于波形坐标换算')}
+                                    </small>
+                                </span>
+                                <em>
+                                    {waveformContentReferenceDb > 0 ? '+' : ''}
+                                    {waveformContentReferenceDb.toFixed(1)} dB
+                                </em>
+                            </div>
                             <label className="setting">
                                 <span>
                                     {tr('曲线粗细')} <em>{intensityLineWidth.toFixed(1)} px</em>
@@ -3845,7 +3862,7 @@ export default function App({
                             </label>
                             <p className="setting-help">
                                 {tr(
-                                    '当前按 Praat 约定假定 1.0 样本单位 = 1 Pa。未经声级计校准时，绝对 dB SPL 仅作参考；校准偏移用于已知声压级的麦克风系统。'
+                                    '使用整段录音峰值基准时，波形坐标自动使用 20 log10（录音峰值）的内容基准补偿；使用原始 PCM 电平基准时补偿为 0 dB。音强曲线始终根据原始样本实际电平计算，不受波形显示基准影响。设备校准偏移应使用相同录音增益下的已知声压参考信号确定。'
                                 )}
                             </p>
                         </>

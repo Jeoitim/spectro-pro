@@ -2173,6 +2173,43 @@ html[lang='en'] .settings-tabs button {
     accent-color: var(--blue);
 }
 
+.calibration-readout {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 10px 11px;
+    border: 1px solid rgba(37, 136, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(37, 136, 255, 0.035);
+}
+
+.calibration-readout > span {
+    display: grid;
+    gap: 3px;
+}
+
+.calibration-readout strong {
+    color: #cbd5e4;
+    font-size: 12px;
+    font-weight: 650;
+}
+
+.calibration-readout small {
+    color: #68758a;
+    font-size: 10px;
+    line-height: 1.55;
+}
+
+.calibration-readout em {
+    flex: 0 0 auto;
+    color: #d5dce8;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
 .waveform-setting-section-label {
     padding-top: 4px;
     color: #7f8da3;
@@ -2866,8 +2903,19 @@ html.light-ui .formant-metrics article {
 
 html.light-ui .statistics dd,
 html.light-ui .setting em,
-html.light-ui .effect-toggle strong {
+html.light-ui .effect-toggle strong,
+html.light-ui .calibration-readout strong,
+html.light-ui .calibration-readout em {
     color: #344054;
+}
+
+html.light-ui .calibration-readout small {
+    color: #667085;
+}
+
+html.light-ui .calibration-readout {
+    border-color: rgba(37, 136, 255, 0.16);
+    background: rgba(37, 136, 255, 0.045);
 }
 
 html.light-ui .select-row select {
