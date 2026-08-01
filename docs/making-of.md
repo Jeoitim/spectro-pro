@@ -1,6 +1,6 @@
 # Building Spectro: a real-time WebGL audio spectrogram visualizer 🎶
 
-[简体中文译本](making-of.zh-CN.md)
+[简体中文译本](making-of.zh-CN.md) | [Building Spectro Pro（中文）](building-spectro-pro.zh-CN.md)
 
 Spectro started with the goal of building a music visualiser after being inspired from some of the cool WebGL experiments over on [Shadertoy](https://www.shadertoy.com/). Having recently started a new job at Atlassian as a frontend developer, I was looking for a fun project that would help me brush up on my web skills after my last mostly backend job in C#/.NET. Some long weekends later (and some weeknights too...) Spectro was born, and although I didn't end up achieving my initial goal I still managed to build something I think is as equally cool and fun to play around with.
 

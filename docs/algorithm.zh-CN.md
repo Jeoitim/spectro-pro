@@ -1,6 +1,6 @@
 # 可视化与声学分析算法
 
-[返回中文 README](../README.md) | [English README](../README.en.md)
+[返回中文 README](../README.md) | [English README](../README.en.md) | [开发历程](building-spectro-pro.zh-CN.md)
 
 本文把 Spectro Pro 从输入采样到屏幕像素的整条链路公开出来。公式和参数以当前
 源码为准；如果本文与代码不一致，应以代码和测试为准。文中涉及 Praat 的定义时，
@@ -9,6 +9,10 @@
 Spectro Pro 是浏览器中的视觉与教学工具，不是 Praat 的替代品，也不宣称提供经过
 硬件校准的研究级测量。尤其是浏览器输入通常是无量纲的归一化采样，绝对 dB SPL
 必须经过麦克风和声级计校准后才有物理意义。
+
+![人类声道结构示意图](https://upload.wikimedia.org/wikipedia/commons/9/9a/VocalTract_withNumbers.svg)
+
+*声音从声带产生，经咽腔、口腔和鼻腔共同塑形。图：Tavin，来源 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:VocalTract_withNumbers.svg)，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。*
 
 ## 1. 总体数据流
 
@@ -359,6 +363,10 @@ Praat 官方手册也说明了 Burg 共振峰流程中的关键点：重采样�
 Gaussian-like 窗、Childers/Press 描述的 Burg LPC，以及用两倍共振峰数量的 poles。
 Spectro Pro 的测试用官方 Praat 6.6.30 对确定性合成信号生成参考帧，覆盖 11 kHz 原生
 输入和 48 kHz 降采样输入，以捕获帧中心、符号、窗函数、根求解和重采样回归。
+
+![元音 i、u、ɑ 的语谱图与前两条共振峰](https://upload.wikimedia.org/wikipedia/commons/7/77/Spectrogram_-iua-.png)
+
+*三个元音的 F1、F2 位置明显不同，这正是共振峰能够帮助区分元音的原因。图：Ish ishwar，使用 Praat 生成，来源 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Spectrogram_-iua-.png)，[CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)。*
 
 ## 7. 声门脉冲标记
 

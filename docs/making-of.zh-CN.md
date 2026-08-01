@@ -1,6 +1,6 @@
 # 构建 Spectro：实时 WebGL 音频语谱图可视化器 🎶
 
-[English original](making-of.md) | **简体中文译本**
+[English original](making-of.md) | **简体中文译本** | [Building Spectro Pro](building-spectro-pro.zh-CN.md)
 
 > 本文是作者 Caleb Joseph 的 `making-of.md` 中文译本。它记录的是早期
 > Spectro 的设计与实现思路；Spectro Pro 在此基础上增加了语音分析、更多窗口和

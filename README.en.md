@@ -211,6 +211,7 @@ independent projects. This project continues to be released under the [MIT Licen
 
 ## Documentation
 
+-   [Development story: Building Spectro Pro (Chinese)](docs/building-spectro-pro.zh-CN.md)
 -   [Author's original: Building Spectro](docs/making-of.md)
 -   [Chinese translation: 构建 Spectro](docs/making-of.zh-CN.md)
 -   [Full visualization and acoustic-analysis algorithm note (Chinese)](docs/algorithm.zh-CN.md)
