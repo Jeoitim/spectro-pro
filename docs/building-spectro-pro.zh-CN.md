@@ -1,6 +1,8 @@
 # Building Spectro Pro：从一堂音乐通识课开始
 
-[返回中文 README](../README.md) | [作者原文：Building Spectro](making-of.md) | [原文中文译本](making-of.zh-CN.md)
+[English](building-spectro-pro.en.md) | **简体中文**
+
+相关文档：[构建 Spectro](making-of.zh-CN.md) · [算法说明](algorithm.zh-CN.md) · [README](../README.md)
 
 ## 最早只是觉得它很有趣
 

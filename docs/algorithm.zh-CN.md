@@ -1,6 +1,8 @@
 # 可视化与声学分析算法
 
-[返回中文 README](../README.md) | [English README](../README.en.md) | [开发历程](building-spectro-pro.zh-CN.md)
+[English](algorithm.en.md) | **简体中文**
+
+相关文档：[构建 Spectro](making-of.zh-CN.md) · [Building Spectro Pro](building-spectro-pro.zh-CN.md) · [README](../README.md)
 
 本文把 Spectro Pro 从输入采样到屏幕像素的整条链路公开出来。公式和参数以当前
 源码为准；如果本文与代码不一致，应以代码和测试为准。文中涉及 Praat 的定义时，

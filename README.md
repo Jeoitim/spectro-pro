@@ -182,7 +182,6 @@ Spectro Pro fork 自 Caleb Joseph 的
 
 ## 文档
 
--   [开发历程：Building Spectro Pro](docs/building-spectro-pro.zh-CN.md)
--   [作者原文：Building Spectro](docs/making-of.md)
--   [中文译本：构建 Spectro](docs/making-of.zh-CN.md)
+-   [构建 Spectro：原作者文档中文译本](docs/making-of.zh-CN.md)
+-   [Building Spectro Pro：开发历程](docs/building-spectro-pro.zh-CN.md)
 -   [可视化与声学分析算法（中文）](docs/algorithm.zh-CN.md)
