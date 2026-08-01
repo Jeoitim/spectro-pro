@@ -10,6 +10,14 @@ Spectro Pro 是一个现代、实时、易用的浏览器声学可视化工具�
 
 当前版本定位为视觉与教学工具，不以替代 Praat 或提供研究级测量为目标。
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshot-light.png">
+  <img alt="Spectro Pro 的语音波形、语谱图与实时声学轨迹" src="docs/screenshot-light.png">
+</picture>
+
+*同一段语音在浅色与深色界面中的波形、语谱图、基频、共振峰和音强可视化。*
+
 ## 功能
 
 -   麦克风实时输入或播放本地音频
@@ -130,6 +138,9 @@ Webpack 配置，实际产物位于 `dist`。当前没有客户端路由，也�
 
 ## 算法说明
 
+完整的算法、公式、参数、数据流、渲染过程、已知限制和源码入口见
+[《可视化与声学分析算法》](docs/algorithm.zh-CN.md)。
+
 -   语谱：可选分析窗、零填充 FFT、Web Worker 计算、WebGL 绘制；默认 Gaussian 窗
 -   F0：分析前执行低通 FIR 抗混叠降采样并去除局部直流。YIN 使用差分函数、
     累积均值归一化与抛物线插值；自相关模式使用 Hanning 窗，并以窗函数自身的
@@ -165,4 +176,12 @@ Webpack 配置，实际产物位于 `dist`。当前没有客户端路由，也�
 
 Spectro Pro fork 自 Caleb Joseph 的
 [Spectro](https://github.com/calebj0seph/spectro)，保留其 Git 历史与 MIT
-许可证。项目继续以 [MIT License](LICENSE) 发布。
+许可证。算法和术语参考了 [Praat](https://www.fon.hum.uva.nl/praat/) 官方手册，
+感谢 Praat 项目及其贡献者公开、清晰地记录语音分析方法；Spectro Pro 与 Praat 是独立
+项目。项目继续以 [MIT License](LICENSE) 发布。
+
+## 文档
+
+-   [作者原文：Building Spectro](docs/making-of.md)
+-   [中文译本：构建 Spectro](docs/making-of.zh-CN.md)
+-   [可视化与声学分析算法（中文）](docs/algorithm.zh-CN.md)

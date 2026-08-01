@@ -1,4 +1,7 @@
 # Building Spectro: a real-time WebGL audio spectrogram visualizer 🎶
+
+[简体中文译本](making-of.zh-CN.md)
+
 Spectro started with the goal of building a music visualiser after being inspired from some of the cool WebGL experiments over on [Shadertoy](https://www.shadertoy.com/). Having recently started a new job at Atlassian as a frontend developer, I was looking for a fun project that would help me brush up on my web skills after my last mostly backend job in C#/.NET. Some long weekends later (and some weeknights too...) Spectro was born, and although I didn't end up achieving my initial goal I still managed to build something I think is as equally cool and fun to play around with.
 
 So what is [Spectro](https://calebj0seph.github.io/spectro/)? The title explains it all really – it's a real-time spectrogram generator for the web that can visualize audio directly from your microphone or any other input device exposed by your browser. It also supports generating spectrograms from audio files on your device, and has a bunch of parameters to control the appearance of the spectrogram in real-time.
