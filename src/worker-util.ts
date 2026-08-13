@@ -132,7 +132,10 @@ export async function offThreadGenerateSpectrogram(
 export async function offThreadAnalyzeEntireFile(
     samples: Float32Array,
     options: SpectrogramOptions,
-    analysisOptions: AnalysisOptions
+    analysisOptions: AnalysisOptions,
+    samplesStart = 0,
+    samplesLength = samples.length,
+    sampleOffset = 0
 ): Promise<
     SpectrogramResult & {
         input: Float32Array;
@@ -151,6 +154,9 @@ export async function offThreadAnalyzeEntireFile(
         ACTION_ANALYZE_OFFLINE,
         {
             samplesBuffer: samples.buffer,
+            samplesStart,
+            samplesLength,
+            sampleOffset,
             options,
             analysisOptions,
         },

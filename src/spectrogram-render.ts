@@ -13,6 +13,8 @@ export interface RenderParameters {
     maxFrequencyHz: number;
     sampleRate: number;
     windowSize: number;
+    spectrogramDataStart: number;
+    spectrogramDataEnd: number;
     scale: Scale;
     gradient: Gradient;
 }
@@ -94,6 +96,8 @@ export class SpectrogramGPURenderer {
         gradientSamplerUniform: WebGLUniformLocation;
         spectrogramOffsetUniform: WebGLUniformLocation;
         spectrogramLengthUniform: WebGLUniformLocation;
+        spectrogramDataStartUniform: WebGLUniformLocation;
+        spectrogramDataEndUniform: WebGLUniformLocation;
         scaleRangeUniform: WebGLUniformLocation;
         contrastUniform: WebGLUniformLocation;
         sensitivityUniform: WebGLUniformLocation;
@@ -142,6 +146,14 @@ export class SpectrogramGPURenderer {
             spectrogramLengthUniform: this.getUniformLocation(
                 program,
                 FragmentShader.uniforms.uSpectrogramLength.variableName
+            ),
+            spectrogramDataStartUniform: this.getUniformLocation(
+                program,
+                FragmentShader.uniforms.uSpectrogramDataStart.variableName
+            ),
+            spectrogramDataEndUniform: this.getUniformLocation(
+                program,
+                FragmentShader.uniforms.uSpectrogramDataEnd.variableName
             ),
             scaleRangeUniform: this.getUniformLocation(
                 program,
@@ -214,6 +226,14 @@ export class SpectrogramGPURenderer {
         this.ctx.useProgram(this.program.program);
         this.ctx.uniform1f(this.program.spectrogramOffsetUniform, this.spectrogramOffset);
         this.ctx.uniform1f(this.program.spectrogramLengthUniform, this.spectrogramLength);
+        this.ctx.uniform1f(
+            this.program.spectrogramDataStartUniform,
+            this.parameters!.spectrogramDataStart
+        );
+        this.ctx.uniform1f(
+            this.program.spectrogramDataEndUniform,
+            this.parameters!.spectrogramDataEnd
+        );
 
         // Smoothing factor to make render parameter changes gradually interpolate to their new
         // value
@@ -308,6 +328,16 @@ export class SpectrogramGPURenderer {
             ),
             sampleRate: merge(parameters.sampleRate, this.parameters?.sampleRate, 48000),
             windowSize: merge(parameters.windowSize, this.parameters?.windowSize, 4096),
+            spectrogramDataStart: merge(
+                parameters.spectrogramDataStart,
+                this.parameters?.spectrogramDataStart,
+                0
+            ),
+            spectrogramDataEnd: merge(
+                parameters.spectrogramDataEnd,
+                this.parameters?.spectrogramDataEnd,
+                1
+            ),
             scale: merge(parameters.scale, this.parameters?.scale, 'mel'),
             gradient: merge(parameters.gradient, this.parameters?.gradient, HEATED_METAL_GRADIENT),
         };

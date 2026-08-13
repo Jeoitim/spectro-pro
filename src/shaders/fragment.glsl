@@ -5,6 +5,8 @@ uniform sampler2D uScaleSampler;
 uniform sampler2D uGradientSampler;
 uniform float uSpectrogramOffset;
 uniform float uSpectrogramLength;
+uniform float uSpectrogramDataStart;
+uniform float uSpectrogramDataEnd;
 uniform vec2 uScaleRange;
 uniform float uContrast;
 uniform float uSensitivity;
@@ -21,12 +23,16 @@ void main() {
         )
     ).r;
 
+    float globalSampleY = clamp(
+        (vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength - uTimeOffset,
+        0.0,
+        1.0
+    );
     float sampleY = mod(
-        clamp(
-            (vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength - uTimeOffset,
-            0.0,
-            1.0
-        ) + uSpectrogramOffset,
+        (globalSampleY - uSpectrogramDataStart) /
+            max(0.000001, uSpectrogramDataEnd - uSpectrogramDataStart) *
+            uSpectrogramLength +
+            uSpectrogramOffset,
         1.0
     );
 
@@ -41,7 +47,7 @@ void main() {
 
     // Prevent wrapping issues when the spectrogram is smaller than the screen
     if (
-        (vVertexTexCoord.x - 1.0) / uZoom + uSpectrogramLength - uTimeOffset <= 0.0
+        globalSampleY < uSpectrogramDataStart || globalSampleY > uSpectrogramDataEnd
     ) {
         intensity = 0.0;
     }

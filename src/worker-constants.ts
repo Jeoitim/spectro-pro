@@ -47,6 +47,9 @@ export type AnalyzeOfflineMessage = MessageBase<
     typeof ACTION_ANALYZE_OFFLINE,
     {
         samplesBuffer: ArrayBufferLike;
+        samplesStart: number;
+        samplesLength: number;
+        sampleOffset: number;
         options: SpectrogramOptions;
         analysisOptions: AnalysisOptions;
     },

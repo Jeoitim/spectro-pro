@@ -200,29 +200,58 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
         case ACTION_ANALYZE_OFFLINE: {
             const {
                 samplesBuffer,
+                samplesStart,
+                samplesLength,
+                sampleOffset,
                 options,
                 analysisOptions,
             } = payload as AnalyzeOfflineMessage['request']['payload'];
             try {
                 const samples = new Float32Array(samplesBuffer);
-                const result = generateSpectrogram(samples, 0, samples.length, options);
+                const result = generateSpectrogram(samples, samplesStart, samplesLength, options);
+                const analysisPadding = Math.max(
+                    options.windowSize || 0,
+                    Math.ceil(0.08 * options.sampleRate)
+                );
+                const analysisStart = Math.max(0, samplesStart - analysisPadding);
+                const analysisEnd = Math.min(
+                    samples.length,
+                    samplesStart + samplesLength + analysisPadding
+                );
+                const analysisSamples = samples.subarray(analysisStart, analysisEnd);
                 const centreSamples = new Array(result.windowCount)
                     .fill(0)
                     .map(
                         (_, windowIndex) =>
+                            samplesStart +
                             windowIndex * result.options.windowStepSize +
                             result.options.windowSize / 2
                     );
                 const analyses: TimedAcousticAnalysis[] = analyzeAtCentres(
-                    samples,
+                    analysisSamples,
                     options.sampleRate,
-                    centreSamples,
+                    centreSamples.map((centreSample) => centreSample - analysisStart),
                     analysisOptions
                 ).map((analysis, index) => ({
                     ...analysis,
-                    timeSeconds: centreSamples[index] / options.sampleRate,
+                    timeSeconds: (centreSamples[index] + sampleOffset) / options.sampleRate,
                 }));
-                const pulseTimes = detectPulseTimes(samples, options.sampleRate, analyses);
+                const pulseTimes = detectPulseTimes(
+                    analysisSamples,
+                    options.sampleRate,
+                    analyses.map((analysis) => ({
+                        ...analysis,
+                        timeSeconds:
+                            analysis.timeSeconds -
+                            analysisStart / options.sampleRate -
+                            sampleOffset / options.sampleRate,
+                    }))
+                ).map(
+                    (time) =>
+                        time +
+                        analysisStart / options.sampleRate +
+                        sampleOffset / options.sampleRate
+                );
 
                 const response: AnalyzeOfflineMessage['response'] = {
                     payload: {

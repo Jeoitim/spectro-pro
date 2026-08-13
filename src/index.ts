@@ -40,7 +40,8 @@ const PITCH_FLOOR_HZ = 75;
 const PITCH_CEILING_HZ = 500;
 const INTENSITY_FLOOR_DB_SPL = 50;
 const INTENSITY_CEILING_DB_SPL = 100;
-const MAX_OFFLINE_COLUMNS = 2048;
+const MAX_OFFLINE_SPECTROGRAM_BYTES = 64 * 1024 * 1024;
+const LONG_RECORDING_SECONDS = 180;
 
 interface ModeConfiguration {
     windowSize: number;
@@ -69,6 +70,9 @@ interface OfflineModeCache {
     windowStepSize: number;
     fftSize: number;
     analysisRevision: number;
+    dataStartSeconds: number;
+    dataEndSeconds: number;
+    complete: boolean;
 }
 
 interface MediaViewState {
@@ -111,7 +115,9 @@ function modeConfiguration(
     const durationSeconds =
         mode === 'broadband' ? 0.005 : mode === 'narrowband' ? 0.03 : customWindowLengthMs / 1000;
     const windowSize = Math.max(32, Math.round(sampleRate * durationSeconds));
-    const hopSize = durationSeconds <= 0.012 ? 128 : 256;
+    // Praat keeps the time step tied to the analysis window (roughly four
+    // frames per window), never to the duration of the sound.
+    const hopSize = Math.max(1, Math.round(windowSize / 4));
     return {
         windowSize,
         fftSize: nextPowerOfTwo(windowSize),
@@ -284,6 +290,10 @@ class SpectroEngine {
 
     private isRecordingMicrophone = false;
 
+    private offlineAnalysisRequestSequence = 0;
+
+    private visibleMediaAnalysisTimer: number | null = null;
+
     constructor(ui: UiController) {
         const canvas = document.querySelector('#spectrogramCanvas');
         const overlay = document.querySelector('#analysisOverlay');
@@ -354,6 +364,13 @@ class SpectroEngine {
             ...parameters,
             timeOffset: this.timeOffset,
         });
+        if (parameters.zoom !== undefined || parameters.timeOffset !== undefined) {
+            const activeMedia = this.activeMedia();
+            if (activeMedia !== null && this.shouldDeferLongRecording(activeMedia)) {
+                this.saveActiveView();
+                this.scheduleVisibleMediaAnalysis();
+            }
+        }
         this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
@@ -831,6 +848,7 @@ class SpectroEngine {
         this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
+        this.scheduleVisibleMediaAnalysis();
     }
 
     inspect(x: number, y: number) {
@@ -961,6 +979,7 @@ class SpectroEngine {
         this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
+        this.scheduleVisibleMediaAnalysis();
     }
 
     returnToPreviousView() {
@@ -984,6 +1003,7 @@ class SpectroEngine {
         this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
+        this.scheduleVisibleMediaAnalysis();
     }
 
     restoreView() {
@@ -1000,6 +1020,7 @@ class SpectroEngine {
         this.saveActiveView();
         this.notifyTransport();
         this.overlayDirty = true;
+        this.scheduleVisibleMediaAnalysis();
     }
 
     exportImage() {
@@ -1098,6 +1119,17 @@ class SpectroEngine {
     private async showOrAnalyzeMedia(item: MediaItem) {
         const cache = item.modes[this.mode];
         if (cache !== undefined) {
+            if (this.shouldDeferLongRecording(item) && !this.shouldLoadLongRecordingView(item)) {
+                this.displayDeferredLongRecording(item);
+                return;
+            }
+            if (
+                this.shouldLoadLongRecordingView(item) &&
+                !this.cacheCoversVisibleView(item, cache)
+            ) {
+                await this.analyzeMedia(item, this.mode, true);
+                return;
+            }
             if (cache.analysisRevision !== this.acousticAnalysisRevision) {
                 this.displayMediaCache(item, cache);
                 await this.reanalyzeMediaCache(item, this.mode, cache);
@@ -1106,19 +1138,112 @@ class SpectroEngine {
             this.displayMediaCache(item, cache);
             return;
         }
+        if (this.shouldDeferLongRecording(item) && !this.shouldLoadLongRecordingView(item)) {
+            item.state = 'ready';
+            this.displayDeferredLongRecording(item);
+            return;
+        }
         await this.analyzeMedia(item, this.mode, true);
     }
 
+    private scheduleVisibleMediaAnalysis() {
+        if (this.visibleMediaAnalysisTimer !== null) {
+            window.clearTimeout(this.visibleMediaAnalysisTimer);
+        }
+        this.visibleMediaAnalysisTimer = window.setTimeout(() => {
+            this.visibleMediaAnalysisTimer = null;
+            const activeMedia = this.activeMedia();
+            if (activeMedia !== null && this.shouldDeferLongRecording(activeMedia)) {
+                void this.showOrAnalyzeMedia(activeMedia);
+            }
+        }, 80);
+    }
+
+    private shouldDeferLongRecording(item: MediaItem) {
+        const config = modeConfiguration(this.mode, item.sampleRate, this.customWindowLengthMs);
+        const frameCount = Math.max(
+            1,
+            Math.floor(Math.max(0, item.samples.length - config.windowSize) / config.hopSize) + 1
+        );
+        return (
+            item.durationSeconds > LONG_RECORDING_SECONDS ||
+            frameCount * SPECTROGRAM_HEIGHT * Float32Array.BYTES_PER_ELEMENT >
+                MAX_OFFLINE_SPECTROGRAM_BYTES
+        );
+    }
+
+    private shouldLoadLongRecordingView(item: MediaItem) {
+        return this.shouldDeferLongRecording(item) && (this.renderParameters.zoom || 1) > 1;
+    }
+
+    private visibleAudioRange(item: MediaItem) {
+        const zoom = Math.max(1, this.renderParameters.zoom || 1);
+        const visibleDuration = item.durationSeconds / zoom;
+        const endSeconds = item.durationSeconds - this.timeOffset * item.durationSeconds;
+        const startSeconds = Math.max(0, endSeconds - visibleDuration);
+        return {
+            startSeconds,
+            endSeconds: Math.min(item.durationSeconds, startSeconds + visibleDuration),
+        };
+    }
+
+    private cacheCoversVisibleView(item: MediaItem, cache: OfflineModeCache) {
+        const visible = this.visibleAudioRange(item);
+        const margin = Math.max(
+            cache.windowSize / item.sampleRate,
+            cache.windowStepSize / item.sampleRate
+        );
+        return (
+            cache.dataStartSeconds <= visible.startSeconds + margin &&
+            cache.dataEndSeconds >= visible.endSeconds - margin
+        );
+    }
+
+    private displayDeferredLongRecording(item: MediaItem) {
+        this.sampleRate = item.sampleRate;
+        this.analysisHistory = [];
+        this.spectrogramBuffer.clear();
+        this.waveformRenderer.setOfflineSamples(item.samples, item.sampleRate);
+        this.waveformRenderer.setOfflinePulseTimes([]);
+        this.renderer.updateParameters({
+            sampleRate: item.sampleRate,
+            spectrogramDataStart: 0,
+            spectrogramDataEnd: 0,
+            zoom: 1,
+            timeOffset: 0,
+        });
+        this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
+        this.renderParameters = { ...this.renderParameters, zoom: 1, timeOffset: 0 };
+        this.timeOffset = 0;
+        this.ui.updateZoom(1);
+        this.ui.updateTimeOffset(0);
+        this.ui.setPlayState('stopped', item.name, '录音较长，已暂停语谱图渲染，请先放大视图');
+        this.notifyTransport();
+        this.overlayDirty = true;
+    }
+
     private async analyzeMedia(item: MediaItem, mode: SpectrogramMode, displayWhenReady: boolean) {
+        if (this.shouldDeferLongRecording(item) && !this.shouldLoadLongRecordingView(item)) {
+            item.state = 'ready';
+            this.notifyMediaLibrary();
+            if (displayWhenReady && this.activeMediaId === item.id) {
+                this.displayDeferredLongRecording(item);
+            }
+            return;
+        }
         const analysisRevision = this.spectrogramAnalysisRevision[mode];
         const acousticAnalysisRevision = this.acousticAnalysisRevision;
+        const requestSequence = ++this.offlineAnalysisRequestSequence;
         item.state = 'analyzing';
         this.notifyMediaLibrary();
         if (displayWhenReady && this.activeMediaId === item.id) {
+            const isLongRecording = this.shouldDeferLongRecording(item);
             this.ui.setPlayState(
                 'loading-file',
                 item.name,
-                mode === 'broadband'
+                isLongRecording
+                    ? '正在渲染当前视野…'
+                    : mode === 'broadband'
                     ? '正在分析整段宽带语谱…'
                     : mode === 'narrowband'
                     ? '正在分析整段窄带语谱…'
@@ -1127,26 +1252,41 @@ class SpectroEngine {
         }
         try {
             const config = modeConfiguration(mode, item.sampleRate, this.customWindowLengthMs);
-            const adaptiveHop = Math.max(
-                config.hopSize,
-                Math.ceil(
-                    Math.max(0, item.samples.length - config.windowSize) /
-                        Math.max(1, MAX_OFFLINE_COLUMNS - 1)
-                )
+            const isLongRecording = this.shouldDeferLongRecording(item);
+            const visible = this.visibleAudioRange(item);
+            const startSeconds = isLongRecording ? visible.startSeconds : 0;
+            const endSeconds = isLongRecording ? visible.endSeconds : item.durationSeconds;
+            const samplesStart = Math.max(
+                0,
+                Math.floor(startSeconds * item.sampleRate) - config.windowSize
             );
+            const samplesEnd = Math.min(
+                item.samples.length,
+                Math.ceil(endSeconds * item.sampleRate) + config.windowSize
+            );
+            const samplesLength = Math.max(0, samplesEnd - samplesStart);
+            const analysisInput = isLongRecording
+                ? new Float32Array(item.samples.subarray(samplesStart, samplesEnd))
+                : new Float32Array(item.samples);
             const result = await offThreadAnalyzeEntireFile(
-                new Float32Array(item.samples),
+                analysisInput,
                 {
                     windowSize: config.windowSize,
                     fftSize: config.fftSize,
-                    windowStepSize: adaptiveHop,
+                    windowStepSize: config.hopSize,
                     sampleRate: item.sampleRate,
                     scaleSize: SPECTROGRAM_HEIGHT,
                     windowFunction: this.windowFunction,
                 },
-                this.analysisOptions
+                this.analysisOptions,
+                isLongRecording ? 0 : samplesStart,
+                isLongRecording ? analysisInput.length : samplesLength,
+                isLongRecording ? samplesStart : 0
             );
-            if (analysisRevision !== this.spectrogramAnalysisRevision[mode]) {
+            if (
+                requestSequence !== this.offlineAnalysisRequestSequence ||
+                analysisRevision !== this.spectrogramAnalysisRevision[mode]
+            ) {
                 return;
             }
             const cache: OfflineModeCache = {
@@ -1158,6 +1298,9 @@ class SpectroEngine {
                 windowStepSize: result.options.windowStepSize,
                 fftSize: config.fftSize,
                 analysisRevision: acousticAnalysisRevision,
+                dataStartSeconds: samplesStart / item.sampleRate,
+                dataEndSeconds: samplesEnd / item.sampleRate,
+                complete: !isLongRecording,
             };
             item.modes[mode] = cache;
             item.state = 'ready';
@@ -1169,7 +1312,10 @@ class SpectroEngine {
                 }
             }
         } catch (error) {
-            if (analysisRevision !== this.spectrogramAnalysisRevision[mode]) {
+            if (
+                requestSequence !== this.offlineAnalysisRequestSequence ||
+                analysisRevision !== this.spectrogramAnalysisRevision[mode]
+            ) {
                 return;
             }
             item.state = 'error';
@@ -1193,7 +1339,12 @@ class SpectroEngine {
         const analysisRevision = this.acousticAnalysisRevision;
         const centreSamples = new Array(cache.windowCount)
             .fill(0)
-            .map((_, index) => index * cache.windowStepSize + cache.windowSize / 2);
+            .map(
+                (_, index) =>
+                    Math.round(cache.dataStartSeconds * item.sampleRate) +
+                    index * cache.windowStepSize +
+                    cache.windowSize / 2
+            );
         try {
             const result = await offThreadAnalyzeAcoustics(
                 new Float32Array(item.samples),
@@ -1243,7 +1394,13 @@ class SpectroEngine {
     }
 
     private displayMediaCache(item: MediaItem, cache: OfflineModeCache) {
-        const savedView = item.views[this.mode] || { zoom: 1, timeOffset: 0 };
+        const savedView =
+            this.shouldDeferLongRecording(item) && !cache.complete
+                ? {
+                      zoom: Math.max(1, this.renderParameters.zoom || 1),
+                      timeOffset: this.timeOffset,
+                  }
+                : item.views[this.mode] || { zoom: 1, timeOffset: 0 };
         const zoom = Math.max(1, savedView.zoom);
         const maximumOffset = Math.max(0, 1 - 1 / zoom);
         const timeOffset = clamp(savedView.timeOffset, 0, maximumOffset);
@@ -1261,6 +1418,12 @@ class SpectroEngine {
         this.renderer.updateParameters({
             sampleRate: item.sampleRate,
             windowSize: cache.fftSize,
+            spectrogramDataStart: cache.complete
+                ? 0
+                : cache.dataStartSeconds / Math.max(0.001, item.durationSeconds),
+            spectrogramDataEnd: cache.complete
+                ? 1
+                : cache.dataEndSeconds / Math.max(0.001, item.durationSeconds),
             zoom,
             timeOffset,
         });
@@ -1277,7 +1440,11 @@ class SpectroEngine {
         this.updateSnapshotAtPlaybackOffset(true);
         this.ui.updateZoom(zoom);
         this.ui.updateTimeOffset(timeOffset);
-        this.ui.setPlayState('stopped', item.name, '整段分析完成，可自由拖动播放');
+        this.ui.setPlayState(
+            'stopped',
+            item.name,
+            cache.complete ? '整段分析完成，可自由拖动播放' : '当前视野已渲染，可继续放大查看细节'
+        );
         this.notifyTransport();
         this.overlayDirty = true;
     }
@@ -1701,14 +1868,15 @@ class SpectroEngine {
         if (item === null || this.analysisHistory.length === 0) {
             return;
         }
-        const snapshotIndex = clamp(
-            Math.round(
-                (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
-                    (this.analysisHistory.length - 1)
-            ),
-            0,
-            this.analysisHistory.length - 1
-        );
+        const cache = item.modes[this.mode];
+        const targetIndex =
+            cache !== undefined && !cache.complete
+                ? this.analysisIndexAtTime(this.playbackOffsetSeconds)
+                : Math.round(
+                      (this.playbackOffsetSeconds / Math.max(0.001, item.durationSeconds)) *
+                          (this.analysisHistory.length - 1)
+                  );
+        const snapshotIndex = clamp(targetIndex, 0, this.analysisHistory.length - 1);
         const point = this.analysisHistory[snapshotIndex];
         this.sessionElapsedSeconds = this.playbackOffsetSeconds;
         this.updateUiSnapshot(point, force);
@@ -1746,7 +1914,11 @@ class SpectroEngine {
         }
         this.renderer.updateSpectrogram(this.spectrogramBuffer, true);
         this.timeOffset = 0;
-        this.renderer.updateParameters({ timeOffset: 0 });
+        this.renderer.updateParameters({
+            timeOffset: 0,
+            spectrogramDataStart: 0,
+            spectrogramDataEnd: 1,
+        });
         this.ui.updateTimeOffset(0);
         this.overlayDirty = true;
     }
@@ -1828,6 +2000,23 @@ class SpectroEngine {
     }
 
     private visibleHistoryRange() {
+        const item = this.activeMedia();
+        const cache = item?.modes[this.mode];
+        if (item !== null && item !== undefined && cache !== undefined && !cache.complete) {
+            const visible = this.visibleAudioRange(item);
+            const first = this.analysisHistory.findIndex(
+                (point) => point.timeSeconds >= visible.startSeconds
+            );
+            const start = first < 0 ? this.analysisHistory.length : first;
+            let end = start;
+            while (
+                end < this.analysisHistory.length &&
+                this.analysisHistory[end].timeSeconds <= visible.endSeconds
+            ) {
+                end += 1;
+            }
+            return { start, end, span: Math.max(0, end - start) };
+        }
         const zoom = Math.max(1, this.renderParameters.zoom || 1);
         const span = Math.max(2, Math.floor(this.spectrogramBuffer.width / zoom));
         const offset = Math.floor(this.timeOffset * this.spectrogramBuffer.width);
@@ -1840,9 +2029,12 @@ class SpectroEngine {
     }
 
     private visibleTimeRange() {
-        const visible = this.visibleHistoryRange();
         const item = this.activeMedia();
         const cache = item?.modes[this.mode];
+        if (item !== null && item !== undefined && (cache === undefined || !cache.complete)) {
+            return this.visibleAudioRange(item);
+        }
+        const visible = this.visibleHistoryRange();
         const config = modeConfiguration(this.mode, this.sampleRate, this.customWindowLengthMs);
         const hopSeconds =
             cache === undefined || item === null

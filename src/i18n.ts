@@ -22,8 +22,12 @@ const ENGLISH: { [key: string]: string } = {
     '正在分析整段宽带语谱…': 'Analyzing the full broadband spectrogram…',
     '正在分析整段窄带语谱…': 'Analyzing the full narrowband spectrogram…',
     '正在分析自定义语谱…': 'Analyzing the custom spectrogram…',
+    '正在渲染当前视野…': 'Rendering the current view…',
     无法分析此音频: 'Unable to analyze this audio',
     '整段分析完成，可自由拖动播放': 'Full analysis complete · Drag or play freely',
+    '录音较长，已暂停语谱图渲染，请先放大视图':
+        'This recording is long, so spectrogram rendering is paused. Zoom in to render a view',
+    '当前视野已渲染，可继续放大查看细节': 'Current view rendered · Zoom in further for more detail',
     播放完成: 'Playback complete',
     选区播放完成: 'Selection playback complete',
     '播放中 · 分析图保持完整': 'Playing · Full analysis remains visible',
