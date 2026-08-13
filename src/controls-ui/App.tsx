@@ -688,6 +688,11 @@ export default function App({
     const pendingMediaAnimationRef = useRef<Map<string, number> | null>(null);
     const axisViewRef = useRef<HTMLDivElement | null>(null);
     const cursorTooltipRef = useRef<HTMLDivElement | null>(null);
+    const pendingInspectionRef = useRef<{
+        canvas: HTMLCanvasElement;
+        point: PlotPointer;
+    } | null>(null);
+    const inspectionFrameRef = useRef<number | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
@@ -736,10 +741,13 @@ export default function App({
                 return;
             }
             const rowMetrics = drag.rowMetrics.get(row.dataset.mediaId || '');
-            const rowShift =
-                rowMetrics === undefined ? 0 : rowMetrics.height + drag.rowGap;
+            const rowShift = rowMetrics === undefined ? 0 : rowMetrics.height + drag.rowGap;
             let offset = 0;
-            if (drag.sourceIndex < targetIndex && rowIndex > drag.sourceIndex && rowIndex <= targetIndex) {
+            if (
+                drag.sourceIndex < targetIndex &&
+                rowIndex > drag.sourceIndex &&
+                rowIndex <= targetIndex
+            ) {
                 offset = -rowShift;
             } else if (
                 drag.sourceIndex > targetIndex &&
@@ -1615,6 +1623,33 @@ export default function App({
         [onInspect]
     );
 
+    const schedulePlotInspection = useCallback(
+        (canvas: HTMLCanvasElement, point: PlotPointer) => {
+            pendingInspectionRef.current = { canvas, point };
+            if (inspectionFrameRef.current !== null) {
+                return;
+            }
+            inspectionFrameRef.current = window.requestAnimationFrame(() => {
+                inspectionFrameRef.current = null;
+                const pending = pendingInspectionRef.current;
+                pendingInspectionRef.current = null;
+                if (pending !== null) {
+                    inspectPlotPoint(pending.canvas, pending.point);
+                }
+            });
+        },
+        [inspectPlotPoint]
+    );
+
+    useEffect(
+        () => () => {
+            if (inspectionFrameRef.current !== null) {
+                window.cancelAnimationFrame(inspectionFrameRef.current);
+            }
+        },
+        []
+    );
+
     const resetPlotGesture = useCallback(() => {
         const gesture = plotGestureRef.current;
         gesture.pointers.clear();
@@ -1679,7 +1714,7 @@ export default function App({
 
             if (current === undefined) {
                 if (event.pointerType === 'mouse') {
-                    inspectPlotPoint(canvas, point);
+                    schedulePlotInspection(canvas, point);
                 }
                 return;
             }
@@ -1708,7 +1743,7 @@ export default function App({
                 return;
             }
 
-            inspectPlotPoint(canvas, point);
+            schedulePlotInspection(canvas, point);
             const distance = Math.hypot(
                 point.clientX - gesture.start.clientX,
                 point.clientY - gesture.start.clientY
@@ -1718,7 +1753,7 @@ export default function App({
                 onSelectRange(gesture.start.x, point.x);
             }
         },
-        [inspectPlotPoint, onNavigate, onSelectRange, plotPanCenterX, plotPoint, zoom]
+        [onNavigate, onSelectRange, plotPanCenterX, plotPoint, schedulePlotInspection, zoom]
     );
 
     const finishPlotGesture = useCallback(
@@ -2560,9 +2595,7 @@ export default function App({
                                 <div
                                     className={`media-row ${
                                         activeMediaId === item.id ? 'active' : ''
-                                    } ${
-                                        draggedMediaId === item.id ? 'dragging' : ''
-                                    }`}
+                                    } ${draggedMediaId === item.id ? 'dragging' : ''}`}
                                     key={item.id}
                                     data-media-id={item.id}
                                     ref={(element) => {

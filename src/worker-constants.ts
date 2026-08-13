@@ -8,6 +8,7 @@ import {
 import { SpectrogramOptions, SpectrogramResult } from './spectrogram';
 
 export const ACTION_COMPUTE_SPECTROGRAM = 'spectrogram-compute';
+export const ACTION_COMPUTE_SPECTROGRAM_ONLY = 'spectrogram-only-compute';
 export const ACTION_ANALYZE_OFFLINE = 'offline-analyze';
 export const ACTION_ANALYZE_ACOUSTICS = 'acoustics-analyze';
 
@@ -63,6 +64,21 @@ export type AnalyzeOfflineMessage = MessageBase<
     }
 >;
 
+export type ComputeSpectrogramOnlyMessage = MessageBase<
+    typeof ACTION_COMPUTE_SPECTROGRAM_ONLY,
+    {
+        samplesBuffer: ArrayBufferLike;
+        samplesStart: number;
+        samplesLength: number;
+        options: SpectrogramOptions;
+    },
+    {
+        spectrogramWindowCount: number;
+        spectrogramOptions: Required<SpectrogramOptions>;
+        spectrogramBuffer: ArrayBufferLike;
+    }
+>;
+
 export type AnalyzeAcousticsMessage = MessageBase<
     typeof ACTION_ANALYZE_ACOUSTICS,
     {
@@ -71,6 +87,7 @@ export type AnalyzeAcousticsMessage = MessageBase<
         centreSamples: number[];
         analysisOptions: AnalysisOptions;
         includeFormants: boolean;
+        analysisLayers?: AnalysisLayerSelection;
     },
     {
         inputBuffer: ArrayBufferLike;
@@ -79,4 +96,8 @@ export type AnalyzeAcousticsMessage = MessageBase<
     }
 >;
 
-export type Message = ComputeSpectrogramMessage | AnalyzeOfflineMessage | AnalyzeAcousticsMessage;
+export type Message =
+    | ComputeSpectrogramMessage
+    | ComputeSpectrogramOnlyMessage
+    | AnalyzeOfflineMessage
+    | AnalyzeAcousticsMessage;

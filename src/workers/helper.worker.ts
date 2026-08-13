@@ -13,9 +13,11 @@ import {
     ACTION_ANALYZE_ACOUSTICS,
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
+    ACTION_COMPUTE_SPECTROGRAM_ONLY,
     AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
+    ComputeSpectrogramOnlyMessage,
     Message,
 } from '../worker-constants';
 
@@ -101,6 +103,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                 centreSamples,
                 analysisOptions,
                 includeFormants,
+                analysisLayers,
             } = payload as AnalyzeAcousticsMessage['request']['payload'];
             try {
                 const samples = new Float32Array(samplesBuffer);
@@ -109,7 +112,7 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     sampleRate,
                     centreSamples,
                     analysisOptions,
-                    {
+                    analysisLayers || {
                         pitch: true,
                         formants: includeFormants,
                         intensity: true,
@@ -123,7 +126,10 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                     payload: {
                         inputBuffer: samples.buffer,
                         analyses,
-                        pulseTimes: detectPulseTimes(samples, sampleRate, timedPitch),
+                        pulseTimes:
+                            analysisLayers?.pitch === false
+                                ? []
+                                : detectPulseTimes(samples, sampleRate, timedPitch),
                     },
                 };
                 workerScope.postMessage(response, [samples.buffer as ArrayBuffer]);
@@ -195,6 +201,36 @@ workerScope.addEventListener('message', (event: { data: Message['request'] }) =>
                 workerScope.postMessage(response);
             }
 
+            break;
+        }
+        case ACTION_COMPUTE_SPECTROGRAM_ONLY: {
+            const {
+                samplesBuffer,
+                samplesStart,
+                samplesLength,
+                options,
+            } = payload as ComputeSpectrogramOnlyMessage['request']['payload'];
+            try {
+                const result = generateSpectrogram(
+                    new Float32Array(samplesBuffer),
+                    samplesStart,
+                    samplesLength,
+                    options
+                );
+                const response: ComputeSpectrogramOnlyMessage['response'] = {
+                    payload: {
+                        spectrogramWindowCount: result.windowCount,
+                        spectrogramOptions: result.options,
+                        spectrogramBuffer: result.spectrogram.buffer,
+                    },
+                };
+                workerScope.postMessage(response, [result.spectrogram.buffer as ArrayBuffer]);
+            } catch (error) {
+                const response: ComputeSpectrogramOnlyMessage['response'] = {
+                    error: error instanceof Error ? error : new Error(String(error)),
+                };
+                workerScope.postMessage(response);
+            }
             break;
         }
         case ACTION_ANALYZE_OFFLINE: {

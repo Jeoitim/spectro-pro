@@ -10,20 +10,23 @@ import {
     ACTION_ANALYZE_ACOUSTICS,
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
+    ACTION_COMPUTE_SPECTROGRAM_ONLY,
     AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
+    ComputeSpectrogramOnlyMessage,
     Message,
 } from './worker-constants';
 import HelperWorker from 'helper-worker';
 
 const WORKER_QUEUE: ((worker: HelperWorker) => void)[] = [];
+const WORKER_LIMIT = Math.min(6, Math.max(2, (window.navigator.hardwareConcurrency || 4) - 1));
 const WORKER_POOL: { worker: HelperWorker; busy: boolean }[] = [];
-for (let i = 0; i < (window.navigator.hardwareConcurrency || 4); i += 1) {
-    WORKER_POOL.push({
-        worker: new HelperWorker(),
-        busy: false,
-    });
+
+function createWorker() {
+    const workerData = { worker: new HelperWorker(), busy: true };
+    WORKER_POOL.push(workerData);
+    return workerData.worker;
 }
 
 function getFreeWorker(): Promise<HelperWorker> {
@@ -31,6 +34,9 @@ function getFreeWorker(): Promise<HelperWorker> {
     if (workerData !== undefined) {
         workerData.busy = true;
         return Promise.resolve(workerData.worker);
+    }
+    if (WORKER_POOL.length < WORKER_LIMIT) {
+        return Promise.resolve(createWorker());
     }
     return new Promise((resolve) => {
         WORKER_QUEUE.push(resolve);
@@ -84,7 +90,88 @@ function queueTask<T extends Message>(
 }
 
 export function getWorkerCount(): number {
-    return WORKER_POOL.length;
+    return WORKER_LIMIT;
+}
+
+async function offThreadGenerateSpectrogramOnly(
+    samples: Float32Array,
+    options: SpectrogramOptions
+): Promise<SpectrogramResult> {
+    const {
+        spectrogramWindowCount,
+        spectrogramOptions,
+        spectrogramBuffer,
+    } = await queueTask<ComputeSpectrogramOnlyMessage>(
+        ACTION_COMPUTE_SPECTROGRAM_ONLY,
+        {
+            samplesBuffer: samples.buffer,
+            samplesStart: 0,
+            samplesLength: samples.length,
+            options,
+        },
+        [samples.buffer]
+    );
+    return {
+        windowCount: spectrogramWindowCount,
+        options: spectrogramOptions,
+        spectrogram: new Float32Array(spectrogramBuffer),
+    };
+}
+
+export async function offThreadGenerateEntireSpectrogram(
+    samples: Float32Array,
+    options: SpectrogramOptions,
+    samplesStart = 0,
+    samplesLength = samples.length
+): Promise<SpectrogramResult & { input: Float32Array }> {
+    const windowSize = options.windowSize || 4096;
+    const windowStepSize = options.windowStepSize || 1024;
+    const windowCount =
+        samplesLength < windowSize
+            ? 0
+            : Math.floor((samplesLength - windowSize) / windowStepSize) + 1;
+    const taskCount = Math.min(WORKER_LIMIT, Math.max(1, Math.ceil(windowCount / 1500)));
+    const tasks: Promise<SpectrogramResult>[] = [];
+    for (let taskIndex = 0; taskIndex < taskCount; taskIndex += 1) {
+        const firstWindow = Math.floor((taskIndex * windowCount) / taskCount);
+        const endWindow = Math.floor(((taskIndex + 1) * windowCount) / taskCount);
+        if (endWindow <= firstWindow) {
+            continue;
+        }
+        const chunkStart = samplesStart + firstWindow * windowStepSize;
+        const chunkEnd = Math.min(
+            samplesStart + samplesLength,
+            samplesStart + (endWindow - 1) * windowStepSize + windowSize
+        );
+        tasks.push(
+            offThreadGenerateSpectrogramOnly(
+                new Float32Array(samples.subarray(chunkStart, chunkEnd)),
+                {
+                    ...options,
+                    isStart: false,
+                    isEnd: false,
+                }
+            )
+        );
+    }
+    const parts = await Promise.all(tasks);
+    const scaleSize = parts[0]?.options.scaleSize || options.scaleSize || windowSize / 2;
+    const spectrogram = new Float32Array(windowCount * scaleSize);
+    let outputOffset = 0;
+    for (const part of parts) {
+        spectrogram.set(part.spectrogram, outputOffset);
+        outputOffset += part.spectrogram.length;
+    }
+    const resolvedOptions = parts[0]?.options;
+    if (resolvedOptions === undefined) {
+        throw new Error('Audio is too short for the selected spectrogram window');
+    }
+    return {
+        windowCount,
+        options: resolvedOptions,
+        spectrogram,
+        input: samples,
+    };
 }
 
 export async function offThreadGenerateSpectrogram(
@@ -143,33 +230,94 @@ export async function offThreadAnalyzeEntireFile(
         pulseTimes: number[];
     }
 > {
-    const {
-        spectrogramWindowCount,
-        spectrogramOptions,
-        spectrogramBuffer,
-        inputBuffer,
-        analyses,
-        pulseTimes,
-    } = await queueTask<AnalyzeOfflineMessage>(
-        ACTION_ANALYZE_OFFLINE,
-        {
-            samplesBuffer: samples.buffer,
-            samplesStart,
-            samplesLength,
-            sampleOffset,
-            options,
-            analysisOptions,
-        },
-        [samples.buffer]
+    const windowSize = options.windowSize || 4096;
+    const windowStepSize = options.windowStepSize || 1024;
+    const windowCount =
+        samplesLength < windowSize
+            ? 0
+            : Math.floor((samplesLength - windowSize) / windowStepSize) + 1;
+    const centreSamples = new Array(windowCount);
+    for (let index = 0; index < windowCount; index += 1) {
+        centreSamples[index] = samplesStart + index * windowStepSize + windowSize / 2;
+    }
+
+    const maximumSpectrogramWorkers = Math.max(1, WORKER_LIMIT - 1);
+    const spectrogramTaskCount = Math.min(
+        maximumSpectrogramWorkers,
+        Math.max(1, Math.ceil(windowCount / 1500))
     );
+    const spectrogramTasks: Promise<SpectrogramResult>[] = [];
+    for (let taskIndex = 0; taskIndex < spectrogramTaskCount; taskIndex += 1) {
+        const firstWindow = Math.floor((taskIndex * windowCount) / spectrogramTaskCount);
+        const endWindow = Math.floor(((taskIndex + 1) * windowCount) / spectrogramTaskCount);
+        if (endWindow <= firstWindow) {
+            continue;
+        }
+        const chunkStart = samplesStart + firstWindow * windowStepSize;
+        const chunkEnd = Math.min(
+            samplesStart + samplesLength,
+            samplesStart + (endWindow - 1) * windowStepSize + windowSize
+        );
+        spectrogramTasks.push(
+            offThreadGenerateSpectrogramOnly(
+                new Float32Array(samples.subarray(chunkStart, chunkEnd)),
+                {
+                    ...options,
+                    isStart: false,
+                    isEnd: false,
+                }
+            )
+        );
+    }
+
+    const acousticTask = offThreadAnalyzeAcoustics(
+        new Float32Array(samples),
+        options.sampleRate,
+        centreSamples,
+        analysisOptions,
+        true
+    );
+    const [spectrogramParts, acousticResult] = await Promise.all([
+        Promise.all(spectrogramTasks),
+        acousticTask,
+    ]);
+    const scaleSize = spectrogramParts[0]?.options.scaleSize || options.scaleSize || windowSize / 2;
+    const spectrogram = new Float32Array(windowCount * scaleSize);
+    let outputOffset = 0;
+    for (const part of spectrogramParts) {
+        spectrogram.set(part.spectrogram, outputOffset);
+        outputOffset += part.spectrogram.length;
+    }
+    const spectrogramOptions: Required<SpectrogramOptions> = spectrogramParts[0]?.options || {
+        isStart: false,
+        isEnd: false,
+        windowSize,
+        fftSize: options.fftSize || windowSize,
+        windowStepSize,
+        minFrequencyHz: options.minFrequencyHz || 0,
+        maxFrequencyHz:
+            options.maxFrequencyHz ||
+            (options.sampleRate * ((options.fftSize || windowSize) - 2)) /
+                (2 * (options.fftSize || windowSize)),
+        sampleRate: options.sampleRate,
+        scale: options.scale || 'linear',
+        scaleSize,
+        windowFunction: options.windowFunction || 'gaussian',
+    };
+    const analyses: TimedAcousticAnalysis[] = acousticResult.analyses.map((analysis, index) => ({
+        ...analysis,
+        timeSeconds: (centreSamples[index] + sampleOffset) / options.sampleRate,
+    }));
 
     return {
-        windowCount: spectrogramWindowCount,
+        windowCount,
         options: spectrogramOptions,
-        spectrogram: new Float32Array(spectrogramBuffer),
-        input: new Float32Array(inputBuffer),
+        spectrogram,
+        input: acousticResult.input,
         analyses,
-        pulseTimes,
+        pulseTimes: acousticResult.pulseTimes.map(
+            (time) => time + sampleOffset / options.sampleRate
+        ),
     };
 }
 
@@ -178,7 +326,8 @@ export async function offThreadAnalyzeAcoustics(
     sampleRate: number,
     centreSamples: number[],
     analysisOptions: AnalysisOptions,
-    includeFormants: boolean
+    includeFormants: boolean,
+    analysisLayers?: AnalysisLayerSelection
 ): Promise<{ input: Float32Array; analyses: AcousticAnalysis[]; pulseTimes: number[] }> {
     const { inputBuffer, analyses, pulseTimes } = await queueTask<AnalyzeAcousticsMessage>(
         ACTION_ANALYZE_ACOUSTICS,
@@ -188,6 +337,7 @@ export async function offThreadAnalyzeAcoustics(
             centreSamples,
             analysisOptions,
             includeFormants,
+            analysisLayers,
         },
         [samples.buffer]
     );

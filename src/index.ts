@@ -27,8 +27,9 @@ import { getPlotSelectionTheme } from './plot-theme';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import {
+    getWorkerCount,
     offThreadAnalyzeAcoustics,
-    offThreadAnalyzeEntireFile,
+    offThreadGenerateEntireSpectrogram,
     offThreadGenerateSpectrogram,
 } from './worker-util';
 import { WaveformDisplayOptions, WaveformRenderer, WaveformThemeName } from './waveform-render';
@@ -144,6 +145,14 @@ class SpectroEngine {
     private readonly canvas: HTMLCanvasElement;
 
     private readonly overlay: HTMLCanvasElement;
+
+    private readonly staticOverlay = document.createElement('canvas');
+
+    private staticOverlayKey = '';
+
+    private staticOverlayHistory: AnalysisPoint[] | null = null;
+
+    private staticOverlayLastPoint: AnalysisPoint | undefined;
 
     private readonly stage: HTMLElement;
 
@@ -1268,7 +1277,7 @@ class SpectroEngine {
             const analysisInput = isLongRecording
                 ? new Float32Array(item.samples.subarray(samplesStart, samplesEnd))
                 : new Float32Array(item.samples);
-            const result = await offThreadAnalyzeEntireFile(
+            const result = await offThreadGenerateEntireSpectrogram(
                 analysisInput,
                 {
                     windowSize: config.windowSize,
@@ -1278,10 +1287,8 @@ class SpectroEngine {
                     scaleSize: SPECTROGRAM_HEIGHT,
                     windowFunction: this.windowFunction,
                 },
-                this.analysisOptions,
                 isLongRecording ? 0 : samplesStart,
-                isLongRecording ? analysisInput.length : samplesLength,
-                isLongRecording ? samplesStart : 0
+                isLongRecording ? analysisInput.length : samplesLength
             );
             if (
                 requestSequence !== this.offlineAnalysisRequestSequence ||
@@ -1291,13 +1298,19 @@ class SpectroEngine {
             }
             const cache: OfflineModeCache = {
                 spectrogram: result.spectrogram,
-                analyses: result.analyses,
-                pulseTimes: result.pulseTimes,
+                analyses: this.emptyOfflineAnalyses(
+                    result.windowCount,
+                    result.options.windowStepSize,
+                    result.options.windowSize,
+                    item.sampleRate,
+                    samplesStart
+                ),
+                pulseTimes: [],
                 windowCount: result.windowCount,
                 windowSize: result.options.windowSize,
                 windowStepSize: result.options.windowStepSize,
                 fftSize: config.fftSize,
-                analysisRevision: acousticAnalysisRevision,
+                analysisRevision: -1,
                 dataStartSeconds: samplesStart / item.sampleRate,
                 dataEndSeconds: samplesEnd / item.sampleRate,
                 complete: !isLongRecording,
@@ -1307,10 +1320,8 @@ class SpectroEngine {
             this.notifyMediaLibrary();
             if (displayWhenReady && this.activeMediaId === item.id && this.mode === mode) {
                 this.displayMediaCache(item, cache);
-                if (cache.analysisRevision !== this.acousticAnalysisRevision) {
-                    this.reanalyzeMediaCache(item, mode, cache);
-                }
             }
+            void this.reanalyzeMediaCache(item, mode, cache);
         } catch (error) {
             if (
                 requestSequence !== this.offlineAnalysisRequestSequence ||
@@ -1330,6 +1341,26 @@ class SpectroEngine {
         }
     }
 
+    private emptyOfflineAnalyses(
+        windowCount: number,
+        windowStepSize: number,
+        windowSize: number,
+        sampleRate: number,
+        sampleOffset: number
+    ): AnalysisPoint[] {
+        const emptyFormants = new Array(Math.ceil(this.analysisOptions.maximumFormants)).fill(null);
+        return new Array(windowCount).fill(null).map((_, index) => ({
+            pitchHz: null,
+            pitchConfidence: 0,
+            intensityDbSpl: 0,
+            formantsHz: emptyFormants,
+            formantBandwidthsHz: emptyFormants,
+            formantIntensity: 0,
+            drawFormants: false,
+            timeSeconds: (sampleOffset + index * windowStepSize + windowSize / 2) / sampleRate,
+        }));
+    }
+
     private async reanalyzeMediaCache(
         item: MediaItem,
         mode: SpectrogramMode,
@@ -1337,7 +1368,7 @@ class SpectroEngine {
         includeFormants = true
     ) {
         const analysisRevision = this.acousticAnalysisRevision;
-        const centreSamples = new Array(cache.windowCount)
+        const absoluteCentreSamples = new Array(cache.windowCount)
             .fill(0)
             .map(
                 (_, index) =>
@@ -1345,41 +1376,95 @@ class SpectroEngine {
                     index * cache.windowStepSize +
                     cache.windowSize / 2
             );
+        const analysisPadding = Math.max(
+            cache.windowSize,
+            Math.ceil(
+                Math.max(0.08, this.analysisOptions.formantWindowLengthSeconds * 2) *
+                    item.sampleRate
+            )
+        );
+        const firstCentre = absoluteCentreSamples[0] || 0;
+        const lastCentre = absoluteCentreSamples[absoluteCentreSamples.length - 1] || firstCentre;
+        const analysisStart = Math.max(0, Math.floor(firstCentre) - analysisPadding);
+        const analysisEnd = Math.min(item.samples.length, Math.ceil(lastCentre) + analysisPadding);
+        const centreSamples = absoluteCentreSamples.map((centre) => centre - analysisStart);
+        const analysisSlice = item.samples.subarray(analysisStart, analysisEnd);
         try {
-            const result = await offThreadAnalyzeAcoustics(
-                new Float32Array(item.samples),
+            const pitchAndIntensityTask = offThreadAnalyzeAcoustics(
+                new Float32Array(analysisSlice),
                 item.sampleRate,
                 centreSamples,
                 this.analysisOptions,
-                includeFormants
+                false,
+                { pitch: true, formants: false, intensity: true }
             );
+            const formantTaskCount = Math.min(
+                Math.max(1, getWorkerCount() - 1),
+                Math.max(1, Math.ceil(absoluteCentreSamples.length / 750))
+            );
+            const formantTasks = includeFormants
+                ? new Array(formantTaskCount).fill(null).map((_, taskIndex) => {
+                      const firstIndex = Math.floor(
+                          (taskIndex * absoluteCentreSamples.length) / formantTaskCount
+                      );
+                      const endIndex = Math.floor(
+                          ((taskIndex + 1) * absoluteCentreSamples.length) / formantTaskCount
+                      );
+                      const chunkStart = Math.max(
+                          0,
+                          Math.floor(absoluteCentreSamples[firstIndex]) - analysisPadding
+                      );
+                      const chunkEnd = Math.min(
+                          item.samples.length,
+                          Math.ceil(absoluteCentreSamples[endIndex - 1]) + analysisPadding
+                      );
+                      return offThreadAnalyzeAcoustics(
+                          new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
+                          item.sampleRate,
+                          absoluteCentreSamples
+                              .slice(firstIndex, endIndex)
+                              .map((centre) => centre - chunkStart),
+                          this.analysisOptions,
+                          true,
+                          { pitch: false, formants: true, intensity: false }
+                      );
+                  })
+                : [];
+            const [pitchAndIntensityResult, formantResults] = await Promise.all([
+                pitchAndIntensityTask,
+                Promise.all(formantTasks),
+            ]);
+            const formantAnalyses = formantResults.flatMap((result) => result.analyses);
             if (analysisRevision !== this.acousticAnalysisRevision || item.modes[mode] !== cache) {
                 return;
             }
-            cache.analyses = result.analyses.map((analysis, index) => {
+            cache.analyses = pitchAndIntensityResult.analyses.map((analysis, index) => {
                 const previous = cache.analyses[index];
+                const formantAnalysis = formantAnalyses[index];
                 return {
                     ...analysis,
                     formantsHz:
                         includeFormants || previous === undefined
-                            ? analysis.formantsHz
+                            ? formantAnalysis?.formantsHz || analysis.formantsHz
                             : previous.formantsHz,
                     formantBandwidthsHz:
                         includeFormants || previous === undefined
-                            ? analysis.formantBandwidthsHz
+                            ? formantAnalysis?.formantBandwidthsHz || analysis.formantBandwidthsHz
                             : previous.formantBandwidthsHz,
                     formantIntensity:
                         includeFormants || previous === undefined
-                            ? analysis.formantIntensity
+                            ? formantAnalysis?.formantIntensity || 0
                             : previous.formantIntensity,
                     drawFormants:
                         includeFormants || previous === undefined
-                            ? analysis.drawFormants
+                            ? formantAnalysis?.drawFormants || false
                             : previous.drawFormants,
-                    timeSeconds: centreSamples[index] / item.sampleRate,
+                    timeSeconds: absoluteCentreSamples[index] / item.sampleRate,
                 };
             });
-            cache.pulseTimes = result.pulseTimes;
+            cache.pulseTimes = pitchAndIntensityResult.pulseTimes.map(
+                (time) => time + analysisStart / item.sampleRate
+            );
             cache.analysisRevision = analysisRevision;
             if (this.activeMediaId === item.id && this.mode === mode) {
                 this.analysisHistory = cache.analyses;
@@ -1387,6 +1472,13 @@ class SpectroEngine {
                 this.rebuildStatisticsFromHistory();
                 this.updateSnapshotAtPlaybackOffset(true);
                 this.overlayDirty = true;
+                this.ui.setPlayState(
+                    'stopped',
+                    item.name,
+                    cache.complete
+                        ? '整段分析完成，可自由拖动播放'
+                        : '当前视野已渲染，可继续放大查看细节'
+                );
             }
         } catch (error) {
             console.warn('Unable to update acoustic overlays', error);
@@ -1443,7 +1535,11 @@ class SpectroEngine {
         this.ui.setPlayState(
             'stopped',
             item.name,
-            cache.complete ? '整段分析完成，可自由拖动播放' : '当前视野已渲染，可继续放大查看细节'
+            cache.analysisRevision < 0
+                ? '语谱图已就绪，声学轨迹后台加载中…'
+                : cache.complete
+                ? '整段分析完成，可自由拖动播放'
+                : '当前视野已渲染，可继续放大查看细节'
         );
         this.notifyTransport();
         this.overlayDirty = true;
@@ -1942,6 +2038,9 @@ class SpectroEngine {
         this.overlay.height = Math.round(height * pixelRatio);
         this.overlay.style.width = `${width}px`;
         this.overlay.style.height = `${height}px`;
+        this.staticOverlay.width = this.overlay.width;
+        this.staticOverlay.height = this.overlay.height;
+        this.staticOverlayKey = '';
         this.waveformRenderer.resize(
             Math.round(waveformWidth * pixelRatio),
             Math.round(waveformHeight * pixelRatio)
@@ -2076,14 +2175,15 @@ class SpectroEngine {
     }
 
     private drawOverlay() {
-        const ctx = this.overlay.getContext('2d');
-        if (!ctx) {
+        const outputContext = this.overlay.getContext('2d');
+        const staticContext = this.staticOverlay.getContext('2d');
+        if (!outputContext || !staticContext) {
             return;
         }
         const width = this.overlay.width;
         const height = this.overlay.height;
         const selectionTheme = getPlotSelectionTheme(this.spectrogramThemeName);
-        ctx.clearRect(0, 0, width, height);
+        outputContext.clearRect(0, 0, width, height);
         const visible = this.visibleHistoryRange();
         if (visible.end <= visible.start) {
             return;
@@ -2116,89 +2216,121 @@ class SpectroEngine {
                             this.layerDisplayOptions.pitchFloorHz
                     ));
 
-        if (this.showFormants) {
-            const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
-            let maximumVisibleFormantIntensity = 0;
-            for (let index = visible.start; index < visible.end; index += 1) {
-                if (this.analysisHistory[index].drawFormants) {
-                    maximumVisibleFormantIntensity = Math.max(
-                        maximumVisibleFormantIntensity,
-                        this.analysisHistory[index].formantIntensity
-                    );
-                }
-            }
-            const minimumVisibleFormantIntensity =
-                maximumVisibleFormantIntensity === 0 ||
-                this.layerDisplayOptions.formantDynamicRangeDb <= 0
-                    ? 0
-                    : maximumVisibleFormantIntensity /
-                      10 ** (this.layerDisplayOptions.formantDynamicRangeDb / 10);
-            const formantCount = Math.min(
-                this.layerDisplayOptions.formantsToDisplay,
-                this.analysisHistory[visible.end - 1]?.formantsHz.length || 0
-            );
-            for (let formantIndex = 0; formantIndex < formantCount; formantIndex += 1) {
-                ctx.fillStyle = colors[formantIndex % colors.length];
+        const lastPoint = this.analysisHistory[visible.end - 1];
+        const staticKey = [
+            width,
+            height,
+            visible.start,
+            visible.end,
+            visibleTime.startSeconds,
+            visibleTime.endSeconds,
+            this.mode,
+            this.activeMediaId || 'live',
+            this.showPitch ? 1 : 0,
+            this.showFormants ? 1 : 0,
+            this.showIntensity ? 1 : 0,
+            this.spectrogramThemeName,
+            this.renderParameters.minFrequencyHz,
+            this.renderParameters.maxFrequencyHz,
+            this.renderParameters.scale,
+            JSON.stringify(this.layerDisplayOptions),
+        ].join(':');
+        const staticChanged =
+            staticKey !== this.staticOverlayKey ||
+            this.staticOverlayHistory !== this.analysisHistory ||
+            this.staticOverlayLastPoint !== lastPoint;
+
+        if (staticChanged) {
+            staticContext.clearRect(0, 0, width, height);
+            if (this.showFormants) {
+                const colors = ['#ff4f72', '#ff755e', '#ff9e61', '#ffc86b', '#ffe39a', '#fff0c7'];
+                let maximumVisibleFormantIntensity = 0;
                 for (let index = visible.start; index < visible.end; index += 1) {
-                    const formant = this.analysisHistory[index].formantsHz[formantIndex];
-                    const withinDynamicRange =
-                        this.analysisHistory[index].formantIntensity >=
-                        minimumVisibleFormantIntensity;
-                    if (
-                        this.analysisHistory[index].drawFormants &&
-                        formant !== null &&
-                        withinDynamicRange
-                    ) {
-                        const y = frequencyY(formant);
-                        if (y >= 0 && y <= height) {
-                            ctx.beginPath();
-                            ctx.arc(
-                                xForIndex(index),
-                                y,
-                                this.layerDisplayOptions.formantDotSize,
-                                0,
-                                Math.PI * 2
-                            );
-                            ctx.fill();
+                    if (this.analysisHistory[index].drawFormants) {
+                        maximumVisibleFormantIntensity = Math.max(
+                            maximumVisibleFormantIntensity,
+                            this.analysisHistory[index].formantIntensity
+                        );
+                    }
+                }
+                const minimumVisibleFormantIntensity =
+                    maximumVisibleFormantIntensity === 0 ||
+                    this.layerDisplayOptions.formantDynamicRangeDb <= 0
+                        ? 0
+                        : maximumVisibleFormantIntensity /
+                          10 ** (this.layerDisplayOptions.formantDynamicRangeDb / 10);
+                const formantCount = Math.min(
+                    this.layerDisplayOptions.formantsToDisplay,
+                    this.analysisHistory[visible.end - 1]?.formantsHz.length || 0
+                );
+                for (let formantIndex = 0; formantIndex < formantCount; formantIndex += 1) {
+                    staticContext.fillStyle = colors[formantIndex % colors.length];
+                    for (let index = visible.start; index < visible.end; index += 1) {
+                        const formant = this.analysisHistory[index].formantsHz[formantIndex];
+                        const withinDynamicRange =
+                            this.analysisHistory[index].formantIntensity >=
+                            minimumVisibleFormantIntensity;
+                        if (
+                            this.analysisHistory[index].drawFormants &&
+                            formant !== null &&
+                            withinDynamicRange
+                        ) {
+                            const y = frequencyY(formant);
+                            if (y >= 0 && y <= height) {
+                                staticContext.beginPath();
+                                staticContext.arc(
+                                    xForIndex(index),
+                                    y,
+                                    this.layerDisplayOptions.formantDotSize,
+                                    0,
+                                    Math.PI * 2
+                                );
+                                staticContext.fill();
+                            }
                         }
                     }
                 }
             }
+
+            if (this.showPitch) {
+                this.strokeSeries(
+                    staticContext,
+                    visible.start,
+                    visible.end,
+                    xForIndex,
+                    (point) => point.pitchHz,
+                    (pitch) =>
+                        this.layerDisplayOptions.pitchFrequencyAligned
+                            ? frequencyY(pitch)
+                            : pitchY(pitch),
+                    '#2588ff',
+                    this.layerDisplayOptions.pitchLineWidth
+                );
+            }
+
+            if (this.showIntensity) {
+                this.strokeSeries(
+                    staticContext,
+                    visible.start,
+                    visible.end,
+                    xForIndex,
+                    (point) => point.intensityDbSpl,
+                    (intensity) =>
+                        height *
+                        (1 -
+                            (intensity - this.layerDisplayOptions.intensityFloorDbSpl) /
+                                (this.layerDisplayOptions.intensityCeilingDbSpl -
+                                    this.layerDisplayOptions.intensityFloorDbSpl)),
+                    '#f4df22',
+                    this.layerDisplayOptions.intensityLineWidth
+                );
+            }
+            this.staticOverlayKey = staticKey;
+            this.staticOverlayHistory = this.analysisHistory;
+            this.staticOverlayLastPoint = lastPoint;
         }
 
-        if (this.showPitch) {
-            this.strokeSeries(
-                ctx,
-                visible.start,
-                visible.end,
-                xForIndex,
-                (point) => point.pitchHz,
-                (pitch) =>
-                    this.layerDisplayOptions.pitchFrequencyAligned
-                        ? frequencyY(pitch)
-                        : pitchY(pitch),
-                '#2588ff',
-                this.layerDisplayOptions.pitchLineWidth
-            );
-        }
-
-        if (this.showIntensity) {
-            this.strokeSeries(
-                ctx,
-                visible.start,
-                visible.end,
-                xForIndex,
-                (point) => point.intensityDbSpl,
-                (intensity) =>
-                    height *
-                    (1 -
-                        (intensity - this.layerDisplayOptions.intensityFloorDbSpl) /
-                            (this.layerDisplayOptions.intensityCeilingDbSpl -
-                                this.layerDisplayOptions.intensityFloorDbSpl)),
-                '#f4df22',
-                this.layerDisplayOptions.intensityLineWidth
-            );
-        }
+        outputContext.drawImage(this.staticOverlay, 0, 0);
 
         if (this.selection !== null) {
             const rawSelectionLeft = xForTime(this.selection.startSeconds);
@@ -2206,24 +2338,29 @@ class SpectroEngine {
             const selectionLeft = clamp(rawSelectionLeft, 0, width);
             const selectionRight = clamp(rawSelectionRight, 0, width);
             if (rawSelectionRight >= 0 && rawSelectionLeft <= width) {
-                ctx.save();
-                ctx.fillStyle = selectionTheme.fill;
-                ctx.fillRect(selectionLeft, 0, Math.max(1, selectionRight - selectionLeft), height);
-                ctx.strokeStyle = selectionTheme.stroke;
-                ctx.lineWidth = 1;
-                ctx.setLineDash([4, 4]);
-                ctx.beginPath();
-                ctx.moveTo(selectionLeft, 0);
-                ctx.lineTo(selectionLeft, height);
-                ctx.moveTo(selectionRight, 0);
-                ctx.lineTo(selectionRight, height);
-                ctx.stroke();
-                ctx.restore();
+                outputContext.save();
+                outputContext.fillStyle = selectionTheme.fill;
+                outputContext.fillRect(
+                    selectionLeft,
+                    0,
+                    Math.max(1, selectionRight - selectionLeft),
+                    height
+                );
+                outputContext.strokeStyle = selectionTheme.stroke;
+                outputContext.lineWidth = 1;
+                outputContext.setLineDash([4, 4]);
+                outputContext.beginPath();
+                outputContext.moveTo(selectionLeft, 0);
+                outputContext.lineTo(selectionLeft, height);
+                outputContext.moveTo(selectionRight, 0);
+                outputContext.lineTo(selectionRight, height);
+                outputContext.stroke();
+                outputContext.restore();
             }
         }
 
         if (this.inspector !== null) {
-            ctx.save();
+            outputContext.save();
             const inspectorIndex = clamp(
                 Math.floor(
                     visible.start + this.inspector.x * Math.max(1, visible.end - visible.start)
@@ -2237,25 +2374,25 @@ class SpectroEngine {
                     ? frequencyY(inspectorPitch)
                     : pitchY(inspectorPitch);
                 if (inspectorPitchY >= 0 && inspectorPitchY <= height) {
-                    ctx.strokeStyle = 'rgba(61, 151, 255, 0.72)';
-                    ctx.lineWidth = 0.75;
-                    ctx.setLineDash([2, 3]);
-                    ctx.beginPath();
-                    ctx.moveTo(this.inspector.x * width, this.inspector.y * height);
-                    ctx.lineTo(this.inspector.x * width, inspectorPitchY);
-                    ctx.stroke();
+                    outputContext.strokeStyle = 'rgba(61, 151, 255, 0.72)';
+                    outputContext.lineWidth = 0.75;
+                    outputContext.setLineDash([2, 3]);
+                    outputContext.beginPath();
+                    outputContext.moveTo(this.inspector.x * width, this.inspector.y * height);
+                    outputContext.lineTo(this.inspector.x * width, inspectorPitchY);
+                    outputContext.stroke();
                 }
             }
-            ctx.strokeStyle = 'rgba(255, 77, 98, 0.9)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([5, 5]);
-            ctx.beginPath();
-            ctx.moveTo(this.inspector.x * width, 0);
-            ctx.lineTo(this.inspector.x * width, height);
-            ctx.moveTo(0, this.inspector.y * height);
-            ctx.lineTo(width, this.inspector.y * height);
-            ctx.stroke();
-            ctx.restore();
+            outputContext.strokeStyle = 'rgba(255, 77, 98, 0.9)';
+            outputContext.lineWidth = 1;
+            outputContext.setLineDash([5, 5]);
+            outputContext.beginPath();
+            outputContext.moveTo(this.inspector.x * width, 0);
+            outputContext.lineTo(this.inspector.x * width, height);
+            outputContext.moveTo(0, this.inspector.y * height);
+            outputContext.lineTo(width, this.inspector.y * height);
+            outputContext.stroke();
+            outputContext.restore();
         }
     }
 
@@ -2286,7 +2423,7 @@ class SpectroEngine {
             }
             const x = xForIndex(index);
             const y = yForValue(value);
-            if (y < 0 || y > this.overlay.height) {
+            if (y < 0 || y > ctx.canvas.height) {
                 drawing = false;
                 continue;
             }

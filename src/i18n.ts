@@ -28,6 +28,8 @@ const ENGLISH: { [key: string]: string } = {
     '录音较长，已暂停语谱图渲染，请先放大视图':
         'This recording is long, so spectrogram rendering is paused. Zoom in to render a view',
     '当前视野已渲染，可继续放大查看细节': 'Current view rendered · Zoom in further for more detail',
+    '语谱图已就绪，声学轨迹后台加载中…':
+        'Spectrogram ready · Loading acoustic tracks in the background…',
     播放完成: 'Playback complete',
     选区播放完成: 'Selection playback complete',
     '播放中 · 分析图保持完整': 'Playing · Full analysis remains visible',
