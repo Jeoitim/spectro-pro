@@ -175,6 +175,17 @@ export interface SelectionSnapshot {
     durationSeconds: number;
 }
 
+export type AnalysisTaskStatus = 'pending' | 'running' | 'retrying' | 'complete' | 'error';
+
+export interface AnalysisTaskSnapshot {
+    id: string;
+    label: string;
+    sourceName: string;
+    status: AnalysisTaskStatus;
+    progress: number | null;
+    detail?: string;
+}
+
 interface PlotPointer {
     x: number;
     y: number;
@@ -207,7 +218,7 @@ interface MediaDragState {
 
 export interface AppCallbacks {
     onStartMicrophone: () => void;
-    onStartFile: (buffer: ArrayBuffer, name: string) => void;
+    onStartFile: (buffer: ArrayBuffer, name: string) => void | Promise<void>;
     onStop: () => void;
     onClear: () => void;
     onExport: () => void;
@@ -434,6 +445,7 @@ export interface UiController {
     updateTransport: (snapshot: TransportSnapshot) => void;
     updateSelection: (snapshot: SelectionSnapshot | null) => void;
     updateWaveformAxis: (state: WaveformAxisState) => void;
+    updateAnalysisTasks: (tasks: AnalysisTaskSnapshot[]) => void;
 }
 
 export default function App({
@@ -513,6 +525,10 @@ export default function App({
     const [playState, setPlayState] = useState<PlayState>('stopped');
     const [sourceName, setSourceName] = useState('等待输入');
     const [statusMessage, setStatusMessage] = useState('选择麦克风或音频文件开始');
+    const [analysisTasks, setAnalysisTasks] = useState<AnalysisTaskSnapshot[]>([]);
+    const [analysisTasksVisible, setAnalysisTasksVisible] = useState(false);
+    const analysisHideTimerRef = useRef<number | null>(null);
+    const analysisClearTimerRef = useRef<number | null>(null);
     const [mode, setMode] = useState<SpectrogramMode>(saved.mode || 'broadband');
     const [pitchAlgorithm, setPitchAlgorithm] = useState<PitchAlgorithm>(
         saved.pitchAlgorithm || 'yin'
@@ -1075,12 +1091,48 @@ export default function App({
             updateTransport: setTransport,
             updateSelection: setSelection,
             updateWaveformAxis: setWaveformAxisState,
+            updateAnalysisTasks: (tasks) => {
+                if (analysisHideTimerRef.current !== null) {
+                    window.clearTimeout(analysisHideTimerRef.current);
+                    analysisHideTimerRef.current = null;
+                }
+                if (analysisClearTimerRef.current !== null) {
+                    window.clearTimeout(analysisClearTimerRef.current);
+                    analysisClearTimerRef.current = null;
+                }
+                setAnalysisTasks(tasks);
+                setAnalysisTasksVisible(tasks.length > 0);
+                if (
+                    tasks.length > 0 &&
+                    tasks.every((task) => task.status === 'complete' || task.status === 'error')
+                ) {
+                    analysisHideTimerRef.current = window.setTimeout(() => {
+                        setAnalysisTasksVisible(false);
+                        analysisClearTimerRef.current = window.setTimeout(
+                            () => setAnalysisTasks([]),
+                            260
+                        );
+                    }, 3000);
+                }
+            },
         });
     }, [registerController]);
 
     useEffect(() => {
         installSpectroFavicon();
     }, []);
+
+    useEffect(
+        () => () => {
+            if (analysisHideTimerRef.current !== null) {
+                window.clearTimeout(analysisHideTimerRef.current);
+            }
+            if (analysisClearTimerRef.current !== null) {
+                window.clearTimeout(analysisClearTimerRef.current);
+            }
+        },
+        []
+    );
 
     useEffect(() => {
         document.documentElement.lang = locale === 'zh' ? 'zh-CN' : 'en';
@@ -1590,7 +1642,7 @@ export default function App({
                     reader.addEventListener('error', () => reject(reader.error));
                     reader.readAsArrayBuffer(file);
                 });
-                onStartFile(buffer, file.name);
+                await onStartFile(buffer, file.name);
             }
             if (fileRef.current) {
                 fileRef.current.value = '';
@@ -4305,6 +4357,86 @@ export default function App({
                     </p>
                 </div>
             </aside>
+            {analysisTasks.length > 0 && (
+                <aside
+                    className={`analysis-task-toast ${analysisTasksVisible ? 'visible' : ''}`}
+                    role="status"
+                    aria-live="polite"
+                >
+                    <div className="analysis-task-heading">
+                        <div>
+                            <span>{tr('后台分析')}</span>
+                            <strong>
+                                {analysisTasks.every(
+                                    (task) => task.status === 'complete' || task.status === 'error'
+                                )
+                                    ? analysisTasks.some((task) => task.status === 'error')
+                                        ? tr('部分任务未完成')
+                                        : tr('分析任务已完成')
+                                    : tr('正在准备分析结果')}
+                            </strong>
+                        </div>
+                        <em>
+                            {
+                                analysisTasks.filter(
+                                    (task) => task.status === 'complete' || task.status === 'error'
+                                ).length
+                            }
+                            /{analysisTasks.length}
+                        </em>
+                    </div>
+                    <div className="analysis-total-progress" aria-hidden="true">
+                        <i
+                            style={{
+                                width: `${Math.round(
+                                    (analysisTasks.reduce(
+                                        (sum, task) =>
+                                            sum +
+                                            (task.status === 'complete' || task.status === 'error'
+                                                ? 1
+                                                : task.progress || 0),
+                                        0
+                                    ) /
+                                        analysisTasks.length) *
+                                        100
+                                )}%`,
+                            }}
+                        />
+                    </div>
+                    <div className="analysis-task-list">
+                        {analysisTasks.map((task) => (
+                            <div className={`analysis-task-row ${task.status}`} key={task.id}>
+                                <i className="analysis-task-state" aria-hidden="true" />
+                                <div>
+                                    <strong>{tr(task.label)}</strong>
+                                    <small>
+                                        {task.sourceName}
+                                        {task.detail ? ` · ${tr(task.detail)}` : ''}
+                                        {task.progress !== null &&
+                                        task.status !== 'complete' &&
+                                        task.status !== 'error'
+                                            ? ` · ${Math.round(task.progress * 100)}%`
+                                            : ''}
+                                    </small>
+                                    {task.progress !== null &&
+                                        task.status !== 'complete' &&
+                                        task.status !== 'error' && (
+                                            <span className="analysis-row-progress">
+                                                <i
+                                                    style={{
+                                                        width: `${Math.round(
+                                                            task.progress * 100
+                                                        )}%`,
+                                                    }}
+                                                />
+                                            </span>
+                                        )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </aside>
+            )}
             {settingsOpen && (
                 <button
                     className="settings-backdrop"

@@ -15,15 +15,24 @@ import {
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
     ACTION_COMPUTE_SPECTROGRAM_ONLY,
+    ACTION_PREPARE_ACOUSTIC_WASM,
     AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
     ComputeSpectrogramOnlyMessage,
     Message,
+    PrepareAcousticWasmRequest,
 } from '../worker-constants';
 
 const workerScope = (self as unknown) as DedicatedWorkerGlobalScope;
-const acousticWasmReady = initializeAcousticWasm();
+let acousticWasmReady: Promise<boolean> | null = null;
+
+function prepareAcousticWasm() {
+    if (acousticWasmReady === null) {
+        acousticWasmReady = initializeAcousticWasm();
+    }
+    return acousticWasmReady;
+}
 
 function analyzeAtCentres(
     samples: Float32Array,
@@ -92,235 +101,254 @@ function analyzeAtCentres(
     );
 }
 
-workerScope.addEventListener('message', async (event: { data: Message['request'] }) => {
-    const {
-        data: { action, payload },
-    } = event;
+async function handleWorkerMessage(event: {
+    data: Message['request'] | PrepareAcousticWasmRequest;
+}) {
+        const {
+            data: { action, payload },
+        } = event;
 
-    if (action !== ACTION_COMPUTE_SPECTROGRAM_ONLY) {
-        await acousticWasmReady;
-    }
+        if (action === ACTION_PREPARE_ACOUSTIC_WASM) {
+            const { module, responsePort } = payload as PrepareAcousticWasmRequest['payload'];
+            if (acousticWasmReady === null) {
+                acousticWasmReady = initializeAcousticWasm(module);
+            }
+            responsePort?.postMessage(await acousticWasmReady);
+            responsePort?.close();
+            return;
+        }
 
-    switch (action) {
-        case ACTION_ANALYZE_ACOUSTICS: {
-            const {
-                samplesBuffer,
-                sampleRate,
-                centreSamples,
-                analysisOptions,
-                includeFormants,
-                analysisLayers,
-            } = payload as AnalyzeAcousticsMessage['request']['payload'];
-            try {
-                const samples = new Float32Array(samplesBuffer);
-                const analyses = analyzeAtCentres(
-                    samples,
+        if (action !== ACTION_COMPUTE_SPECTROGRAM_ONLY) {
+            await prepareAcousticWasm();
+        }
+
+        switch (action) {
+            case ACTION_ANALYZE_ACOUSTICS: {
+                const {
+                    samplesBuffer,
                     sampleRate,
                     centreSamples,
                     analysisOptions,
-                    analysisLayers || {
-                        pitch: true,
-                        formants: includeFormants,
-                        intensity: true,
-                    }
-                );
-                const timedPitch = analyses.map((analysis, index) => ({
-                    ...analysis,
-                    timeSeconds: centreSamples[index] / sampleRate,
-                }));
-                const response: AnalyzeAcousticsMessage['response'] = {
-                    payload: {
-                        inputBuffer: samples.buffer,
-                        analyses,
-                        pulseTimes:
-                            analysisLayers?.pitch === false
-                                ? []
-                                : detectPulseTimes(samples, sampleRate, timedPitch),
-                    },
-                };
-                workerScope.postMessage(response, [samples.buffer as ArrayBuffer]);
-            } catch (error) {
-                const response: AnalyzeAcousticsMessage['response'] = {
-                    error: error instanceof Error ? error : new Error(String(error)),
-                };
-                workerScope.postMessage(response);
-            }
-            break;
-        }
-        case ACTION_COMPUTE_SPECTROGRAM: {
-            const {
-                samplesBuffer,
-                samplesStart,
-                samplesLength,
-                options,
-                analysisOptions,
-                analysisLayers,
-                analysisCadence,
-            } = payload as ComputeSpectrogramMessage['request']['payload'];
-
-            try {
-                const samples = new Float32Array(samplesBuffer);
-                const {
-                    windowCount: spectrogramWindowCount,
-                    options: spectrogramOptions,
-                    spectrogram,
-                } = generateSpectrogram(samples, samplesStart, samplesLength, options);
-                const centreSamples = new Array(spectrogramWindowCount)
-                    .fill(0)
-                    .map(
-                        (_, windowIndex) =>
-                            samplesStart +
-                            windowIndex * spectrogramOptions.windowStepSize +
-                            spectrogramOptions.windowSize / 2
-                    );
-                const analyses = analyzeAtCentres(
-                    samples,
-                    options.sampleRate,
-                    centreSamples,
-                    analysisOptions,
+                    includeFormants,
                     analysisLayers,
-                    analysisCadence
-                );
-                const timedPitch = analyses.map((analysis, index) => ({
-                    ...analysis,
-                    timeSeconds: centreSamples[index] / options.sampleRate,
-                }));
-
-                const response: ComputeSpectrogramMessage['response'] = {
-                    payload: {
-                        spectrogramWindowCount,
-                        spectrogramOptions,
-                        spectrogramBuffer: spectrogram.buffer,
-                        inputBuffer: samples.buffer,
-                        analyses,
-                        pulseTimes: detectPulseTimes(samples, options.sampleRate, timedPitch),
-                    },
-                };
-                workerScope.postMessage(response, [
-                    spectrogram.buffer as ArrayBuffer,
-                    samples.buffer as ArrayBuffer,
-                ]);
-            } catch (error) {
-                const response: ComputeSpectrogramMessage['response'] = {
-                    error: error instanceof Error ? error : new Error(String(error)),
-                };
-                workerScope.postMessage(response);
+                } = payload as AnalyzeAcousticsMessage['request']['payload'];
+                try {
+                    const samples = new Float32Array(samplesBuffer);
+                    const analyses = analyzeAtCentres(
+                        samples,
+                        sampleRate,
+                        centreSamples,
+                        analysisOptions,
+                        analysisLayers || {
+                            pitch: true,
+                            formants: includeFormants,
+                            intensity: true,
+                        }
+                    );
+                    const timedPitch = analyses.map((analysis, index) => ({
+                        ...analysis,
+                        timeSeconds: centreSamples[index] / sampleRate,
+                    }));
+                    const response: AnalyzeAcousticsMessage['response'] = {
+                        payload: {
+                            inputBuffer: samples.buffer,
+                            analyses,
+                            pulseTimes:
+                                analysisLayers?.pitch === false
+                                    ? []
+                                    : detectPulseTimes(samples, sampleRate, timedPitch),
+                        },
+                    };
+                    workerScope.postMessage(response, [samples.buffer as ArrayBuffer]);
+                } catch (error) {
+                    const response: AnalyzeAcousticsMessage['response'] = {
+                        error: error instanceof Error ? error : new Error(String(error)),
+                    };
+                    workerScope.postMessage(response);
+                }
+                break;
             }
-
-            break;
-        }
-        case ACTION_COMPUTE_SPECTROGRAM_ONLY: {
-            const {
-                samplesBuffer,
-                samplesStart,
-                samplesLength,
-                options,
-            } = payload as ComputeSpectrogramOnlyMessage['request']['payload'];
-            try {
-                const result = generateSpectrogram(
-                    new Float32Array(samplesBuffer),
+            case ACTION_COMPUTE_SPECTROGRAM: {
+                const {
+                    samplesBuffer,
                     samplesStart,
                     samplesLength,
-                    options
-                );
-                const response: ComputeSpectrogramOnlyMessage['response'] = {
-                    payload: {
-                        spectrogramWindowCount: result.windowCount,
-                        spectrogramOptions: result.options,
-                        spectrogramBuffer: result.spectrogram.buffer,
-                    },
-                };
-                workerScope.postMessage(response, [result.spectrogram.buffer as ArrayBuffer]);
-            } catch (error) {
-                const response: ComputeSpectrogramOnlyMessage['response'] = {
-                    error: error instanceof Error ? error : new Error(String(error)),
-                };
-                workerScope.postMessage(response);
-            }
-            break;
-        }
-        case ACTION_ANALYZE_OFFLINE: {
-            const {
-                samplesBuffer,
-                samplesStart,
-                samplesLength,
-                sampleOffset,
-                options,
-                analysisOptions,
-            } = payload as AnalyzeOfflineMessage['request']['payload'];
-            try {
-                const samples = new Float32Array(samplesBuffer);
-                const result = generateSpectrogram(samples, samplesStart, samplesLength, options);
-                const analysisPadding = Math.max(
-                    options.windowSize || 0,
-                    Math.ceil(0.08 * options.sampleRate)
-                );
-                const analysisStart = Math.max(0, samplesStart - analysisPadding);
-                const analysisEnd = Math.min(
-                    samples.length,
-                    samplesStart + samplesLength + analysisPadding
-                );
-                const analysisSamples = samples.subarray(analysisStart, analysisEnd);
-                const centreSamples = new Array(result.windowCount)
-                    .fill(0)
-                    .map(
-                        (_, windowIndex) =>
-                            samplesStart +
-                            windowIndex * result.options.windowStepSize +
-                            result.options.windowSize / 2
-                    );
-                const analyses: TimedAcousticAnalysis[] = analyzeAtCentres(
-                    analysisSamples,
-                    options.sampleRate,
-                    centreSamples.map((centreSample) => centreSample - analysisStart),
-                    analysisOptions
-                ).map((analysis, index) => ({
-                    ...analysis,
-                    timeSeconds: (centreSamples[index] + sampleOffset) / options.sampleRate,
-                }));
-                const pulseTimes = detectPulseTimes(
-                    analysisSamples,
-                    options.sampleRate,
-                    analyses.map((analysis) => ({
-                        ...analysis,
-                        timeSeconds:
-                            analysis.timeSeconds -
-                            analysisStart / options.sampleRate -
-                            sampleOffset / options.sampleRate,
-                    }))
-                ).map(
-                    (time) =>
-                        time +
-                        analysisStart / options.sampleRate +
-                        sampleOffset / options.sampleRate
-                );
+                    options,
+                    analysisOptions,
+                    analysisLayers,
+                    analysisCadence,
+                } = payload as ComputeSpectrogramMessage['request']['payload'];
 
-                const response: AnalyzeOfflineMessage['response'] = {
-                    payload: {
-                        spectrogramWindowCount: result.windowCount,
-                        spectrogramOptions: result.options,
-                        spectrogramBuffer: result.spectrogram.buffer,
-                        inputBuffer: samples.buffer,
-                        analyses,
-                        pulseTimes,
-                    },
-                };
-                workerScope.postMessage(response, [
-                    result.spectrogram.buffer as ArrayBuffer,
-                    samples.buffer as ArrayBuffer,
-                ]);
-            } catch (error) {
-                const response: AnalyzeOfflineMessage['response'] = {
-                    error: error instanceof Error ? error : new Error(String(error)),
-                };
-                workerScope.postMessage(response);
+                try {
+                    const samples = new Float32Array(samplesBuffer);
+                    const {
+                        windowCount: spectrogramWindowCount,
+                        options: spectrogramOptions,
+                        spectrogram,
+                    } = generateSpectrogram(samples, samplesStart, samplesLength, options);
+                    const centreSamples = new Array(spectrogramWindowCount)
+                        .fill(0)
+                        .map(
+                            (_, windowIndex) =>
+                                samplesStart +
+                                windowIndex * spectrogramOptions.windowStepSize +
+                                spectrogramOptions.windowSize / 2
+                        );
+                    const analyses = analyzeAtCentres(
+                        samples,
+                        options.sampleRate,
+                        centreSamples,
+                        analysisOptions,
+                        analysisLayers,
+                        analysisCadence
+                    );
+                    const timedPitch = analyses.map((analysis, index) => ({
+                        ...analysis,
+                        timeSeconds: centreSamples[index] / options.sampleRate,
+                    }));
+
+                    const response: ComputeSpectrogramMessage['response'] = {
+                        payload: {
+                            spectrogramWindowCount,
+                            spectrogramOptions,
+                            spectrogramBuffer: spectrogram.buffer,
+                            inputBuffer: samples.buffer,
+                            analyses,
+                            pulseTimes: detectPulseTimes(samples, options.sampleRate, timedPitch),
+                        },
+                    };
+                    workerScope.postMessage(response, [
+                        spectrogram.buffer as ArrayBuffer,
+                        samples.buffer as ArrayBuffer,
+                    ]);
+                } catch (error) {
+                    const response: ComputeSpectrogramMessage['response'] = {
+                        error: error instanceof Error ? error : new Error(String(error)),
+                    };
+                    workerScope.postMessage(response);
+                }
+
+                break;
             }
-            break;
+            case ACTION_COMPUTE_SPECTROGRAM_ONLY: {
+                const {
+                    samplesBuffer,
+                    samplesStart,
+                    samplesLength,
+                    options,
+                } = payload as ComputeSpectrogramOnlyMessage['request']['payload'];
+                try {
+                    const result = generateSpectrogram(
+                        new Float32Array(samplesBuffer),
+                        samplesStart,
+                        samplesLength,
+                        options
+                    );
+                    const response: ComputeSpectrogramOnlyMessage['response'] = {
+                        payload: {
+                            spectrogramWindowCount: result.windowCount,
+                            spectrogramOptions: result.options,
+                            spectrogramBuffer: result.spectrogram.buffer,
+                        },
+                    };
+                    workerScope.postMessage(response, [result.spectrogram.buffer as ArrayBuffer]);
+                } catch (error) {
+                    const response: ComputeSpectrogramOnlyMessage['response'] = {
+                        error: error instanceof Error ? error : new Error(String(error)),
+                    };
+                    workerScope.postMessage(response);
+                }
+                break;
+            }
+            case ACTION_ANALYZE_OFFLINE: {
+                const {
+                    samplesBuffer,
+                    samplesStart,
+                    samplesLength,
+                    sampleOffset,
+                    options,
+                    analysisOptions,
+                } = payload as AnalyzeOfflineMessage['request']['payload'];
+                try {
+                    const samples = new Float32Array(samplesBuffer);
+                    const result = generateSpectrogram(
+                        samples,
+                        samplesStart,
+                        samplesLength,
+                        options
+                    );
+                    const analysisPadding = Math.max(
+                        options.windowSize || 0,
+                        Math.ceil(0.08 * options.sampleRate)
+                    );
+                    const analysisStart = Math.max(0, samplesStart - analysisPadding);
+                    const analysisEnd = Math.min(
+                        samples.length,
+                        samplesStart + samplesLength + analysisPadding
+                    );
+                    const analysisSamples = samples.subarray(analysisStart, analysisEnd);
+                    const centreSamples = new Array(result.windowCount)
+                        .fill(0)
+                        .map(
+                            (_, windowIndex) =>
+                                samplesStart +
+                                windowIndex * result.options.windowStepSize +
+                                result.options.windowSize / 2
+                        );
+                    const analyses: TimedAcousticAnalysis[] = analyzeAtCentres(
+                        analysisSamples,
+                        options.sampleRate,
+                        centreSamples.map((centreSample) => centreSample - analysisStart),
+                        analysisOptions
+                    ).map((analysis, index) => ({
+                        ...analysis,
+                        timeSeconds: (centreSamples[index] + sampleOffset) / options.sampleRate,
+                    }));
+                    const pulseTimes = detectPulseTimes(
+                        analysisSamples,
+                        options.sampleRate,
+                        analyses.map((analysis) => ({
+                            ...analysis,
+                            timeSeconds:
+                                analysis.timeSeconds -
+                                analysisStart / options.sampleRate -
+                                sampleOffset / options.sampleRate,
+                        }))
+                    ).map(
+                        (time) =>
+                            time +
+                            analysisStart / options.sampleRate +
+                            sampleOffset / options.sampleRate
+                    );
+
+                    const response: AnalyzeOfflineMessage['response'] = {
+                        payload: {
+                            spectrogramWindowCount: result.windowCount,
+                            spectrogramOptions: result.options,
+                            spectrogramBuffer: result.spectrogram.buffer,
+                            inputBuffer: samples.buffer,
+                            analyses,
+                            pulseTimes,
+                        },
+                    };
+                    workerScope.postMessage(response, [
+                        result.spectrogram.buffer as ArrayBuffer,
+                        samples.buffer as ArrayBuffer,
+                    ]);
+                } catch (error) {
+                    const response: AnalyzeOfflineMessage['response'] = {
+                        error: error instanceof Error ? error : new Error(String(error)),
+                    };
+                    workerScope.postMessage(response);
+                }
+                break;
+            }
+            default:
+                workerScope.postMessage({
+                    error: new Error('Unknown action'),
+                });
+                break;
         }
-        default:
-            workerScope.postMessage({
-                error: new Error('Unknown action'),
-            });
-            break;
-    }
-});
+}
+
+workerScope.addEventListener('message', handleWorkerMessage);

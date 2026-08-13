@@ -596,6 +596,161 @@ select:focus-visible {
     overflow: auto;
 }
 
+.analysis-task-toast {
+    position: fixed;
+    z-index: 70;
+    left: 18px;
+    bottom: 18px;
+    width: min(360px, calc(100vw - 36px));
+    padding: 15px;
+    border: 1px solid rgba(95, 146, 255, 0.24);
+    border-radius: 16px;
+    color: #edf4ff;
+    background: rgba(12, 18, 31, 0.94);
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.025) inset;
+    backdrop-filter: blur(18px);
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.98);
+    pointer-events: none;
+    transition: opacity 220ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.analysis-task-toast.visible {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+}
+
+.analysis-task-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+}
+
+.analysis-task-heading > div {
+    display: grid;
+    gap: 2px;
+}
+
+.analysis-task-heading span,
+.analysis-task-heading em {
+    color: #8fa0ba;
+    font-size: 10px;
+    font-style: normal;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.analysis-task-heading strong {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.analysis-task-heading em {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(91, 154, 255, 0.1);
+}
+
+.analysis-total-progress,
+.analysis-row-progress {
+    display: block;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(133, 154, 190, 0.14);
+}
+
+.analysis-total-progress {
+    height: 3px;
+    margin: 12px 0 10px;
+}
+
+.analysis-total-progress i,
+.analysis-row-progress i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2e8cff, #5fc9ff);
+    transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.analysis-task-list {
+    display: grid;
+    gap: 5px;
+}
+
+.analysis-task-row {
+    display: grid;
+    grid-template-columns: 11px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 39px;
+    padding: 6px 8px;
+    border-radius: 10px;
+    transition: background 180ms ease;
+}
+
+.analysis-task-row.running,
+.analysis-task-row.retrying {
+    background: rgba(76, 137, 255, 0.075);
+}
+
+.analysis-task-row > div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.analysis-task-row strong {
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.analysis-task-row small {
+    overflow: hidden;
+    color: #8796ad;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.analysis-task-state {
+    width: 8px;
+    height: 8px;
+    border: 1px solid #65748b;
+    border-radius: 50%;
+}
+
+.analysis-task-row.running .analysis-task-state,
+.analysis-task-row.retrying .analysis-task-state {
+    border-color: transparent;
+    border-top-color: #58baff;
+    animation: analysis-spin 800ms linear infinite;
+}
+
+.analysis-task-row.complete .analysis-task-state {
+    border-color: #57d69a;
+    background: #57d69a;
+    box-shadow: 0 0 9px rgba(87, 214, 154, 0.32);
+}
+
+.analysis-task-row.error .analysis-task-state {
+    border-color: #ff727f;
+    background: #ff727f;
+}
+
+.analysis-row-progress {
+    height: 2px;
+    margin-top: 3px;
+}
+
+@keyframes analysis-spin {
+    to { transform: rotate(360deg); }
+}
+
 .media-list.dragging {
     user-select: none;
 }
@@ -3097,6 +3252,45 @@ html.light-ui .microphone .media-kind {
 html.light-ui .status-dot.playing {
     background: #23835e;
     box-shadow: 0 0 0 4px rgba(35, 131, 94, 0.12), 0 0 8px rgba(35, 131, 94, 0.26);
+}
+
+html.light-ui .analysis-task-toast {
+    color: #172033;
+    border-color: rgba(53, 105, 181, 0.2);
+    background: rgba(250, 252, 255, 0.96);
+    box-shadow: 0 18px 42px rgba(36, 50, 76, 0.16), 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+}
+
+html.light-ui .analysis-task-heading span,
+html.light-ui .analysis-task-heading em,
+html.light-ui .analysis-task-row small {
+    color: #667085;
+}
+
+html.light-ui .analysis-task-heading em,
+html.light-ui .analysis-task-row.running,
+html.light-ui .analysis-task-row.retrying {
+    background: rgba(40, 127, 223, 0.08);
+}
+
+html.light-ui .analysis-total-progress,
+html.light-ui .analysis-row-progress {
+    background: rgba(53, 74, 107, 0.13);
+}
+
+@media (max-width: 760px) {
+    .analysis-task-toast {
+        left: 10px;
+        right: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        width: auto;
+        padding: 13px;
+        border-radius: 14px;
+    }
+
+    .analysis-task-row {
+        min-height: 36px;
+    }
 }
 
 html.light-ui .setting-help {

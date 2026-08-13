@@ -11,6 +11,15 @@ export const ACTION_COMPUTE_SPECTROGRAM = 'spectrogram-compute';
 export const ACTION_COMPUTE_SPECTROGRAM_ONLY = 'spectrogram-only-compute';
 export const ACTION_ANALYZE_OFFLINE = 'offline-analyze';
 export const ACTION_ANALYZE_ACOUSTICS = 'acoustics-analyze';
+export const ACTION_PREPARE_ACOUSTIC_WASM = 'acoustic-wasm-prepare';
+
+export interface PrepareAcousticWasmRequest {
+    action: typeof ACTION_PREPARE_ACOUSTIC_WASM;
+    payload: {
+        module: WebAssembly.Module;
+        responsePort?: MessagePort;
+    };
+}
 
 interface MessageBase<T, U, V> {
     request: {

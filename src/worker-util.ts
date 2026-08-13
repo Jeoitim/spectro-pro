@@ -11,6 +11,7 @@ import {
     ACTION_ANALYZE_OFFLINE,
     ACTION_COMPUTE_SPECTROGRAM,
     ACTION_COMPUTE_SPECTROGRAM_ONLY,
+    ACTION_PREPARE_ACOUSTIC_WASM,
     AnalyzeAcousticsMessage,
     AnalyzeOfflineMessage,
     ComputeSpectrogramMessage,
@@ -18,14 +19,24 @@ import {
     Message,
 } from './worker-constants';
 import HelperWorker from 'helper-worker';
+import { prepareAcousticWasmModule } from './acoustic-wasm-module';
 
 const WORKER_QUEUE: ((worker: HelperWorker) => void)[] = [];
 const WORKER_LIMIT = Math.min(6, Math.max(2, (window.navigator.hardwareConcurrency || 4) - 1));
 const WORKER_POOL: { worker: HelperWorker; busy: boolean }[] = [];
 const WORKER_TASK_TIMEOUT_MS = 120_000;
+let preparedAcousticWasmModule: WebAssembly.Module | null = null;
+let acousticWasmPreparation: Promise<boolean> | null = null;
 
-function createWorker() {
-    const workerData = { worker: new HelperWorker(), busy: true };
+function prepareWorkerAcousticWasm(worker: HelperWorker, module: WebAssembly.Module) {
+    worker.postMessage({
+        action: ACTION_PREPARE_ACOUSTIC_WASM,
+        payload: { module },
+    });
+}
+
+function createWorker(busy = true) {
+    const workerData = { worker: new HelperWorker(), busy };
     WORKER_POOL.push(workerData);
     return workerData.worker;
 }
@@ -126,6 +137,12 @@ function queueTask<T extends Message>(
             worker.addEventListener('messageerror', messageErrorHandler);
 
             try {
+                if (
+                    action !== ACTION_COMPUTE_SPECTROGRAM_ONLY &&
+                    preparedAcousticWasmModule !== null
+                ) {
+                    prepareWorkerAcousticWasm(worker, preparedAcousticWasmModule);
+                }
                 worker.postMessage(
                     {
                         action,
@@ -159,6 +176,63 @@ export function getWorkerCount(): number {
     return WORKER_LIMIT;
 }
 
+export function prepareAcousticWorkers(): Promise<boolean> {
+    if (acousticWasmPreparation !== null) {
+        return acousticWasmPreparation;
+    }
+    acousticWasmPreparation = (async () => {
+        const module = await prepareAcousticWasmModule();
+        if (module === null) {
+            return false;
+        }
+        preparedAcousticWasmModule = module;
+        const idleEntry = WORKER_POOL.find((entry) => !entry.busy);
+        if (idleEntry !== undefined) {
+            idleEntry.busy = true;
+        }
+        const worker =
+            idleEntry?.worker || (WORKER_POOL.length < WORKER_LIMIT ? createWorker() : null);
+        if (worker === null) {
+            return false;
+        }
+        const channel = new MessageChannel();
+        const ready = new Promise<boolean>((resolve) => {
+            const timeout = window.setTimeout(() => {
+                channel.port1.close();
+                resolve(false);
+            }, 10_000);
+            channel.port1.addEventListener(
+                'message',
+                (event: MessageEvent<boolean>) => {
+                    window.clearTimeout(timeout);
+                    channel.port1.close();
+                    resolve(event.data);
+                },
+                { once: true }
+            );
+            channel.port1.start();
+        });
+        worker.postMessage(
+            {
+                action: ACTION_PREPARE_ACOUSTIC_WASM,
+                payload: { module, responsePort: channel.port2 },
+            },
+            [channel.port2]
+        );
+        for (const entry of WORKER_POOL) {
+            if (entry.worker !== worker) {
+                prepareWorkerAcousticWasm(entry.worker, module);
+            }
+        }
+        const available = await ready;
+        if (WORKER_POOL.some((entry) => entry.worker === worker)) {
+            releaseWorker(worker);
+        }
+        return available;
+    })();
+    return acousticWasmPreparation;
+}
+
 async function offThreadGenerateSpectrogramOnly(
     samples: Float32Array,
     options: SpectrogramOptions
@@ -188,7 +262,8 @@ export async function offThreadGenerateEntireSpectrogram(
     samples: Float32Array,
     options: SpectrogramOptions,
     samplesStart = 0,
-    samplesLength = samples.length
+    samplesLength = samples.length,
+    onProgress?: (completedTasks: number, totalTasks: number) => void
 ): Promise<SpectrogramResult & { input: Float32Array }> {
     const windowSize = options.windowSize || 4096;
     const windowStepSize = options.windowStepSize || 1024;
@@ -198,6 +273,7 @@ export async function offThreadGenerateEntireSpectrogram(
             : Math.floor((samplesLength - windowSize) / windowStepSize) + 1;
     const taskCount = Math.min(WORKER_LIMIT, Math.max(1, Math.ceil(windowCount / 1500)));
     const tasks: Promise<SpectrogramResult>[] = [];
+    let completedTasks = 0;
     for (let taskIndex = 0; taskIndex < taskCount; taskIndex += 1) {
         const firstWindow = Math.floor((taskIndex * windowCount) / taskCount);
         const endWindow = Math.floor(((taskIndex + 1) * windowCount) / taskCount);
@@ -219,7 +295,11 @@ export async function offThreadGenerateEntireSpectrogram(
                         isEnd: false,
                     }
                 )
-            )
+            ).then((result) => {
+                completedTasks += 1;
+                onProgress?.(completedTasks, taskCount);
+                return result;
+            })
         );
     }
     const parts = await Promise.all(tasks);

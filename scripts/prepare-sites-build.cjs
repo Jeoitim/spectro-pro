@@ -27,7 +27,15 @@ for (const fileName of [
 
 const mainBundle = readFileSync(path.join(distDirectory, 'main.js'), 'utf8');
 const workerFiles = new Set(mainBundle.match(/[a-f0-9]{20}\.worker\.js/g) || []);
+const wasmFiles = new Set(mainBundle.match(/[a-f0-9]{20}\.wasm/g) || []);
 for (const workerFile of workerFiles) {
     copyToClient(workerFile);
     copyToClient(`${workerFile}.map`);
+    const workerBundle = readFileSync(path.join(distDirectory, workerFile), 'utf8');
+    for (const wasmFile of workerBundle.match(/[a-f0-9]{20}\.wasm/g) || []) {
+        wasmFiles.add(wasmFile);
+    }
+}
+for (const wasmFile of wasmFiles) {
+    copyToClient(wasmFile);
 }

@@ -10,6 +10,7 @@ import {
 import { AURORA_GRADIENT } from './color-util';
 import initialiseControlsUi from './controls-ui';
 import {
+    AnalysisTaskSnapshot,
     CursorSnapshot,
     LayerDisplayOptions,
     LiveSnapshot,
@@ -27,10 +28,10 @@ import { getPlotSelectionTheme } from './plot-theme';
 import { SpectrogramWindowFunction } from './spectrogram';
 import { RenderParameters, SpectrogramGPURenderer } from './spectrogram-render';
 import {
-    getWorkerCount,
     offThreadAnalyzeAcoustics,
     offThreadGenerateEntireSpectrogram,
     offThreadGenerateSpectrogram,
+    prepareAcousticWorkers,
 } from './worker-util';
 import { WaveformDisplayOptions, WaveformRenderer, WaveformThemeName } from './waveform-render';
 
@@ -309,6 +310,10 @@ class SpectroEngine {
 
     private visibleMediaAnalysisTimer: number | null = null;
 
+    private analysisTasks = new Map<string, AnalysisTaskSnapshot>();
+
+    private acousticWasmState: AnalysisTaskSnapshot['status'] = 'pending';
+
     constructor(ui: UiController) {
         const canvas = document.querySelector('#spectrogramCanvas');
         const overlay = document.querySelector('#analysisOverlay');
@@ -359,6 +364,79 @@ class SpectroEngine {
         this.notifyMediaLibrary();
         this.notifyTransport();
         this.ui.updateReturnViewAvailable(false);
+        if (window.requestIdleCallback !== undefined) {
+            window.requestIdleCallback(() => this.prepareAcousticAcceleration(), {
+                timeout: 3000,
+            });
+        } else {
+            window.setTimeout(() => this.prepareAcousticAcceleration(), 1200);
+        }
+    }
+
+    private updateAnalysisTask(task: AnalysisTaskSnapshot) {
+        const startsNewBatch =
+            task.status === 'pending' || task.status === 'running' || task.status === 'retrying';
+        const hasActiveTask = Array.from(this.analysisTasks.values()).some(
+            (current) =>
+                current.status === 'pending' ||
+                current.status === 'running' ||
+                current.status === 'retrying'
+        );
+        if (startsNewBatch && !hasActiveTask) {
+            for (const [taskId, current] of this.analysisTasks) {
+                if (current.status === 'complete' || current.status === 'error') {
+                    this.analysisTasks.delete(taskId);
+                }
+            }
+        }
+        this.analysisTasks.set(task.id, task);
+        this.ui.updateAnalysisTasks(Array.from(this.analysisTasks.values()));
+    }
+
+    private removeAnalysisTasksForMedia(mediaId: string) {
+        for (const taskId of this.analysisTasks.keys()) {
+            if (taskId.startsWith(`${mediaId}:`)) {
+                this.analysisTasks.delete(taskId);
+            }
+        }
+        this.ui.updateAnalysisTasks(Array.from(this.analysisTasks.values()));
+    }
+
+    private async prepareAcousticAcceleration() {
+        if (this.acousticWasmState === 'running' || this.acousticWasmState === 'complete') {
+            return;
+        }
+        if (
+            Array.from(this.analysisTasks.values()).some(
+                (task) =>
+                    !task.id.startsWith('system:') &&
+                    (task.status === 'pending' ||
+                        task.status === 'running' ||
+                        task.status === 'retrying')
+            )
+        ) {
+            window.setTimeout(() => this.prepareAcousticAcceleration(), 500);
+            return;
+        }
+        this.acousticWasmState = 'running';
+        this.updateAnalysisTask({
+            id: 'system:wasm',
+            label: '加速引擎',
+            sourceName: 'WebAssembly SIMD',
+            status: 'running',
+            progress: null,
+            detail: '正在准备',
+        });
+        const ready = await prepareAcousticWorkers();
+        this.acousticWasmState = 'complete';
+        this.updateAnalysisTask({
+            id: 'system:wasm',
+            label: '加速引擎',
+            sourceName: 'WebAssembly SIMD',
+            status: 'complete',
+            progress: 1,
+            detail: ready ? '已就绪' : '已切换兼容模式',
+        });
     }
 
     updateDisplay(parameters: Partial<RenderParameters>) {
@@ -806,6 +884,12 @@ class SpectroEngine {
     clearPlaylist() {
         this.stop();
         this.mediaItems = [];
+        for (const taskId of this.analysisTasks.keys()) {
+            if (!taskId.startsWith('system:')) {
+                this.analysisTasks.delete(taskId);
+            }
+        }
+        this.ui.updateAnalysisTasks(Array.from(this.analysisTasks.values()));
         this.activeMediaId = null;
         this.playbackOffsetSeconds = 0;
         this.resetSession();
@@ -828,6 +912,7 @@ class SpectroEngine {
             this.ui.setPlayState('stopped', '麦克风', '音频已移除，可开始新的会话');
         }
         this.mediaItems.splice(index, 1);
+        this.removeAnalysisTasksForMedia(id);
         this.notifyMediaLibrary();
         if (wasActive) {
             this.notifyTransport();
@@ -1268,6 +1353,29 @@ class SpectroEngine {
         const requestSequence = ++this.offlineAnalysisRequestSequence;
         item.state = 'analyzing';
         this.notifyMediaLibrary();
+        this.removeAnalysisTasksForMedia(item.id);
+        const taskPrefix = `${item.id}:${mode}`;
+        this.updateAnalysisTask({
+            id: `${taskPrefix}:spectrogram`,
+            label: '语谱渲染',
+            sourceName: item.name,
+            status: 'running',
+            progress: 0,
+            detail: '正在渲染',
+        });
+        for (const [id, label] of [
+            ['pitch', '基频与音强'],
+            ['formants', '共振峰分析'],
+        ]) {
+            this.updateAnalysisTask({
+                id: `${taskPrefix}:${id}`,
+                label,
+                sourceName: item.name,
+                status: 'pending',
+                progress: 0,
+                detail: '等待语谱',
+            });
+        }
         if (displayWhenReady && this.activeMediaId === item.id) {
             const isLongRecording = this.shouldDeferLongRecording(item);
             this.ui.setPlayState(
@@ -1311,7 +1419,22 @@ class SpectroEngine {
                     windowFunction: this.windowFunction,
                 },
                 isLongRecording ? 0 : samplesStart,
-                isLongRecording ? analysisInput.length : samplesLength
+                isLongRecording ? analysisInput.length : samplesLength,
+                (completed, total) => {
+                    if (
+                        requestSequence === this.offlineAnalysisRequestSequence &&
+                        analysisRevision === this.spectrogramAnalysisRevision[mode]
+                    ) {
+                        this.updateAnalysisTask({
+                            id: `${taskPrefix}:spectrogram`,
+                            label: '语谱渲染',
+                            sourceName: item.name,
+                            status: 'running',
+                            progress: completed / Math.max(1, total),
+                            detail: '正在渲染',
+                        });
+                    }
+                }
             );
             if (
                 requestSequence !== this.offlineAnalysisRequestSequence ||
@@ -1346,6 +1469,14 @@ class SpectroEngine {
             };
             item.modes[mode] = cache;
             item.state = 'ready';
+            this.updateAnalysisTask({
+                id: `${taskPrefix}:spectrogram`,
+                label: '语谱渲染',
+                sourceName: item.name,
+                status: 'complete',
+                progress: 1,
+                detail: '完成',
+            });
             this.notifyMediaLibrary();
             if (displayWhenReady && this.activeMediaId === item.id && this.mode === mode) {
                 this.displayMediaCache(item, cache);
@@ -1359,6 +1490,20 @@ class SpectroEngine {
                 return;
             }
             item.state = 'error';
+            for (const [id, label] of [
+                ['spectrogram', '语谱渲染'],
+                ['pitch', '基频与音强'],
+                ['formants', '共振峰分析'],
+            ]) {
+                this.updateAnalysisTask({
+                    id: `${taskPrefix}:${id}`,
+                    label,
+                    sourceName: item.name,
+                    status: 'error',
+                    progress: 1,
+                    detail: '失败',
+                });
+            }
             this.notifyMediaLibrary();
             if (displayWhenReady && this.activeMediaId === item.id) {
                 this.ui.setPlayState(
@@ -1446,6 +1591,7 @@ class SpectroEngine {
         };
         let retryIncompleteLayers = false;
         try {
+            const taskPrefix = `${item.id}:${mode}`;
             type AcousticJob = {
                 layer: 'pitch' | 'formant';
                 firstIndex: number;
@@ -1499,38 +1645,38 @@ class SpectroEngine {
             const formantJobs: AcousticJob[] = new Array(formantJobCount)
                 .fill(null)
                 .map((_, taskIndex) => {
-                      const firstIndex = Math.floor(
-                          (taskIndex * absoluteCentreSamples.length) / formantJobCount
-                      );
-                      const endIndex = Math.floor(
-                          ((taskIndex + 1) * absoluteCentreSamples.length) / formantJobCount
-                      );
-                      const chunkStart = Math.max(
-                          0,
-                          Math.floor(absoluteCentreSamples[firstIndex]) - analysisPadding
-                      );
-                      const chunkEnd = Math.min(
-                          item.samples.length,
-                          Math.ceil(absoluteCentreSamples[endIndex - 1]) + analysisPadding
-                      );
-                      return {
-                          layer: 'formant' as const,
-                          firstIndex,
-                          endIndex,
-                          sampleOffset: chunkStart,
-                          task: () =>
-                              offThreadAnalyzeAcoustics(
-                                  new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
-                                  item.sampleRate,
-                                  absoluteCentreSamples
-                                      .slice(firstIndex, endIndex)
-                                      .map((centre) => centre - chunkStart),
-                                  this.analysisOptions,
-                                  true,
-                                  { pitch: false, formants: true, intensity: false }
-                              ),
-                      };
-                  });
+                    const firstIndex = Math.floor(
+                        (taskIndex * absoluteCentreSamples.length) / formantJobCount
+                    );
+                    const endIndex = Math.floor(
+                        ((taskIndex + 1) * absoluteCentreSamples.length) / formantJobCount
+                    );
+                    const chunkStart = Math.max(
+                        0,
+                        Math.floor(absoluteCentreSamples[firstIndex]) - analysisPadding
+                    );
+                    const chunkEnd = Math.min(
+                        item.samples.length,
+                        Math.ceil(absoluteCentreSamples[endIndex - 1]) + analysisPadding
+                    );
+                    return {
+                        layer: 'formant' as const,
+                        firstIndex,
+                        endIndex,
+                        sampleOffset: chunkStart,
+                        task: () =>
+                            offThreadAnalyzeAcoustics(
+                                new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
+                                item.sampleRate,
+                                absoluteCentreSamples
+                                    .slice(firstIndex, endIndex)
+                                    .map((centre) => centre - chunkStart),
+                                this.analysisOptions,
+                                true,
+                                { pitch: false, formants: true, intensity: false }
+                            ),
+                    };
+                });
             const jobs: AcousticJob[] = [];
             const maximumJobCount = Math.max(pitchJobs.length, formantJobs.length);
             for (let jobIndex = 0; jobIndex < maximumJobCount; jobIndex += 1) {
@@ -1541,8 +1687,45 @@ class SpectroEngine {
                     jobs.push(formantJobs[jobIndex]);
                 }
             }
+            const totalJobs = {
+                pitch: pitchJobs.length,
+                formant: formantJobs.length,
+            };
+            const completedJobs = { pitch: 0, formant: 0 };
+            if (pitchJobs.length > 0) {
+                this.updateAnalysisTask({
+                    id: `${taskPrefix}:pitch`,
+                    label: '基频与音强',
+                    sourceName: item.name,
+                    status: cache.acousticRetryCount > 0 ? 'retrying' : 'running',
+                    progress: 0,
+                    detail: cache.acousticRetryCount > 0 ? '正在重试' : '正在分析',
+                });
+            }
+            if (formantJobs.length > 0) {
+                this.updateAnalysisTask({
+                    id: `${taskPrefix}:formants`,
+                    label: '共振峰分析',
+                    sourceName: item.name,
+                    status: cache.acousticRetryCount > 0 ? 'retrying' : 'running',
+                    progress: 0,
+                    detail: cache.acousticRetryCount > 0 ? '正在重试' : '正在分析',
+                });
+            }
             const results = await Promise.allSettled(
-                jobs.map((job) => retryTask(job.task))
+                jobs.map((job) =>
+                    retryTask(job.task).finally(() => {
+                        completedJobs[job.layer] += 1;
+                        this.updateAnalysisTask({
+                            id: `${taskPrefix}:${job.layer === 'pitch' ? 'pitch' : 'formants'}`,
+                            label: job.layer === 'pitch' ? '基频与音强' : '共振峰分析',
+                            sourceName: item.name,
+                            status: cache.acousticRetryCount > 0 ? 'retrying' : 'running',
+                            progress: completedJobs[job.layer] / Math.max(1, totalJobs[job.layer]),
+                            detail: cache.acousticRetryCount > 0 ? '正在重试' : '正在分析',
+                        });
+                    })
+                )
             );
             if (analysisRevision !== this.acousticAnalysisRevision || item.modes[mode] !== cache) {
                 return;
@@ -1556,7 +1739,10 @@ class SpectroEngine {
                 if (result.status === 'rejected') {
                     if (job.layer === 'pitch') {
                         allPitchJobsSucceeded = false;
-                        console.warn('Pitch analysis chunk failed and will be retried', result.reason);
+                        console.warn(
+                            'Pitch analysis chunk failed and will be retried',
+                            result.reason
+                        );
                     } else {
                         allFormantJobsSucceeded = false;
                         console.warn(
@@ -1601,7 +1787,8 @@ class SpectroEngine {
             if (pitchJobs.length > 0) {
                 pulseTimes.sort((left, right) => left - right);
                 cache.pulseTimes = pulseTimes.filter(
-                    (time, index) => index === 0 || time - pulseTimes[index - 1] > 1 / item.sampleRate
+                    (time, index) =>
+                        index === 0 || time - pulseTimes[index - 1] > 1 / item.sampleRate
                 );
             }
             if (formantJobs.length > 0 && allFormantJobsSucceeded) {
@@ -1611,6 +1798,22 @@ class SpectroEngine {
             const formantsReady =
                 !analyzeFormants || cache.formantAnalysisRevision === analysisRevision;
             retryIncompleteLayers = !pitchReady || !formantsReady;
+            this.updateAnalysisTask({
+                id: `${taskPrefix}:pitch`,
+                label: '基频与音强',
+                sourceName: item.name,
+                status: pitchReady ? 'complete' : 'retrying',
+                progress: pitchReady ? 1 : 0,
+                detail: pitchReady ? '完成' : '正在重试',
+            });
+            this.updateAnalysisTask({
+                id: `${taskPrefix}:formants`,
+                label: '共振峰分析',
+                sourceName: item.name,
+                status: formantsReady ? 'complete' : 'retrying',
+                progress: formantsReady ? 1 : 0,
+                detail: formantsReady ? '完成' : '正在重试',
+            });
             cache.analysisRevision = retryIncompleteLayers ? -1 : analysisRevision;
             cache.acousticRetryCount = retryIncompleteLayers ? cache.acousticRetryCount + 1 : 0;
             if (this.activeMediaId === item.id && this.mode === mode) {
@@ -1636,10 +1839,7 @@ class SpectroEngine {
         } finally {
             cache.acousticAnalysisPending = false;
             const analysisChanged = analysisRevision !== this.acousticAnalysisRevision;
-            if (
-                (retryIncompleteLayers || analysisChanged) &&
-                item.modes[mode] === cache
-            ) {
+            if ((retryIncompleteLayers || analysisChanged) && item.modes[mode] === cache) {
                 const retryDelay = analysisChanged
                     ? 50
                     : Math.min(15_000, 500 * 2 ** Math.min(5, cache.acousticRetryCount));

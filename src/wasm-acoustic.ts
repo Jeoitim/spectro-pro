@@ -3,7 +3,7 @@ import {
     installAcceleratedAnalysisBackend,
     PitchAlgorithm,
 } from './analysis';
-import acousticCoreUrl from './wasm/acoustic-core.wasm';
+import { prepareAcousticWasmModule } from './acoustic-wasm-module';
 
 interface AcousticWasmExports extends WebAssembly.Exports {
     memory: WebAssembly.Memory;
@@ -118,24 +118,14 @@ function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend
     };
 }
 
-async function instantiateAcousticCore() {
-    const response = await fetch(acousticCoreUrl);
-    if (WebAssembly.instantiateStreaming !== undefined) {
-        try {
-            return await WebAssembly.instantiateStreaming(response.clone(), {});
-        } catch {
-            // Static hosts sometimes serve .wasm without application/wasm.
-        }
-    }
-    return WebAssembly.instantiate(await response.arrayBuffer(), {});
-}
-
-export async function initializeAcousticWasm() {
+export async function initializeAcousticWasm(preparedModule?: WebAssembly.Module) {
     try {
-        const instance = await instantiateAcousticCore();
-        installAcceleratedAnalysisBackend(
-            createBackend(instance.instance.exports as AcousticWasmExports)
-        );
+        const module = preparedModule || (await prepareAcousticWasmModule());
+        if (module === null) {
+            throw new Error('Acoustic Wasm module is unavailable');
+        }
+        const instance = await WebAssembly.instantiate(module, {});
+        installAcceleratedAnalysisBackend(createBackend(instance.exports as AcousticWasmExports));
         return true;
     } catch (error) {
         installAcceleratedAnalysisBackend(null);
