@@ -39,7 +39,8 @@ function copyToWasm(exports: AcousticWasmExports, values: Float64Array) {
 }
 
 function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend {
-    let disabled = false;
+    let pitchDisabled = false;
+    let rootsDisabled = false;
     return {
         detectPitch(
             algorithm: PitchAlgorithm,
@@ -48,7 +49,7 @@ function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend
             minPitchHz: number,
             maxPitchHz: number
         ) {
-            if (disabled) {
+            if (pitchDisabled) {
                 return null;
             }
             const signalPointer = copyToWasm(exports, signal);
@@ -78,7 +79,7 @@ function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend
                     confidence: Number.isFinite(output[1]) ? output[1] : 0,
                 };
             } catch {
-                disabled = true;
+                pitchDisabled = true;
                 return null;
             } finally {
                 exports.deallocate_f64(outputPointer, 2);
@@ -86,7 +87,21 @@ function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend
             }
         },
         polynomialRoots(coefficients: Float64Array) {
-            if (disabled) {
+            if (rootsDisabled) {
+                return null;
+            }
+            const coefficientScale = coefficients.reduce(
+                (maximum, coefficient) => Math.max(maximum, Math.abs(coefficient)),
+                0
+            );
+            const leadingCoefficient = Math.abs(coefficients[0] || 0);
+            if (
+                !Number.isFinite(coefficientScale) ||
+                coefficientScale === 0 ||
+                !Number.isFinite(leadingCoefficient) ||
+                leadingCoefficient < coefficientScale * 1e-12 ||
+                coefficients.some((coefficient) => !Number.isFinite(coefficient))
+            ) {
                 return null;
             }
             const degree = coefficients.length - 1;
@@ -103,12 +118,15 @@ function createBackend(exports: AcousticWasmExports): AcceleratedAnalysisBackend
                     return null;
                 }
                 const output = new Float64Array(exports.memory.buffer, outputPointer, outputLength);
-                return new Array(rootCount).fill(null).map((_, index) => ({
+                const roots = new Array(rootCount).fill(null).map((_, index) => ({
                     re: output[2 * index],
                     im: output[2 * index + 1],
                 }));
+                return roots.every((root) => Number.isFinite(root.re) && Number.isFinite(root.im))
+                    ? roots
+                    : null;
             } catch {
-                disabled = true;
+                rootsDisabled = true;
                 return null;
             } finally {
                 exports.deallocate_f64(outputPointer, outputLength);

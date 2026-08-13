@@ -119,7 +119,14 @@ async function handleWorkerMessage(event: {
         }
 
         if (action !== ACTION_COMPUTE_SPECTROGRAM_ONLY) {
-            await prepareAcousticWasm();
+            try {
+                await prepareAcousticWasm();
+            } catch (error) {
+                workerScope.postMessage({
+                    error: error instanceof Error ? error : new Error(String(error)),
+                });
+                return;
+            }
         }
 
         switch (action) {
@@ -351,4 +358,13 @@ async function handleWorkerMessage(event: {
         }
 }
 
-workerScope.addEventListener('message', handleWorkerMessage);
+let pendingWorkerMessage = Promise.resolve();
+workerScope.addEventListener('message', (event) => {
+    pendingWorkerMessage = pendingWorkerMessage
+        .then(() => handleWorkerMessage(event))
+        .catch((error) => {
+            workerScope.postMessage({
+                error: error instanceof Error ? error : new Error(String(error)),
+            });
+        });
+});

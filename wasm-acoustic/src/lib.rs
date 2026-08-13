@@ -1,8 +1,204 @@
-use nalgebra::{linalg::Schur, DMatrix};
-
 #[no_mangle]
 pub extern "C" fn allocate_f64(length: usize) -> *mut f64 {
     Box::into_raw(vec![0.0_f64; length].into_boxed_slice()) as *mut f64
+}
+
+#[derive(Clone, Copy, Default)]
+struct Complex64 {
+    re: f64,
+    im: f64,
+}
+
+#[inline]
+fn complex_add(left: Complex64, right: Complex64) -> Complex64 {
+    Complex64 {
+        re: left.re + right.re,
+        im: left.im + right.im,
+    }
+}
+
+#[inline]
+fn complex_sub(left: Complex64, right: Complex64) -> Complex64 {
+    Complex64 {
+        re: left.re - right.re,
+        im: left.im - right.im,
+    }
+}
+
+#[inline]
+fn complex_mul(left: Complex64, right: Complex64) -> Complex64 {
+    Complex64 {
+        re: left.re * right.re - left.im * right.im,
+        im: left.re * right.im + left.im * right.re,
+    }
+}
+
+#[inline]
+fn complex_div(left: Complex64, right: Complex64) -> Option<Complex64> {
+    let denominator = right.re * right.re + right.im * right.im;
+    if !denominator.is_finite() || denominator < 1e-30 {
+        return None;
+    }
+    Some(Complex64 {
+        re: (left.re * right.re + left.im * right.im) / denominator,
+        im: (left.im * right.re - left.re * right.im) / denominator,
+    })
+}
+
+#[inline]
+fn complex_norm_squared(value: Complex64) -> f64 {
+    value.re * value.re + value.im * value.im
+}
+
+#[inline]
+fn complex_norm(value: Complex64) -> f64 {
+    complex_norm_squared(value).sqrt()
+}
+
+fn evaluate_polynomial(coefficients: &[f64], root: Complex64) -> (Complex64, Complex64) {
+    let mut value = Complex64 {
+        re: coefficients[0],
+        im: 0.0,
+    };
+    let mut derivative = Complex64::default();
+    for coefficient in coefficients.iter().skip(1) {
+        derivative = complex_add(complex_mul(derivative, root), value);
+        value = complex_add(
+            complex_mul(value, root),
+            Complex64 {
+                re: *coefficient,
+                im: 0.0,
+            },
+        );
+    }
+    (value, derivative)
+}
+
+fn polynomial_residual(coefficients: &[f64], root: Complex64) -> Option<f64> {
+    let (value, _) = evaluate_polynomial(coefficients, root);
+    let mut scale = coefficients[0].abs();
+    let magnitude = complex_norm(root);
+    for coefficient in coefficients.iter().skip(1) {
+        scale = scale * magnitude + coefficient.abs();
+    }
+    let residual = complex_norm(value) / scale.max(1e-30);
+    residual.is_finite().then_some(residual)
+}
+
+// Aberth-Ehrlich is used instead of an unconstrained Schur/QR iteration here.
+// LPC polynomials are small (normally degree 10), so a fixed iteration budget
+// gives us a predictable upper bound even for roots that are nearly repeated.
+fn bounded_polynomial_roots(coefficients: &[f64]) -> Option<Vec<Complex64>> {
+    const MAX_DEGREE: usize = 32;
+    const MAX_ITERATIONS: usize = 256;
+    const STEP_TOLERANCE: f64 = 1e-13;
+    const RESIDUAL_TOLERANCE: f64 = 1e-7;
+
+    let degree = coefficients.len().checked_sub(1)?;
+    if degree == 0 || degree > MAX_DEGREE || coefficients.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+
+    let leading = coefficients[0];
+    let coefficient_scale = coefficients
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    if !leading.is_finite()
+        || !coefficient_scale.is_finite()
+        || coefficient_scale == 0.0
+        || leading.abs() < coefficient_scale * 1e-12
+    {
+        return None;
+    }
+
+    let normalized: Vec<f64> = coefficients.iter().map(|value| *value / leading).collect();
+    if normalized.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let cauchy_radius = 1.0
+        + normalized
+            .iter()
+            .skip(1)
+            .map(|value| value.abs())
+            .fold(0.0_f64, f64::max);
+    if !cauchy_radius.is_finite() || cauchy_radius > 1e8 {
+        return None;
+    }
+
+    let mut roots = Vec::with_capacity(degree);
+    let phase = std::f64::consts::PI / (degree as f64 * 3.0);
+    for index in 0..degree {
+        let angle = phase + 2.0 * std::f64::consts::PI * index as f64 / degree as f64;
+        roots.push(Complex64 {
+            re: cauchy_radius * angle.cos(),
+            im: cauchy_radius * angle.sin(),
+        });
+    }
+
+    let mut converged = false;
+    for _ in 0..MAX_ITERATIONS {
+        let mut next_roots = roots.clone();
+        let mut maximum_step = 0.0_f64;
+        for index in 0..degree {
+            let (value, derivative) = evaluate_polynomial(&normalized, roots[index]);
+            let Some(newton_step) = complex_div(value, derivative) else {
+                return None;
+            };
+            let mut separation_sum = Complex64::default();
+            for other_index in 0..degree {
+                if other_index == index {
+                    continue;
+                }
+                let separation = complex_sub(roots[index], roots[other_index]);
+                let Some(reciprocal) = complex_div(
+                    Complex64 { re: 1.0, im: 0.0 },
+                    separation,
+                ) else {
+                    return None;
+                };
+                separation_sum = complex_add(separation_sum, reciprocal);
+            }
+            let correction_denominator = complex_sub(
+                Complex64 { re: 1.0, im: 0.0 },
+                complex_mul(newton_step, separation_sum),
+            );
+            let Some(mut correction) = complex_div(newton_step, correction_denominator) else {
+                return None;
+            };
+            let correction_norm = complex_norm(correction);
+            let maximum_allowed_step = 2.0 * cauchy_radius;
+            if correction_norm > maximum_allowed_step {
+                let scale = maximum_allowed_step / correction_norm;
+                correction.re *= scale;
+                correction.im *= scale;
+            }
+            next_roots[index] = complex_sub(roots[index], correction);
+            maximum_step = maximum_step.max(complex_norm(correction));
+        }
+        if next_roots.iter().any(|root| {
+            !root.re.is_finite() || !root.im.is_finite() || complex_norm(*root) > 1e10
+        }) {
+            return None;
+        }
+        roots = next_roots;
+        let maximum_root_norm = roots.iter().map(|root| complex_norm(*root)).fold(0.0, f64::max);
+        if maximum_step <= STEP_TOLERANCE * (1.0 + maximum_root_norm) {
+            converged = true;
+            break;
+        }
+    }
+
+    if !converged
+        || roots.iter().any(|root| {
+            polynomial_residual(&normalized, *root)
+                .map(|residual| residual > RESIDUAL_TOLERANCE)
+                .unwrap_or(true)
+        })
+    {
+        return None;
+    }
+    Some(roots)
 }
 
 #[no_mangle]
@@ -232,24 +428,12 @@ pub unsafe extern "C" fn polynomial_roots(
         return 0;
     }
     let coefficients = std::slice::from_raw_parts(coefficients_pointer, coefficient_count);
-    let degree = coefficient_count - 1;
-    let leading = coefficients[0];
-    if !leading.is_finite() || leading.abs() < f64::EPSILON {
+    let Some(roots) = bounded_polynomial_roots(coefficients) else {
         return 0;
-    }
-    let companion = DMatrix::from_fn(degree, degree, |row, column| {
-        if column + 1 == degree {
-            -coefficients[degree - row] / leading
-        } else if row == column + 1 {
-            1.0
-        } else {
-            0.0
-        }
-    });
-    let eigenvalues = Schur::new(companion).complex_eigenvalues();
-    for (index, root) in eigenvalues.iter().enumerate() {
+    };
+    for (index, root) in roots.iter().enumerate() {
         *output_pointer.add(2 * index) = root.re;
         *output_pointer.add(2 * index + 1) = root.im;
     }
-    degree
+    roots.len()
 }

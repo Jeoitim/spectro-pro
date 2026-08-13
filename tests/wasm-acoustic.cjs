@@ -130,9 +130,36 @@ function assertNear(name, actual, expected, tolerance) {
             );
         }
     });
+
+    // Regression case from the recording that previously stalled at 93%:
+    // the coefficients are finite, but their companion matrix is poorly
+    // conditioned and must still return within the bounded Wasm budget.
+    const pathologicalCoefficients = new Float64Array([
+        1,
+        -2.165,
+        3.1553,
+        -3.4695,
+        3.2431,
+        -2.701,
+        2.0115,
+        -1.3205,
+        1.0276,
+        -0.59061,
+        0.20922,
+    ]);
+    const rootStartedAt = Date.now();
+    const pathologicalRoots = createBackend(instance.exports).polynomialRoots(
+        pathologicalCoefficients
+    );
+    const rootElapsedMs = Date.now() - rootStartedAt;
+    if (rootElapsedMs > 1000) {
+        throw new Error(`Bounded Wasm polynomial-root regression failed (${rootElapsedMs} ms)`);
+    }
+    if (pathologicalRoots === null) {
+        throw new Error('Bounded Wasm polynomial-root regression returned no roots');
+    }
     console.log('Wasm SIMD pitch and formant-root parity checks passed.');
 })().catch((error) => {
     console.error(error);
     process.exit(1);
 });
-

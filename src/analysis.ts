@@ -570,8 +570,12 @@ function polishAndValidateRoot(coefficients: Float64Array, initialRoot: Complex)
 }
 
 function polynomialRoots(coefficients: Float64Array) {
-    const acceleratedRoots = acceleratedAnalysisBackend?.polynomialRoots(coefficients);
-    if (acceleratedRoots != null) {
+    const acceleratedBackend = acceleratedAnalysisBackend;
+    if (acceleratedBackend !== null) {
+        const acceleratedRoots = acceleratedBackend.polynomialRoots(coefficients);
+        if (acceleratedRoots === null) {
+            return [];
+        }
         return acceleratedRoots
             .map((root) => polishAndValidateRoot(coefficients, root))
             .filter((root): root is Complex => root !== null);

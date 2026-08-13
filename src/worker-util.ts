@@ -25,14 +25,52 @@ const WORKER_QUEUE: ((worker: HelperWorker) => void)[] = [];
 const WORKER_LIMIT = Math.min(6, Math.max(2, (window.navigator.hardwareConcurrency || 4) - 1));
 const WORKER_POOL: { worker: HelperWorker; busy: boolean }[] = [];
 const WORKER_TASK_TIMEOUT_MS = 120_000;
+const ACOUSTIC_TASK_TIMEOUT_MS = 15_000;
 let preparedAcousticWasmModule: WebAssembly.Module | null = null;
 let acousticWasmPreparation: Promise<boolean> | null = null;
+const WORKER_WASM_PREPARATION = new WeakMap<HelperWorker, Promise<boolean>>();
 
-function prepareWorkerAcousticWasm(worker: HelperWorker, module: WebAssembly.Module) {
-    worker.postMessage({
-        action: ACTION_PREPARE_ACOUSTIC_WASM,
-        payload: { module },
+function prepareWorkerAcousticWasm(
+    worker: HelperWorker,
+    module: WebAssembly.Module
+): Promise<boolean> {
+    const existingPreparation = WORKER_WASM_PREPARATION.get(worker);
+    if (existingPreparation !== undefined) {
+        return existingPreparation;
+    }
+
+    const channel = new MessageChannel();
+    const preparation = new Promise<boolean>((resolve) => {
+        const timeout = window.setTimeout(() => {
+            channel.port1.close();
+            resolve(false);
+        }, 10_000);
+        channel.port1.addEventListener(
+            'message',
+            (event: MessageEvent<boolean>) => {
+                window.clearTimeout(timeout);
+                channel.port1.close();
+                resolve(event.data === true);
+            },
+            { once: true }
+        );
+        channel.port1.start();
+        try {
+            worker.postMessage(
+                {
+                    action: ACTION_PREPARE_ACOUSTIC_WASM,
+                    payload: { module, responsePort: channel.port2 },
+                },
+                [channel.port2]
+            );
+        } catch {
+            window.clearTimeout(timeout);
+            channel.port1.close();
+            resolve(false);
+        }
     });
+    WORKER_WASM_PREPARATION.set(worker, preparation);
+    return preparation;
 }
 
 function createWorker(busy = true) {
@@ -75,6 +113,7 @@ function retireWorker(worker: HelperWorker) {
     if (workerIndex !== -1) {
         WORKER_POOL.splice(workerIndex, 1);
     }
+    WORKER_WASM_PREPARATION.delete(worker);
     worker.terminate();
 
     if (WORKER_QUEUE.length > 0) {
@@ -90,6 +129,10 @@ function queueTask<T extends Message>(
 ): Promise<Required<T['response']>['payload']> {
     return new Promise((resolve, reject) => {
         getFreeWorker().then((worker) => {
+            const taskTimeoutMs =
+                action === ACTION_ANALYZE_ACOUSTICS
+                    ? ACOUSTIC_TASK_TIMEOUT_MS
+                    : WORKER_TASK_TIMEOUT_MS;
             let settled = false;
             const cleanup = () => {
                 worker.removeEventListener('message', messageHandler);
@@ -129,29 +172,41 @@ function queueTask<T extends Message>(
                 failWorker(new Error('Worker returned an unreadable analysis result'));
             };
             const timeout = window.setTimeout(() => {
-                failWorker(new Error(`Worker task timed out after ${WORKER_TASK_TIMEOUT_MS} ms`));
-            }, WORKER_TASK_TIMEOUT_MS);
+                failWorker(new Error(`Worker task timed out after ${taskTimeoutMs} ms`));
+            }, taskTimeoutMs);
 
             worker.addEventListener('message', messageHandler);
             worker.addEventListener('error', errorHandler);
             worker.addEventListener('messageerror', messageErrorHandler);
 
-            try {
-                if (
-                    action !== ACTION_COMPUTE_SPECTROGRAM_ONLY &&
-                    preparedAcousticWasmModule !== null
-                ) {
-                    prepareWorkerAcousticWasm(worker, preparedAcousticWasmModule);
+            const postTask = () => {
+                try {
+                    worker.postMessage(
+                        {
+                            action,
+                            payload,
+                        },
+                        transfer
+                    );
+                } catch (error) {
+                    failWorker(error instanceof Error ? error : new Error(String(error)));
                 }
-                worker.postMessage(
-                    {
-                        action,
-                        payload,
-                    },
-                    transfer
+            };
+            if (
+                action !== ACTION_COMPUTE_SPECTROGRAM_ONLY &&
+                preparedAcousticWasmModule !== null
+            ) {
+                void prepareWorkerAcousticWasm(worker, preparedAcousticWasmModule).then(
+                    (ready) => {
+                        if (!ready) {
+                            failWorker(new Error('Worker failed to initialize acoustic Wasm'));
+                            return;
+                        }
+                        postTask();
+                    }
                 );
-            } catch (error) {
-                failWorker(error instanceof Error ? error : new Error(String(error)));
+            } else {
+                postTask();
             }
         });
     });
@@ -195,36 +250,7 @@ export function prepareAcousticWorkers(): Promise<boolean> {
         if (worker === null) {
             return false;
         }
-        const channel = new MessageChannel();
-        const ready = new Promise<boolean>((resolve) => {
-            const timeout = window.setTimeout(() => {
-                channel.port1.close();
-                resolve(false);
-            }, 10_000);
-            channel.port1.addEventListener(
-                'message',
-                (event: MessageEvent<boolean>) => {
-                    window.clearTimeout(timeout);
-                    channel.port1.close();
-                    resolve(event.data);
-                },
-                { once: true }
-            );
-            channel.port1.start();
-        });
-        worker.postMessage(
-            {
-                action: ACTION_PREPARE_ACOUSTIC_WASM,
-                payload: { module, responsePort: channel.port2 },
-            },
-            [channel.port2]
-        );
-        for (const entry of WORKER_POOL) {
-            if (entry.worker !== worker) {
-                prepareWorkerAcousticWasm(entry.worker, module);
-            }
-        }
-        const available = await ready;
+        const available = await prepareWorkerAcousticWasm(worker, module);
         if (WORKER_POOL.some((entry) => entry.worker === worker)) {
             releaseWorker(worker);
         }
