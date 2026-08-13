@@ -9,6 +9,7 @@ import {
 } from '../analysis';
 import { detectPulseTimes } from '../pulse-analysis';
 import { generateSpectrogram } from '../spectrogram';
+import { initializeAcousticWasm } from '../wasm-acoustic';
 import {
     ACTION_ANALYZE_ACOUSTICS,
     ACTION_ANALYZE_OFFLINE,
@@ -22,6 +23,7 @@ import {
 } from '../worker-constants';
 
 const workerScope = (self as unknown) as DedicatedWorkerGlobalScope;
+const acousticWasmReady = initializeAcousticWasm();
 
 function analyzeAtCentres(
     samples: Float32Array,
@@ -90,10 +92,14 @@ function analyzeAtCentres(
     );
 }
 
-workerScope.addEventListener('message', (event: { data: Message['request'] }) => {
+workerScope.addEventListener('message', async (event: { data: Message['request'] }) => {
     const {
         data: { action, payload },
     } = event;
+
+    if (action !== ACTION_COMPUTE_SPECTROGRAM_ONLY) {
+        await acousticWasmReady;
+    }
 
     switch (action) {
         case ACTION_ANALYZE_ACOUSTICS: {

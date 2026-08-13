@@ -31,6 +31,13 @@ module.exports = {
                 use: [{ loader: 'webpack-glsl-minify' }],
             },
             {
+                test: /\.wasm$/,
+                type: 'asset/resource',
+                generator: {
+                    filename: '[contenthash][ext]',
+                },
+            },
+            {
                 test: /\.worker\.ts$/,
                 use: [
                     { loader: 'babel-loader' },

@@ -47,6 +47,7 @@ typings/
 # TypeScript cache
 *.tsbuildinfo
 .test-dist/
+wasm-acoustic/target/
 
 # Optional npm cache directory
 .npm

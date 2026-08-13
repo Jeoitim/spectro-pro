@@ -61,6 +61,23 @@ interface Complex {
     im: number;
 }
 
+export interface AcceleratedAnalysisBackend {
+    detectPitch(
+        algorithm: PitchAlgorithm,
+        signal: Float64Array,
+        sampleRate: number,
+        minPitchHz: number,
+        maxPitchHz: number
+    ): { pitchHz: number | null; confidence: number } | null;
+    polynomialRoots(coefficients: Float64Array): Complex[] | null;
+}
+
+let acceleratedAnalysisBackend: AcceleratedAnalysisBackend | null = null;
+
+export function installAcceleratedAnalysisBackend(backend: AcceleratedAnalysisBackend | null) {
+    acceleratedAnalysisBackend = backend;
+}
+
 export interface FormantFrameAnalysis {
     timeSeconds: number;
     formantsHz: (number | null)[];
@@ -230,6 +247,16 @@ function detectPitchAutocorrelation(
     if (prepared.rms < 1e-12) {
         return { pitchHz: null, confidence: 0 };
     }
+    const accelerated = acceleratedAnalysisBackend?.detectPitch(
+        'autocorrelation',
+        prepared.signal,
+        prepared.sampleRate,
+        minPitchHz,
+        maxPitchHz
+    );
+    if (accelerated != null) {
+        return accelerated;
+    }
 
     const minLag = Math.max(2, Math.floor(prepared.sampleRate / maxPitchHz));
     const maxLag = Math.min(
@@ -305,6 +332,16 @@ function detectPitchYin(
     const prepared = preparePitchSignal(samples, sampleRate, minPitchHz, maxPitchHz, centreSample);
     if (prepared.rms < 1e-12) {
         return { pitchHz: null, confidence: 0 };
+    }
+    const accelerated = acceleratedAnalysisBackend?.detectPitch(
+        'yin',
+        prepared.signal,
+        prepared.sampleRate,
+        minPitchHz,
+        maxPitchHz
+    );
+    if (accelerated != null) {
+        return accelerated;
     }
 
     const minLag = Math.max(2, Math.floor(prepared.sampleRate / maxPitchHz));
@@ -533,6 +570,12 @@ function polishAndValidateRoot(coefficients: Float64Array, initialRoot: Complex)
 }
 
 function polynomialRoots(coefficients: Float64Array) {
+    const acceleratedRoots = acceleratedAnalysisBackend?.polynomialRoots(coefficients);
+    if (acceleratedRoots != null) {
+        return acceleratedRoots
+            .map((root) => polishAndValidateRoot(coefficients, root))
+            .filter((root): root is Complex => root !== null);
+    }
     const degree = coefficients.length - 1;
     const ascending = new Float64Array(coefficients).reverse();
     const companion = Matrix.zeros(degree, degree);

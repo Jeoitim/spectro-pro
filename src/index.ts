@@ -74,6 +74,12 @@ interface OfflineModeCache {
     dataStartSeconds: number;
     dataEndSeconds: number;
     complete: boolean;
+    pitchAnalysisRevision: number;
+    formantAnalysisRevision: number;
+    acousticAnalysisPending: boolean;
+    acousticFormantsRequested: boolean;
+    acousticRetryCount: number;
+    acousticRetryTimer: number | null;
 }
 
 interface MediaViewState {
@@ -1182,7 +1188,24 @@ class SpectroEngine {
     }
 
     private shouldLoadLongRecordingView(item: MediaItem) {
-        return this.shouldDeferLongRecording(item) && (this.renderParameters.zoom || 1) > 1;
+        if (!this.shouldDeferLongRecording(item)) {
+            return false;
+        }
+        const zoom = Math.max(1, this.renderParameters.zoom || 1);
+        const visibleDurationSeconds = item.durationSeconds / zoom;
+        const config = modeConfiguration(this.mode, item.sampleRate, this.customWindowLengthMs);
+        const visibleSampleCount = Math.ceil(visibleDurationSeconds * item.sampleRate);
+        const visibleFrameCount = Math.max(
+            1,
+            Math.floor(Math.max(0, visibleSampleCount - config.windowSize) / config.hopSize) + 1
+        );
+        const estimatedSpectrogramBytes =
+            visibleFrameCount * SPECTROGRAM_HEIGHT * Float32Array.BYTES_PER_ELEMENT;
+        return (
+            zoom > 1 &&
+            visibleDurationSeconds <= LONG_RECORDING_SECONDS &&
+            estimatedSpectrogramBytes <= MAX_OFFLINE_SPECTROGRAM_BYTES
+        );
     }
 
     private visibleAudioRange(item: MediaItem) {
@@ -1314,6 +1337,12 @@ class SpectroEngine {
                 dataStartSeconds: samplesStart / item.sampleRate,
                 dataEndSeconds: samplesEnd / item.sampleRate,
                 complete: !isLongRecording,
+                pitchAnalysisRevision: -1,
+                formantAnalysisRevision: -1,
+                acousticAnalysisPending: false,
+                acousticFormantsRequested: false,
+                acousticRetryCount: 0,
+                acousticRetryTimer: null,
             };
             item.modes[mode] = cache;
             item.state = 'ready';
@@ -1367,6 +1396,17 @@ class SpectroEngine {
         cache: OfflineModeCache,
         includeFormants = true
     ) {
+        cache.acousticFormantsRequested = cache.acousticFormantsRequested || includeFormants;
+        if (cache.acousticAnalysisPending) {
+            return;
+        }
+        cache.acousticAnalysisPending = true;
+        const analyzeFormants = cache.acousticFormantsRequested;
+        cache.acousticFormantsRequested = false;
+        if (cache.acousticRetryTimer !== null) {
+            window.clearTimeout(cache.acousticRetryTimer);
+            cache.acousticRetryTimer = null;
+        }
         const analysisRevision = this.acousticAnalysisRevision;
         const absoluteCentreSamples = new Array(cache.windowCount)
             .fill(0)
@@ -1388,27 +1428,82 @@ class SpectroEngine {
         const analysisStart = Math.max(0, Math.floor(firstCentre) - analysisPadding);
         const analysisEnd = Math.min(item.samples.length, Math.ceil(lastCentre) + analysisPadding);
         const centreSamples = absoluteCentreSamples.map((centre) => centre - analysisStart);
-        const analysisSlice = item.samples.subarray(analysisStart, analysisEnd);
+        const retryTask = async <T>(task: () => Promise<T>, maximumAttempts = 3): Promise<T> => {
+            let lastError: unknown;
+            for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+                try {
+                    return await task();
+                } catch (error) {
+                    lastError = error;
+                    if (attempt + 1 < maximumAttempts) {
+                        await new Promise((resolve) =>
+                            window.setTimeout(resolve, 100 * 2 ** attempt)
+                        );
+                    }
+                }
+            }
+            throw lastError;
+        };
+        let retryIncompleteLayers = false;
         try {
-            const pitchAndIntensityTask = offThreadAnalyzeAcoustics(
-                new Float32Array(analysisSlice),
-                item.sampleRate,
-                centreSamples,
-                this.analysisOptions,
-                false,
-                { pitch: true, formants: false, intensity: true }
-            );
-            const formantTaskCount = Math.min(
-                Math.max(1, getWorkerCount() - 1),
-                Math.max(1, Math.ceil(absoluteCentreSamples.length / 750))
-            );
-            const formantTasks = includeFormants
-                ? new Array(formantTaskCount).fill(null).map((_, taskIndex) => {
+            type AcousticJob = {
+                layer: 'pitch' | 'formant';
+                firstIndex: number;
+                endIndex: number;
+                sampleOffset: number;
+                task: () => ReturnType<typeof offThreadAnalyzeAcoustics>;
+            };
+            const pitchJobCount =
+                cache.pitchAnalysisRevision === analysisRevision
+                    ? 0
+                    : Math.max(1, Math.ceil(absoluteCentreSamples.length / 1500));
+            const pitchJobs: AcousticJob[] = new Array(pitchJobCount)
+                .fill(null)
+                .map((_, taskIndex) => {
+                    const firstIndex = Math.floor(
+                        (taskIndex * absoluteCentreSamples.length) / pitchJobCount
+                    );
+                    const endIndex = Math.floor(
+                        ((taskIndex + 1) * absoluteCentreSamples.length) / pitchJobCount
+                    );
+                    const chunkStart = Math.max(
+                        0,
+                        Math.floor(absoluteCentreSamples[firstIndex]) - analysisPadding
+                    );
+                    const chunkEnd = Math.min(
+                        item.samples.length,
+                        Math.ceil(absoluteCentreSamples[endIndex - 1]) + analysisPadding
+                    );
+                    return {
+                        layer: 'pitch' as const,
+                        firstIndex,
+                        endIndex,
+                        sampleOffset: chunkStart,
+                        task: () =>
+                            offThreadAnalyzeAcoustics(
+                                new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
+                                item.sampleRate,
+                                absoluteCentreSamples
+                                    .slice(firstIndex, endIndex)
+                                    .map((centre) => centre - chunkStart),
+                                this.analysisOptions,
+                                false,
+                                { pitch: true, formants: false, intensity: true }
+                            ),
+                    };
+                });
+            const formantJobCount =
+                analyzeFormants && cache.formantAnalysisRevision !== analysisRevision
+                    ? Math.max(1, Math.ceil(absoluteCentreSamples.length / 750))
+                    : 0;
+            const formantJobs: AcousticJob[] = new Array(formantJobCount)
+                .fill(null)
+                .map((_, taskIndex) => {
                       const firstIndex = Math.floor(
-                          (taskIndex * absoluteCentreSamples.length) / formantTaskCount
+                          (taskIndex * absoluteCentreSamples.length) / formantJobCount
                       );
                       const endIndex = Math.floor(
-                          ((taskIndex + 1) * absoluteCentreSamples.length) / formantTaskCount
+                          ((taskIndex + 1) * absoluteCentreSamples.length) / formantJobCount
                       );
                       const chunkStart = Math.max(
                           0,
@@ -1418,54 +1513,106 @@ class SpectroEngine {
                           item.samples.length,
                           Math.ceil(absoluteCentreSamples[endIndex - 1]) + analysisPadding
                       );
-                      return offThreadAnalyzeAcoustics(
-                          new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
-                          item.sampleRate,
-                          absoluteCentreSamples
-                              .slice(firstIndex, endIndex)
-                              .map((centre) => centre - chunkStart),
-                          this.analysisOptions,
-                          true,
-                          { pitch: false, formants: true, intensity: false }
-                      );
-                  })
-                : [];
-            const [pitchAndIntensityResult, formantResults] = await Promise.all([
-                pitchAndIntensityTask,
-                Promise.all(formantTasks),
-            ]);
-            const formantAnalyses = formantResults.flatMap((result) => result.analyses);
+                      return {
+                          layer: 'formant' as const,
+                          firstIndex,
+                          endIndex,
+                          sampleOffset: chunkStart,
+                          task: () =>
+                              offThreadAnalyzeAcoustics(
+                                  new Float32Array(item.samples.subarray(chunkStart, chunkEnd)),
+                                  item.sampleRate,
+                                  absoluteCentreSamples
+                                      .slice(firstIndex, endIndex)
+                                      .map((centre) => centre - chunkStart),
+                                  this.analysisOptions,
+                                  true,
+                                  { pitch: false, formants: true, intensity: false }
+                              ),
+                      };
+                  });
+            const jobs: AcousticJob[] = [];
+            const maximumJobCount = Math.max(pitchJobs.length, formantJobs.length);
+            for (let jobIndex = 0; jobIndex < maximumJobCount; jobIndex += 1) {
+                if (pitchJobs[jobIndex] !== undefined) {
+                    jobs.push(pitchJobs[jobIndex]);
+                }
+                if (formantJobs[jobIndex] !== undefined) {
+                    jobs.push(formantJobs[jobIndex]);
+                }
+            }
+            const results = await Promise.allSettled(
+                jobs.map((job) => retryTask(job.task))
+            );
             if (analysisRevision !== this.acousticAnalysisRevision || item.modes[mode] !== cache) {
                 return;
             }
-            cache.analyses = pitchAndIntensityResult.analyses.map((analysis, index) => {
-                const previous = cache.analyses[index];
-                const formantAnalysis = formantAnalyses[index];
-                return {
-                    ...analysis,
-                    formantsHz:
-                        includeFormants || previous === undefined
-                            ? formantAnalysis?.formantsHz || analysis.formantsHz
-                            : previous.formantsHz,
-                    formantBandwidthsHz:
-                        includeFormants || previous === undefined
-                            ? formantAnalysis?.formantBandwidthsHz || analysis.formantBandwidthsHz
-                            : previous.formantBandwidthsHz,
-                    formantIntensity:
-                        includeFormants || previous === undefined
-                            ? formantAnalysis?.formantIntensity || 0
-                            : previous.formantIntensity,
-                    drawFormants:
-                        includeFormants || previous === undefined
-                            ? formantAnalysis?.drawFormants || false
-                            : previous.drawFormants,
-                    timeSeconds: absoluteCentreSamples[index] / item.sampleRate,
-                };
+
+            let allPitchJobsSucceeded = true;
+            let allFormantJobsSucceeded = true;
+            const pulseTimes: number[] = [];
+            results.forEach((result, jobIndex) => {
+                const job = jobs[jobIndex];
+                if (result.status === 'rejected') {
+                    if (job.layer === 'pitch') {
+                        allPitchJobsSucceeded = false;
+                        console.warn('Pitch analysis chunk failed and will be retried', result.reason);
+                    } else {
+                        allFormantJobsSucceeded = false;
+                        console.warn(
+                            'Formant analysis chunk failed and will be retried',
+                            result.reason
+                        );
+                    }
+                    return;
+                }
+                result.value.analyses.forEach((analysis, localIndex) => {
+                    const index = job.firstIndex + localIndex;
+                    const previous = cache.analyses[index];
+                    if (previous !== undefined && index < job.endIndex) {
+                        cache.analyses[index] =
+                            job.layer === 'pitch'
+                                ? {
+                                      ...previous,
+                                      pitchHz: analysis.pitchHz,
+                                      pitchConfidence: analysis.pitchConfidence,
+                                      intensityDbSpl: analysis.intensityDbSpl,
+                                      timeSeconds: absoluteCentreSamples[index] / item.sampleRate,
+                                  }
+                                : {
+                                      ...previous,
+                                      formantsHz: analysis.formantsHz,
+                                      formantBandwidthsHz: analysis.formantBandwidthsHz,
+                                      formantIntensity: analysis.formantIntensity,
+                                      drawFormants: analysis.drawFormants,
+                                      timeSeconds: absoluteCentreSamples[index] / item.sampleRate,
+                                  };
+                    }
+                });
+                if (job.layer === 'pitch') {
+                    result.value.pulseTimes.forEach((time) =>
+                        pulseTimes.push(time + job.sampleOffset / item.sampleRate)
+                    );
+                }
             });
-            cache.pulseTimes = pitchAndIntensityResult.pulseTimes.map(
-                (time) => time + analysisStart / item.sampleRate
-            );
-            cache.analysisRevision = analysisRevision;
+            if (pitchJobs.length > 0 && allPitchJobsSucceeded) {
+                cache.pitchAnalysisRevision = analysisRevision;
+            }
+            if (pitchJobs.length > 0) {
+                pulseTimes.sort((left, right) => left - right);
+                cache.pulseTimes = pulseTimes.filter(
+                    (time, index) => index === 0 || time - pulseTimes[index - 1] > 1 / item.sampleRate
+                );
+            }
+            if (formantJobs.length > 0 && allFormantJobsSucceeded) {
+                cache.formantAnalysisRevision = analysisRevision;
+            }
+            const pitchReady = cache.pitchAnalysisRevision === analysisRevision;
+            const formantsReady =
+                !analyzeFormants || cache.formantAnalysisRevision === analysisRevision;
+            retryIncompleteLayers = !pitchReady || !formantsReady;
+            cache.analysisRevision = retryIncompleteLayers ? -1 : analysisRevision;
+            cache.acousticRetryCount = retryIncompleteLayers ? cache.acousticRetryCount + 1 : 0;
             if (this.activeMediaId === item.id && this.mode === mode) {
                 this.analysisHistory = cache.analyses;
                 this.waveformRenderer.setOfflinePulseTimes(cache.pulseTimes);
@@ -1475,13 +1622,39 @@ class SpectroEngine {
                 this.ui.setPlayState(
                     'stopped',
                     item.name,
-                    cache.complete
+                    retryIncompleteLayers
+                        ? '部分声学轨迹加载失败，正在自动重试…'
+                        : cache.complete
                         ? '整段分析完成，可自由拖动播放'
                         : '当前视野已渲染，可继续放大查看细节'
                 );
             }
         } catch (error) {
             console.warn('Unable to update acoustic overlays', error);
+            retryIncompleteLayers = true;
+            cache.acousticRetryCount += 1;
+        } finally {
+            cache.acousticAnalysisPending = false;
+            const analysisChanged = analysisRevision !== this.acousticAnalysisRevision;
+            if (
+                (retryIncompleteLayers || analysisChanged) &&
+                item.modes[mode] === cache
+            ) {
+                const retryDelay = analysisChanged
+                    ? 50
+                    : Math.min(15_000, 500 * 2 ** Math.min(5, cache.acousticRetryCount));
+                cache.acousticRetryTimer = window.setTimeout(() => {
+                    cache.acousticRetryTimer = null;
+                    if (item.modes[mode] === cache) {
+                        void this.reanalyzeMediaCache(
+                            item,
+                            mode,
+                            cache,
+                            analyzeFormants || cache.acousticFormantsRequested
+                        );
+                    }
+                }, retryDelay);
+            }
         }
     }
 

@@ -4,7 +4,8 @@
   "description": "Modern real-time acoustic visualizer for the web.",
   "scripts": {
     "test": "npm run test:analysis",
-    "test:analysis": "tsc -p tsconfig.tests.json && node .test-dist/tests/synthetic-analysis.js",
+    "test:analysis": "tsc -p tsconfig.tests.json && node .test-dist/tests/synthetic-analysis.js && node tests/wasm-acoustic.cjs",
+    "build:wasm": "node scripts/build-acoustic-wasm.cjs",
     "build": "webpack --mode=production && node scripts/prepare-sites-build.cjs",
     "start": "webpack serve --mode=development",
     "prettier": "prettier --write 'src/**/*.{ts,tsx}'",
