@@ -16,6 +16,7 @@ import CloseIcon from '@material-ui/icons/Close';
 import CloudUploadIcon from '@material-ui/icons/CloudUpload';
 import DeleteOutlineIcon from '@material-ui/icons/DeleteOutline';
 import DeleteSweepIcon from '@material-ui/icons/DeleteSweep';
+import DragHandleIcon from '@material-ui/icons/DragHandle';
 import ImageOutlinedIcon from '@material-ui/icons/ImageOutlined';
 import LanguageIcon from '@material-ui/icons/Language';
 import QueueMusicIcon from '@material-ui/icons/QueueMusic';
@@ -191,6 +192,19 @@ interface PlotGesture {
     lastPanCenterX: number | null;
 }
 
+interface MediaDragState {
+    id: string;
+    pointerId: number;
+    startClientX: number;
+    startClientY: number;
+    sourceIndex: number;
+    rowMetrics: Map<string, { top: number; height: number }>;
+    rowGap: number;
+    moved: boolean;
+    targetId: string | null;
+    targetIndex: number;
+}
+
 export interface AppCallbacks {
     onStartMicrophone: () => void;
     onStartFile: (buffer: ArrayBuffer, name: string) => void;
@@ -224,6 +238,7 @@ export interface AppCallbacks {
     onRenameMedia: (id: string, name: string) => void;
     onSaveMedia: (id: string) => void;
     onRemoveMedia: (id: string) => void;
+    onReorderMedia: (id: string, targetId: string | null) => void;
     onClearPlaylist: () => void;
 }
 
@@ -455,6 +470,7 @@ export default function App({
     onRenameMedia,
     onSaveMedia,
     onRemoveMedia,
+    onReorderMedia,
     onClearPlaylist,
 }: AppProps) {
     const savedSettingsRef = useRef<Partial<SavedSettings> | null>(null);
@@ -644,6 +660,7 @@ export default function App({
     } | null>(null);
     const [mediaItems, setMediaItems] = useState<MediaListItem[]>([]);
     const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
+    const [draggedMediaId, setDraggedMediaId] = useState<string | null>(null);
     const [transport, setTransport] = useState<TransportSnapshot>({
         activeId: null,
         currentSeconds: 0,
@@ -664,6 +681,11 @@ export default function App({
         lastPanCenterX: null,
     });
     const plotContainerRef = useRef<HTMLDivElement | null>(null);
+    const mediaListRef = useRef<HTMLDivElement | null>(null);
+    const mediaDragRef = useRef<MediaDragState | null>(null);
+    const mediaRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+    const mediaDropIndicatorRef = useRef<HTMLSpanElement | null>(null);
+    const pendingMediaAnimationRef = useRef<Map<string, number> | null>(null);
     const axisViewRef = useRef<HTMLDivElement | null>(null);
     const cursorTooltipRef = useRef<HTMLDivElement | null>(null);
     const playlistRef = useRef<HTMLElement | null>(null);
@@ -673,6 +695,223 @@ export default function App({
     const zoomInitializedRef = useRef(false);
     const heldArrowKeysRef = useRef<Set<string>>(new Set());
     const keyboardAuditionRef = useRef(false);
+
+    const updateMediaDragTarget = useCallback((clientY: number) => {
+        const drag = mediaDragRef.current;
+        const list = mediaListRef.current;
+        if (drag === null || list === null) {
+            return;
+        }
+        const allRows = Array.from(list.querySelectorAll<HTMLDivElement>('[data-media-id]'));
+        const draggedRow = allRows.find((row) => row.dataset.mediaId === drag.id);
+        if (draggedRow === undefined) {
+            return;
+        }
+        const rows = allRows.filter((row) => row !== draggedRow);
+        const draggedMetrics = drag.rowMetrics.get(drag.id);
+        if (draggedMetrics === undefined) {
+            return;
+        }
+        const deltaY = clientY - drag.startClientY;
+        const draggedCenter = draggedMetrics.top + deltaY + draggedMetrics.height / 2;
+        const targetRow = rows.find((row) => {
+            const metrics = drag.rowMetrics.get(row.dataset.mediaId || '');
+            if (metrics === undefined) {
+                return false;
+            }
+            const rowCenter = metrics.top + metrics.height / 2;
+            return draggedCenter < rowCenter;
+        });
+        // The target is an insertion slot in the list after removing the dragged row.
+        // The engine inserts before targetId, so the row below the dragged item is
+        // the target when the pointer has crossed the preceding row.
+        const targetIndex = targetRow === undefined ? rows.length : rows.indexOf(targetRow);
+        const targetId = rows[targetIndex]?.dataset.mediaId ?? null;
+        drag.targetId = targetId;
+        drag.targetIndex = targetIndex;
+
+        allRows.forEach((row, rowIndex) => {
+            if (row === draggedRow) {
+                row.style.transform = `translate3d(0, ${deltaY}px, 0) scale(0.98)`;
+                return;
+            }
+            const rowMetrics = drag.rowMetrics.get(row.dataset.mediaId || '');
+            const rowShift =
+                rowMetrics === undefined ? 0 : rowMetrics.height + drag.rowGap;
+            let offset = 0;
+            if (drag.sourceIndex < targetIndex && rowIndex > drag.sourceIndex && rowIndex <= targetIndex) {
+                offset = -rowShift;
+            } else if (
+                drag.sourceIndex > targetIndex &&
+                rowIndex >= targetIndex &&
+                rowIndex < drag.sourceIndex
+            ) {
+                offset = rowShift;
+            }
+            row.style.transform = offset === 0 ? '' : `translate3d(0, ${offset}px, 0)`;
+        });
+
+        const indicator = mediaDropIndicatorRef.current;
+        const indicatorRow = targetRow || rows[rows.length - 1];
+        if (indicator !== null && indicatorRow !== undefined) {
+            // offsetTop/offsetHeight describe the normal layout, excluding the
+            // temporary transforms used for the drag preview.
+            const rawTop =
+                targetRow === undefined
+                    ? indicatorRow.offsetTop + indicatorRow.offsetHeight
+                    : indicatorRow.offsetTop;
+            indicator.style.top = `${Math.max(0, rawTop)}px`;
+        }
+    }, []);
+
+    const beginMediaDrag = useCallback(
+        (id: string, event: ReactPointerEvent<HTMLButtonElement>) => {
+            if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            event.currentTarget.setPointerCapture(event.pointerId);
+            const row = event.currentTarget.closest<HTMLDivElement>('[data-media-id]');
+            const list = mediaListRef.current;
+            const rows = list
+                ? Array.from(list.querySelectorAll<HTMLDivElement>('[data-media-id]'))
+                : [];
+            const sourceIndex = row === null ? -1 : rows.indexOf(row);
+            if (row === null || sourceIndex < 0) {
+                return;
+            }
+            const rowMetrics = new Map<string, { top: number; height: number }>();
+            rows.forEach((mediaRow) => {
+                rowMetrics.set(mediaRow.dataset.mediaId || '', {
+                    top: mediaRow.getBoundingClientRect().top,
+                    height: mediaRow.getBoundingClientRect().height,
+                });
+            });
+            const rowStyle = getComputedStyle(row.parentElement || row);
+            mediaDragRef.current = {
+                id,
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                sourceIndex,
+                rowMetrics,
+                rowGap: Number.parseFloat(rowStyle.rowGap || '0'),
+                moved: false,
+                targetId: null,
+                targetIndex: sourceIndex,
+            };
+            if (mediaDropIndicatorRef.current !== null) {
+                mediaDropIndicatorRef.current.style.opacity = '0';
+            }
+        },
+        []
+    );
+
+    const moveMediaDrag = useCallback(
+        (event: ReactPointerEvent<HTMLButtonElement>) => {
+            const drag = mediaDragRef.current;
+            if (drag === null || drag.pointerId !== event.pointerId) {
+                return;
+            }
+            event.preventDefault();
+            if (
+                !drag.moved &&
+                Math.hypot(event.clientX - drag.startClientX, event.clientY - drag.startClientY) < 6
+            ) {
+                return;
+            }
+            if (!drag.moved) {
+                drag.moved = true;
+                setDraggedMediaId(drag.id);
+                if (mediaDropIndicatorRef.current !== null) {
+                    mediaDropIndicatorRef.current.style.opacity = '1';
+                }
+            }
+            updateMediaDragTarget(event.clientY);
+        },
+        [updateMediaDragTarget]
+    );
+
+    const finishMediaDrag = useCallback(
+        (event: ReactPointerEvent<HTMLButtonElement>, cancelled: boolean) => {
+            const drag = mediaDragRef.current;
+            if (drag === null || drag.pointerId !== event.pointerId) {
+                return;
+            }
+            event.preventDefault();
+            if (!cancelled) {
+                updateMediaDragTarget(event.clientY);
+            }
+            if (!cancelled && drag.moved) {
+                const firstRects = new Map<string, number>();
+                mediaRowRefs.current.forEach((row, rowId) => {
+                    // Capture the visual release position before clearing the temporary
+                    // drag transforms. This keeps the FLIP animation anchored at the
+                    // pointer release instead of snapping back to the old layout first.
+                    firstRects.set(rowId, row.getBoundingClientRect().top);
+                    row.style.transition = 'none';
+                    row.style.transform = '';
+                });
+                pendingMediaAnimationRef.current = firstRects;
+                onReorderMedia(drag.id, drag.targetId);
+            } else {
+                mediaRowRefs.current.forEach((row) => {
+                    row.style.transform = '';
+                });
+            }
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+            }
+            mediaDragRef.current = null;
+            setDraggedMediaId(null);
+            if (mediaDropIndicatorRef.current !== null) {
+                mediaDropIndicatorRef.current.style.opacity = '0';
+            }
+        },
+        [onReorderMedia, updateMediaDragTarget]
+    );
+
+    useLayoutEffect(() => {
+        const firstRects = pendingMediaAnimationRef.current;
+        if (firstRects === null) {
+            return;
+        }
+        pendingMediaAnimationRef.current = null;
+        const animatedRows: HTMLDivElement[] = [];
+        mediaRowRefs.current.forEach((row, rowId) => {
+            const firstTop = firstRects.get(rowId);
+            if (firstTop === undefined) {
+                return;
+            }
+            const lastTop = row.getBoundingClientRect().top;
+            const offsetY = firstTop - lastTop;
+            if (Math.abs(offsetY) < 1) {
+                row.style.transition = '';
+                row.style.transform = '';
+                return;
+            }
+            row.style.transition = 'none';
+            row.style.transform = `translate3d(0, ${offsetY}px, 0)`;
+            animatedRows.push(row);
+        });
+        if (animatedRows.length === 0) {
+            return;
+        }
+        requestAnimationFrame(() => {
+            animatedRows.forEach((row) => {
+                row.style.transition =
+                    'transform 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms ease, box-shadow 160ms ease';
+                row.style.transform = 'translate3d(0, 0, 0)';
+            });
+            window.setTimeout(() => {
+                animatedRows.forEach((row) => {
+                    row.style.transition = '';
+                    row.style.transform = '';
+                });
+            }, 240);
+        });
+    }, [mediaItems]);
     const [languageMenuOpen, setLanguageMenuOpen] = useState(false);
     const scale =
         mode === 'broadband'
@@ -2303,7 +2542,15 @@ export default function App({
                         </span>
                         <i className={`status-dot ${playState}`} />
                     </button>
-                    <div className="media-list">
+                    <div
+                        ref={mediaListRef}
+                        className={`media-list ${draggedMediaId !== null ? 'dragging' : ''}`}
+                    >
+                        <span
+                            ref={mediaDropIndicatorRef}
+                            className="media-drop-indicator"
+                            aria-hidden="true"
+                        />
                         {mediaItems.length === 0 ? (
                             <p className="media-empty">
                                 {tr('导入音频或录制一段声音后，会保留在这里。')}
@@ -2313,9 +2560,31 @@ export default function App({
                                 <div
                                     className={`media-row ${
                                         activeMediaId === item.id ? 'active' : ''
+                                    } ${
+                                        draggedMediaId === item.id ? 'dragging' : ''
                                     }`}
                                     key={item.id}
+                                    data-media-id={item.id}
+                                    ref={(element) => {
+                                        if (element === null) {
+                                            mediaRowRefs.current.delete(item.id);
+                                        } else {
+                                            mediaRowRefs.current.set(item.id, element);
+                                        }
+                                    }}
                                 >
+                                    <button
+                                        className="media-drag-handle"
+                                        onPointerDown={(event) => beginMediaDrag(item.id, event)}
+                                        onPointerMove={moveMediaDrag}
+                                        onPointerUp={(event) => finishMediaDrag(event, false)}
+                                        onPointerCancel={(event) => finishMediaDrag(event, true)}
+                                        aria-grabbed={draggedMediaId === item.id}
+                                        title={tr('拖动调整顺序')}
+                                        aria-label={`${tr('拖动调整顺序')} ${item.name}`}
+                                    >
+                                        <DragHandleIcon aria-hidden="true" />
+                                    </button>
                                     <button
                                         className="media-select"
                                         onClick={() => onSelectMedia(item.id)}

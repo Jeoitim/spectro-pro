@@ -587,12 +587,23 @@ select:focus-visible {
 }
 
 .media-list {
+    position: relative;
     display: grid;
     align-content: start;
     gap: 6px;
     min-height: 0;
     margin-top: 8px;
     overflow: auto;
+}
+
+.media-list.dragging {
+    user-select: none;
+}
+
+.media-list.dragging .media-row {
+    transition: transform 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease,
+        box-shadow 160ms ease, opacity 160ms ease;
+    will-change: transform;
 }
 
 .media-row {
@@ -607,6 +618,9 @@ select:focus-visible {
     color: #cbd5e3;
     text-align: left;
     background: rgba(255, 255, 255, 0.025);
+    position: relative;
+    transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease,
+        box-shadow 160ms ease, opacity 160ms ease;
 }
 
 button.media-row {
@@ -636,6 +650,63 @@ button.media-row {
     text-align: left;
     background: transparent;
     cursor: pointer;
+}
+
+.media-drag-handle {
+    display: grid;
+    width: 20px;
+    height: 32px;
+    padding: 0;
+    flex: 0 0 auto;
+    place-items: center;
+    border: 0;
+    color: #718098;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.media-drag-handle:active {
+    cursor: grabbing;
+}
+
+.media-drag-handle svg {
+    width: 15px;
+    height: 15px;
+}
+
+.media-row.dragging {
+    z-index: 1;
+    opacity: 0.72;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22);
+    transition: none;
+    will-change: transform;
+}
+
+.media-list.dragging .media-row.dragging {
+    transition: none;
+}
+
+.media-list.dragging .media-row:not(.dragging) {
+    will-change: transform;
+}
+
+.media-drop-indicator {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    right: 8px;
+    left: 8px;
+    height: 2px;
+    border-radius: 999px;
+    background: #2588ff;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%);
+    transition: top 90ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease;
+    will-change: top, opacity;
 }
 
 .media-kind {
@@ -2933,6 +3004,18 @@ html.light-ui .media-row {
 html.light-ui .media-row:hover,
 html.light-ui .media-row.active {
     background: #eef5ff;
+}
+
+html.light-ui .media-drag-handle {
+    color: #7c8da5;
+}
+
+html.light-ui .media-drop-indicator {
+    background: #287fdf;
+}
+
+html.light-ui .media-row.dragging {
+    box-shadow: 0 8px 20px rgba(36, 50, 76, 0.16);
 }
 
 html.light-ui .axis,

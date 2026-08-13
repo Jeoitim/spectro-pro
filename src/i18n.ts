@@ -52,6 +52,7 @@ const ENGLISH: { [key: string]: string } = {
     保存WAV: 'Save WAV',
     从播放列表移除: 'Remove from playlist',
     移除: 'Remove',
+    拖动调整顺序: 'Drag to reorder',
     语谱类型: 'Spectrogram type',
     宽带: 'Broadband',
     窄带: 'Narrowband',

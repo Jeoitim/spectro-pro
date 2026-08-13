@@ -802,6 +802,24 @@ class SpectroEngine {
         }
     }
 
+    reorderMedia(id: string, targetId: string | null) {
+        const sourceIndex = this.mediaItems.findIndex((item) => item.id === id);
+        if (sourceIndex < 0) {
+            return;
+        }
+        const [item] = this.mediaItems.splice(sourceIndex, 1);
+        const targetIndex =
+            targetId === null
+                ? this.mediaItems.length
+                : this.mediaItems.findIndex((candidate) => candidate.id === targetId);
+        if (targetIndex < 0) {
+            this.mediaItems.splice(sourceIndex, 0, item);
+            return;
+        }
+        this.mediaItems.splice(targetIndex, 0, item);
+        this.notifyMediaLibrary();
+    }
+
     navigate(amount: number) {
         const zoom = this.renderParameters.zoom || 1;
         const maximumOffset = Math.max(0, 1 - 1 / Math.max(1, zoom));
@@ -2168,6 +2186,7 @@ const ui = initialiseControlsUi(appContainer, {
     onRenameMedia: (id, name) => engine?.renameMedia(id, name),
     onSaveMedia: (id) => engine?.saveMedia(id),
     onRemoveMedia: (id) => engine?.removeMedia(id),
+    onReorderMedia: (id, targetId) => engine?.reorderMedia(id, targetId),
     onClearPlaylist: () => engine?.clearPlaylist(),
 });
 engine = new SpectroEngine(ui);
