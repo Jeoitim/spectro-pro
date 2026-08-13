@@ -27,6 +27,19 @@ import UndoIcon from '@material-ui/icons/Undo';
 import ViewArrayIcon from '@material-ui/icons/ViewArray';
 import ZoomOutMapIcon from '@material-ui/icons/ZoomOutMap';
 
+function ExpandSelectionIcon() {
+    return (
+        <svg
+            className="selection-expand-icon"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            focusable="false"
+        >
+            <path d="M3.5 4v16M20.5 4v16M9 8.5 5.5 12 9 15.5M15 8.5l3.5 3.5-3.5 3.5M5.5 12h13" />
+        </svg>
+    );
+}
+
 import { AnalysisOptions, PitchAlgorithm, RealtimeAnalysisPrecision } from '../analysis';
 import { GRADIENTS } from '../color-util';
 import { getActiveLocale, Locale, setActiveLocale, translate } from '../i18n';
@@ -2461,7 +2474,7 @@ export default function App({
                                                 : tr('让选区扩展至铺满语谱图')
                                         }
                                     >
-                                        <ZoomOutMapIcon aria-hidden="true" />
+                                        <ExpandSelectionIcon />
                                         <span>{tr('扩选')}</span>
                                     </button>
                                     <button

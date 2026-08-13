@@ -11,6 +11,10 @@
     --yellow: #f4df22;
     --red: #ff4f72;
     --green: #5ee7a7;
+    --scrollbar-track: rgba(7, 11, 19, 0.42);
+    --scrollbar-thumb: linear-gradient(180deg, rgba(75, 120, 190, 0.76), rgba(48, 79, 132, 0.72));
+    --scrollbar-thumb-hover: linear-gradient(180deg, rgba(95, 148, 226, 0.88), rgba(57, 94, 157, 0.82));
+    --scrollbar-thumb-border: rgba(7, 11, 19, 0.68);
     --radius: 18px;
     font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI',
         'Microsoft YaHei', sans-serif;
@@ -20,7 +24,7 @@
 * {
     box-sizing: border-box;
     scrollbar-width: thin;
-    scrollbar-color: rgba(94, 130, 188, 0.62) rgba(7, 11, 19, 0.42);
+    scrollbar-color: rgba(94, 130, 188, 0.62) var(--scrollbar-track);
 }
 
 *::-webkit-scrollbar {
@@ -30,18 +34,18 @@
 
 *::-webkit-scrollbar-track {
     border-radius: 999px;
-    background: rgba(7, 11, 19, 0.42);
+    background: var(--scrollbar-track);
 }
 
 *::-webkit-scrollbar-thumb {
     min-height: 32px;
-    border: 2px solid rgba(7, 11, 19, 0.68);
+    border: 2px solid var(--scrollbar-thumb-border);
     border-radius: 999px;
-    background: linear-gradient(180deg, rgba(75, 120, 190, 0.76), rgba(48, 79, 132, 0.72));
+    background: var(--scrollbar-thumb);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(95, 148, 226, 0.88), rgba(57, 94, 157, 0.82));
+    background: var(--scrollbar-thumb-hover);
 }
 
 html,
@@ -961,6 +965,14 @@ button.media-row {
     height: 15px;
     fill: currentColor;
     stroke: none;
+}
+
+.view-actions .view-level-action .selection-expand-icon {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
 }
 
 .view-actions .view-level-action span {
@@ -2710,6 +2722,27 @@ html.light-ui {
     --line-strong: rgba(54, 68, 91, 0.24);
     --text: #172033;
     --muted: #667085;
+    --scrollbar-track: rgba(204, 213, 226, 0.7);
+    --scrollbar-thumb: linear-gradient(180deg, #aebdce, #8f9fb3);
+    --scrollbar-thumb-hover: linear-gradient(180deg, #9eafc3, #7f91a8);
+    --scrollbar-thumb-border: rgba(255, 255, 255, 0.82);
+}
+
+html.light-ui * {
+    scrollbar-color: #9aabbe var(--scrollbar-track);
+}
+
+html.light-ui *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+}
+
+html.light-ui *::-webkit-scrollbar-thumb {
+    border-color: var(--scrollbar-thumb-border);
+    background: var(--scrollbar-thumb);
+}
+
+html.light-ui *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
 }
 
 html.light-ui body {
@@ -2924,6 +2957,11 @@ html.light-ui .zoom-scrollbar {
 html.light-ui .zoom-scrollbar-thumb {
     border-color: #77869a;
     background: #aeb9c8;
+}
+
+html.light-ui .zoom-scrollbar:active .zoom-scrollbar-thumb {
+    border-color: #60748e;
+    background: #91a2b8;
 }
 
 html.light-ui .primary-metrics article,
