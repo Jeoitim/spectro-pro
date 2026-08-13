@@ -12,6 +12,7 @@ import initialiseControlsUi from './controls-ui';
 import {
     AnalysisTaskSnapshot,
     CursorSnapshot,
+    EditAvailability,
     LayerDisplayOptions,
     LiveSnapshot,
     MediaListItem,
@@ -98,7 +99,14 @@ interface MediaItem {
     samples: Float32Array;
     modes: Partial<Record<SpectrogramMode, OfflineModeCache>>;
     views: Partial<Record<SpectrogramMode, MediaViewState>>;
+    edited: boolean;
     wavBlob?: Blob;
+}
+
+interface AudioClipboard {
+    samples: Float32Array;
+    sampleRate: number;
+    sourceName: string;
 }
 
 interface SessionStatistics {
@@ -144,6 +152,26 @@ function emptyStatistics(): SessionStatistics {
         pitchMax: Number.NEGATIVE_INFINITY,
         intensityPowerSum: 0,
     };
+}
+
+function resampleSamples(samples: Float32Array, sourceRate: number, targetRate: number) {
+    if (samples.length === 0) {
+        return new Float32Array();
+    }
+    if (sourceRate === targetRate) {
+        return new Float32Array(samples);
+    }
+    const targetLength = Math.max(1, Math.round((samples.length * targetRate) / sourceRate));
+    const result = new Float32Array(targetLength);
+    const scale = sourceRate / targetRate;
+    for (let index = 0; index < targetLength; index += 1) {
+        const sourcePosition = index * scale;
+        const left = Math.min(samples.length - 1, Math.floor(sourcePosition));
+        const right = Math.min(samples.length - 1, left + 1);
+        const fraction = sourcePosition - left;
+        result[index] = samples[left] + (samples[right] - samples[left]) * fraction;
+    }
+    return result;
 }
 
 class SpectroEngine {
@@ -298,6 +326,10 @@ class SpectroEngine {
 
     private playbackOffsetSeconds = 0;
 
+    private audioClipboard: AudioClipboard | null = null;
+
+    private lastEditAvailability: EditAvailability | null = null;
+
     private playbackIsPlaying = false;
 
     private recordingChunks: Float32Array[] = [];
@@ -363,6 +395,7 @@ class SpectroEngine {
         requestAnimationFrame(() => this.renderLoop());
         this.notifyMediaLibrary();
         this.notifyTransport();
+        this.notifyEditAvailability();
         this.ui.updateReturnViewAvailable(false);
         if (window.requestIdleCallback !== undefined) {
             window.requestIdleCallback(() => this.prepareAcousticAcceleration(), {
@@ -723,6 +756,7 @@ class SpectroEngine {
                 samples: mono,
                 modes: {},
                 views: {},
+                edited: false,
             };
             this.saveActiveView();
             this.mediaItems.push(item);
@@ -869,10 +903,10 @@ class SpectroEngine {
 
     saveMedia(id: string) {
         const item = this.mediaItems.find((candidate) => candidate.id === id);
-        if (item?.type !== 'recording') {
+        if (item === undefined || (item.type !== 'recording' && !item.edited)) {
             return;
         }
-        const blob = item.wavBlob || encodeWav(item.samples, item.sampleRate);
+        const blob = encodeWav(item.samples, item.sampleRate);
         item.wavBlob = blob;
         const link = document.createElement('a');
         link.download = `${item.name.replace(/[<>:"/\\|?*]/g, '_')}.wav`;
@@ -995,6 +1029,7 @@ class SpectroEngine {
             this.selection = null;
             this.playbackRange = null;
             this.ui.updateSelection(null);
+            this.notifyEditAvailability();
             this.overlayDirty = true;
             return;
         }
@@ -1027,7 +1062,115 @@ class SpectroEngine {
             endSeconds: this.selection.endSeconds,
         };
         this.ui.updateSelection(this.selection);
+        this.notifyEditAvailability();
         this.overlayDirty = true;
+    }
+
+    copySelection() {
+        const item = this.activeMedia();
+        const range = this.selectedSampleRange(item);
+        if (item === null || range === null) {
+            return;
+        }
+        this.audioClipboard = {
+            samples: new Float32Array(item.samples.subarray(range.start, range.end)),
+            sampleRate: item.sampleRate,
+            sourceName: item.name,
+        };
+        this.ui.setPlayState('stopped', item.name, '已复制选中的音频片段');
+        this.notifyEditAvailability();
+    }
+
+    cutSelection() {
+        const item = this.activeMedia();
+        const range = this.selectedSampleRange(item);
+        if (item === null || range === null || (range.start === 0 && range.end === item.samples.length)) {
+            if (item !== null && range !== null && range.start === 0 && range.end === item.samples.length) {
+                this.ui.setPlayState('stopped', item.name, '不能剪切全部音频');
+            }
+            return;
+        }
+        this.audioClipboard = {
+            samples: new Float32Array(item.samples.subarray(range.start, range.end)),
+            sampleRate: item.sampleRate,
+            sourceName: item.name,
+        };
+        const nextSamples = new Float32Array(item.samples.length - (range.end - range.start));
+        nextSamples.set(item.samples.subarray(0, range.start));
+        nextSamples.set(item.samples.subarray(range.end), range.start);
+        this.replaceEditedSamples(item, nextSamples, range.start / item.sampleRate);
+    }
+
+    pasteAtPlayhead() {
+        const item = this.activeMedia();
+        const clipboard = this.audioClipboard;
+        if (item === null || item.state !== 'ready' || clipboard === null) {
+            return;
+        }
+        const pastedSamples = resampleSamples(clipboard.samples, clipboard.sampleRate, item.sampleRate);
+        if (pastedSamples.length === 0) {
+            return;
+        }
+        const insertAt = clamp(
+            Math.round(this.playbackOffsetSeconds * item.sampleRate),
+            0,
+            item.samples.length
+        );
+        const nextSamples = new Float32Array(item.samples.length + pastedSamples.length);
+        nextSamples.set(item.samples.subarray(0, insertAt));
+        nextSamples.set(pastedSamples, insertAt);
+        nextSamples.set(item.samples.subarray(insertAt), insertAt + pastedSamples.length);
+        const nextPosition = (insertAt + pastedSamples.length) / item.sampleRate;
+        this.replaceEditedSamples(item, nextSamples, nextPosition);
+    }
+
+    private selectedSampleRange(item: MediaItem | null) {
+        if (
+            item === null ||
+            this.selection === null ||
+            this.selection.durationSeconds <= 0 ||
+            !Number.isFinite(this.selection.startSeconds) ||
+            !Number.isFinite(this.selection.endSeconds)
+        ) {
+            return null;
+        }
+        const start = clamp(
+            Math.round(this.selection.startSeconds * item.sampleRate),
+            0,
+            item.samples.length
+        );
+        const end = clamp(
+            Math.round(this.selection.endSeconds * item.sampleRate),
+            start,
+            item.samples.length
+        );
+        return end > start ? { start, end } : null;
+    }
+
+    private replaceEditedSamples(item: MediaItem, samples: Float32Array, playbackSeconds: number) {
+        this.stopMediaPlayback(false);
+        this.offlineAnalysisRequestSequence += 1;
+        this.removeAnalysisTasksForMedia(item.id);
+        for (const cache of Object.values(item.modes)) {
+            if (cache?.acousticRetryTimer !== null && cache?.acousticRetryTimer !== undefined) {
+                window.clearTimeout(cache.acousticRetryTimer);
+            }
+        }
+        item.samples = samples;
+        item.durationSeconds = samples.length / item.sampleRate;
+        item.edited = true;
+        item.wavBlob = undefined;
+        item.modes = {};
+        item.state = 'analyzing';
+        this.selection = null;
+        this.playbackRange = null;
+        this.playbackOffsetSeconds = clamp(playbackSeconds, 0, item.durationSeconds);
+        this.sessionElapsedSeconds = this.playbackOffsetSeconds;
+        this.ui.updateSelection(null);
+        this.notifyMediaLibrary();
+        this.notifyTransport();
+        this.notifyEditAvailability();
+        void this.showOrAnalyzeMedia(item);
     }
 
     fitSelection() {
@@ -2085,6 +2228,7 @@ class SpectroEngine {
             samples,
             modes: {},
             views: {},
+            edited: false,
         };
         this.mediaItems.unshift(item);
         this.notifyMediaLibrary();
@@ -2098,8 +2242,35 @@ class SpectroEngine {
             durationSeconds: item.durationSeconds,
             type: item.type,
             state: item.state,
+            edited: item.edited,
         }));
         this.ui.updateMediaLibrary(items, this.activeMediaId);
+        this.notifyEditAvailability();
+    }
+
+    private notifyEditAvailability() {
+        const item = this.activeMedia();
+        const range = this.selectedSampleRange(item);
+        const canCopy = range !== null && item?.state === 'ready';
+        const availability: EditAvailability = {
+            canCopy,
+            canCut:
+                canCopy &&
+                range !== null &&
+                item !== null &&
+                (range.start > 0 || range.end < item.samples.length),
+            canPaste: item !== null && item.state === 'ready' && this.audioClipboard !== null,
+        };
+        if (
+            this.lastEditAvailability !== null &&
+            this.lastEditAvailability.canCopy === availability.canCopy &&
+            this.lastEditAvailability.canCut === availability.canCut &&
+            this.lastEditAvailability.canPaste === availability.canPaste
+        ) {
+            return;
+        }
+        this.lastEditAvailability = availability;
+        this.ui.updateEditAvailability(availability);
     }
 
     private saveActiveView() {
@@ -2131,6 +2302,7 @@ class SpectroEngine {
             isPlaying: this.playbackIsPlaying,
         };
         this.ui.updateTransport(snapshot);
+        this.notifyEditAvailability();
     }
 
     private createAudioContext() {
@@ -2857,6 +3029,9 @@ const ui = initialiseControlsUi(appContainer, {
     onStop: () => engine?.stop(),
     onClear: () => engine?.clear(),
     onExport: () => engine?.exportImage(),
+    onCopySelection: () => engine?.copySelection(),
+    onCutSelection: () => engine?.cutSelection(),
+    onPasteAtPlayhead: () => engine?.pasteAtPlayhead(),
     onModeChange: (mode) => engine?.setMode(mode),
     onSpectrogramAnalysisChange: (settings) => engine?.setSpectrogramAnalysis(settings),
     onPitchAlgorithmChange: (algorithm) => engine?.setPitchAlgorithm(algorithm),

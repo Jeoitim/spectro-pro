@@ -17,6 +17,7 @@ import CloudUploadIcon from '@material-ui/icons/CloudUpload';
 import DeleteOutlineIcon from '@material-ui/icons/DeleteOutline';
 import DeleteSweepIcon from '@material-ui/icons/DeleteSweep';
 import DragHandleIcon from '@material-ui/icons/DragHandle';
+import EditOutlinedIcon from '@material-ui/icons/EditOutlined';
 import ImageOutlinedIcon from '@material-ui/icons/ImageOutlined';
 import LanguageIcon from '@material-ui/icons/Language';
 import QueueMusicIcon from '@material-ui/icons/QueueMusic';
@@ -37,6 +38,32 @@ function ExpandSelectionIcon() {
             focusable="false"
         >
             <path d="M3.5 4v16M20.5 4v16M9 8.5 5.5 12 9 15.5M15 8.5l3.5 3.5-3.5 3.5M5.5 12h13" />
+        </svg>
+    );
+}
+
+function ClipboardActionIcon({ type }: { type: 'copy' | 'cut' | 'paste' }) {
+    return (
+        <svg className="clipboard-action-icon" viewBox="0 0 24 24" aria-hidden="true">
+            {type === 'copy' && (
+                <>
+                    <path d="M8 8h10v12H8z" />
+                    <path d="M6 16H4V4h10v2" />
+                </>
+            )}
+            {type === 'cut' && (
+                <>
+                    <circle cx="6" cy="6" r="2.5" />
+                    <circle cx="6" cy="18" r="2.5" />
+                    <path d="m8 7.5 11 8.5M8 16.5 13 12" />
+                </>
+            )}
+            {type === 'paste' && (
+                <>
+                    <path d="M8 7H5v14h12v-3" />
+                    <path d="M9 3h5l1 3H8zM12 12h8m0 0-3-3m3 3-3 3" />
+                </>
+            )}
         </svg>
     );
 }
@@ -156,6 +183,7 @@ export interface MediaListItem {
     durationSeconds: number;
     type: 'file' | 'recording';
     state: 'ready' | 'analyzing' | 'error';
+    edited: boolean;
 }
 
 export interface TransportSnapshot {
@@ -222,6 +250,9 @@ export interface AppCallbacks {
     onStop: () => void;
     onClear: () => void;
     onExport: () => void;
+    onCopySelection: () => void;
+    onCutSelection: () => void;
+    onPasteAtPlayhead: () => void;
     onModeChange: (mode: SpectrogramMode) => void;
     onSpectrogramAnalysisChange: (settings: SpectrogramAnalysisSettings) => void;
     onPitchAlgorithmChange: (algorithm: PitchAlgorithm) => void;
@@ -446,6 +477,13 @@ export interface UiController {
     updateSelection: (snapshot: SelectionSnapshot | null) => void;
     updateWaveformAxis: (state: WaveformAxisState) => void;
     updateAnalysisTasks: (tasks: AnalysisTaskSnapshot[]) => void;
+    updateEditAvailability: (availability: EditAvailability) => void;
+}
+
+export interface EditAvailability {
+    canCopy: boolean;
+    canCut: boolean;
+    canPaste: boolean;
 }
 
 export default function App({
@@ -455,6 +493,9 @@ export default function App({
     onStop,
     onClear,
     onExport,
+    onCopySelection,
+    onCutSelection,
+    onPasteAtPlayhead,
     onModeChange,
     onSpectrogramAnalysisChange,
     onPitchAlgorithmChange,
@@ -686,6 +727,12 @@ export default function App({
         isPlaying: false,
     });
     const [selection, setSelection] = useState<SelectionSnapshot | null>(null);
+    const [editAvailability, setEditAvailability] = useState<EditAvailability>({
+        canCopy: false,
+        canCut: false,
+        canPaste: false,
+    });
+    const [editActionsOpen, setEditActionsOpen] = useState(false);
     const fileRef = useRef<HTMLInputElement | null>(null);
     const plotGestureRef = useRef<PlotGesture>({
         pointers: new Map(),
@@ -712,6 +759,7 @@ export default function App({
     const playlistRef = useRef<HTMLElement | null>(null);
     const metricsRef = useRef<HTMLElement | null>(null);
     const languageRef = useRef<HTMLDivElement | null>(null);
+    const editActionsRef = useRef<HTMLDivElement | null>(null);
     const draggedPanelRef = useRef<'playlist' | 'metrics' | null>(null);
     const zoomInitializedRef = useRef(false);
     const heldArrowKeysRef = useRef<Set<string>>(new Set());
@@ -1091,6 +1139,7 @@ export default function App({
             updateTransport: setTransport,
             updateSelection: setSelection,
             updateWaveformAxis: setWaveformAxisState,
+            updateEditAvailability: setEditAvailability,
             updateAnalysisTasks: (tasks) => {
                 if (analysisHideTimerRef.current !== null) {
                     window.clearTimeout(analysisHideTimerRef.current);
@@ -1168,6 +1217,29 @@ export default function App({
         return () => {
             document.removeEventListener('mousedown', closeLanguageMenu);
             document.removeEventListener('keydown', closeLanguageMenuWithEscape);
+        };
+    }, []);
+
+    useEffect(() => {
+        const closeEditActions = (event: MouseEvent) => {
+            if (
+                editActionsRef.current !== null &&
+                event.target instanceof Node &&
+                !editActionsRef.current.contains(event.target)
+            ) {
+                setEditActionsOpen(false);
+            }
+        };
+        const closeEditActionsWithEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                setEditActionsOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', closeEditActions);
+        document.addEventListener('keydown', closeEditActionsWithEscape);
+        return () => {
+            document.removeEventListener('mousedown', closeEditActions);
+            document.removeEventListener('keydown', closeEditActionsWithEscape);
         };
     }, []);
 
@@ -2693,10 +2765,13 @@ export default function App({
                                                     : `${formatTime(item.durationSeconds)} · ${tr(
                                                           '双击重命名'
                                                       )}`}
+                                                {item.edited && (
+                                                    <em className="media-edited-mark">{tr('已编辑')}</em>
+                                                )}
                                             </small>
                                         </span>
                                     </button>
-                                    {item.type === 'recording' && (
+                                    {(item.type === 'recording' || item.edited) && (
                                         <button
                                             className="media-save"
                                             onClick={() => onSaveMedia(item.id)}
@@ -2853,16 +2928,61 @@ export default function App({
                                     </button>
                                 </>
                             )}
-                            <button
-                                onClick={onExport}
-                                className="icon-action"
-                                aria-label={tr('导出图片')}
-                                title={tr('导出图片')}
+                            <div
+                                ref={editActionsRef}
+                                className={`edit-actions ${editActionsOpen ? 'open' : ''}`}
                             >
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 16v4h14v-4" />
-                                </svg>
-                            </button>
+                                <button
+                                    onClick={() => setEditActionsOpen(!editActionsOpen)}
+                                    className="icon-action edit-actions-toggle"
+                                    aria-label={tr('编辑')}
+                                    title={tr('编辑')}
+                                    aria-haspopup="menu"
+                                    aria-expanded={editActionsOpen}
+                                >
+                                    <EditOutlinedIcon aria-hidden="true" />
+                                </button>
+                                {editActionsOpen && (
+                                    <div className="edit-actions-menu" role="menu">
+                                        <button
+                                            onClick={() => {
+                                                onCopySelection();
+                                                setEditActionsOpen(false);
+                                            }}
+                                            disabled={!editAvailability.canCopy}
+                                            role="menuitem"
+                                            title={tr('复制选中的音频片段')}
+                                        >
+                                            <ClipboardActionIcon type="copy" />
+                                            <span>{tr('复制')}</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                onCutSelection();
+                                                setEditActionsOpen(false);
+                                            }}
+                                            disabled={!editAvailability.canCut}
+                                            role="menuitem"
+                                            title={tr('剪切选中的音频片段')}
+                                        >
+                                            <ClipboardActionIcon type="cut" />
+                                            <span>{tr('剪切')}</span>
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                onPasteAtPlayhead();
+                                                setEditActionsOpen(false);
+                                            }}
+                                            disabled={!editAvailability.canPaste}
+                                            role="menuitem"
+                                            title={tr('粘贴到播放头后')}
+                                        >
+                                            <ClipboardActionIcon type="paste" />
+                                            <span>{tr('粘贴')}</span>
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                             <button
                                 onClick={toggleFullscreen}
                                 className="icon-action"

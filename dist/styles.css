@@ -908,6 +908,27 @@ button.media-row {
     line-height: 1.4;
 }
 
+.media-copy small {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    gap: 5px;
+}
+
+.media-edited-mark {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding: 1px 5px;
+    border: 1px solid rgba(91, 173, 255, 0.28);
+    border-radius: 999px;
+    color: #86c4ff;
+    font-size: 9px;
+    font-style: normal;
+    line-height: 1.35;
+    background: rgba(53, 142, 243, 0.12);
+}
+
 .media-save,
 .media-remove {
     display: grid;
@@ -1216,6 +1237,109 @@ button.media-row {
 .view-actions button:disabled:hover {
     border-color: var(--line-strong);
     background: rgba(255, 255, 255, 0.025);
+}
+
+.edit-actions {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.edit-actions-toggle {
+    transition: color 160ms ease, border-color 160ms ease, background 160ms ease,
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.edit-actions.open .edit-actions-toggle {
+    color: #dbe9ff;
+    border-color: rgba(77, 157, 255, 0.62);
+    background: rgba(52, 137, 244, 0.16);
+    transform: translateY(-1px);
+}
+
+.edit-actions-menu {
+    position: absolute;
+    z-index: 8;
+    right: 0;
+    top: calc(100% + 9px);
+    display: grid;
+    width: 168px;
+    gap: 3px;
+    padding: 6px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: rgba(15, 22, 36, 0.97);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.025) inset;
+    animation: edit-menu-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.edit-actions-menu::after {
+    position: absolute;
+    right: 12px;
+    top: -5px;
+    width: 8px;
+    height: 8px;
+    border-right: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    background: #0f1624;
+    content: '';
+    transform: rotate(225deg);
+}
+
+.edit-actions-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    gap: 9px;
+    padding: 0 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: #cbd7e9;
+    font-size: 11px;
+    text-align: left;
+    background: transparent;
+}
+
+.edit-actions-menu button:hover {
+    border-color: rgba(89, 158, 255, 0.28);
+    color: #f1f6ff;
+    background: rgba(67, 143, 241, 0.14);
+}
+
+.edit-actions-menu button:disabled,
+.edit-actions-menu button:disabled:hover {
+    border-color: transparent;
+    color: #65738a;
+    background: transparent;
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+.edit-actions-menu button > svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+}
+
+@keyframes edit-menu-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px) scale(0.97);
+        transform-origin: bottom right;
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        transform-origin: bottom right;
+    }
 }
 
 .transport-control {
@@ -2846,6 +2970,19 @@ html.glass-effects .settings-panel {
         flex: 0 0 auto;
     }
 
+    .edit-actions-menu {
+        right: auto;
+        left: 0;
+        top: calc(100% + 8px);
+        width: 154px;
+    }
+
+    .edit-actions-menu::after {
+        right: auto;
+        left: 12px;
+        top: -5px;
+    }
+
     .praat-view {
         grid-template-columns: 50px minmax(0, 1fr) 74px;
         min-height: 0;
@@ -3159,6 +3296,36 @@ html.light-ui .media-row {
 html.light-ui .media-row:hover,
 html.light-ui .media-row.active {
     background: #eef5ff;
+}
+
+html.light-ui .edit-actions-menu,
+html.light-ui.glass-effects .edit-actions-menu {
+    border-color: rgba(54, 68, 91, 0.18);
+    color: #344054;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 16px 34px rgba(36, 50, 76, 0.16);
+}
+
+html.light-ui .edit-actions-menu::after,
+html.light-ui.glass-effects .edit-actions-menu::after {
+    border-color: rgba(54, 68, 91, 0.18);
+    background: #ffffff;
+}
+
+html.light-ui .edit-actions-menu button {
+    color: #475467;
+}
+
+html.light-ui .edit-actions-menu button:hover {
+    border-color: rgba(53, 105, 181, 0.22);
+    color: #172033;
+    background: rgba(53, 105, 181, 0.08);
+}
+
+html.light-ui .edit-actions-menu button:disabled,
+html.light-ui .edit-actions-menu button:disabled:hover {
+    color: #98a2b3;
+    background: transparent;
 }
 
 html.light-ui .media-drag-handle {
