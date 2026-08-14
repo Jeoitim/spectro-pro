@@ -196,6 +196,7 @@ const ENGLISH: { [key: string]: string } = {
     保存当前画面: 'Save current view',
     调整画面: 'Adjust display',
     关闭设置: 'Close settings',
+    关闭分析提示: 'Dismiss analysis status',
     语谱图: 'Spectrogram',
     恢复本页默认参数: 'Restore defaults for this tab',
     渲染帧率: 'Render frame rate',
@@ -218,6 +219,9 @@ const ENGLISH: { [key: string]: string } = {
         'Shortcuts: Space plays or pauses; Left/Right moves by 1% of the visible view, or 5% with Shift. Hold Right to play forward or Left to play in reverse; add Shift for 3× and release to pause.',
     显示增益: 'Display gain',
     语谱窗口长度: 'Spectrogram window length',
+    显示指针信息气泡: 'Show pointer info bubble',
+    '在语谱图上跟随指针显示时间、频率与声学读数':
+        'Show time, frequency, and acoustic readings beside the spectrogram pointer',
     选择自定义模式后可调节窗口长度: 'Select Custom mode to adjust the window length.',
     窗口形状: 'Window shape',
     层次对比: 'Layer contrast',

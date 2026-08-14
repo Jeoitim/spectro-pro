@@ -646,6 +646,31 @@ select:focus-visible {
     font-weight: 700;
 }
 
+.analysis-task-dismiss {
+    display: grid;
+    width: 25px;
+    height: 25px;
+    padding: 0;
+    place-items: center;
+    border: 1px solid rgba(143, 160, 186, 0.28);
+    border-radius: 7px;
+    color: #aebbd0;
+    background: rgba(255, 255, 255, 0.035);
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.analysis-task-dismiss:hover {
+    border-color: rgba(95, 173, 255, 0.5);
+    color: #edf4ff;
+    background: rgba(95, 173, 255, 0.12);
+}
+
+.analysis-task-dismiss svg {
+    width: 14px;
+    height: 14px;
+}
+
 .analysis-task-heading em {
     padding: 4px 8px;
     border-radius: 999px;
@@ -3406,6 +3431,10 @@ html.light-ui .intensity-color {
     color: #807000 !important;
 }
 
+html.light-ui .collapsed-reading.intensity {
+    --metric-color: #807000;
+}
+
 html.light-ui .overlay-toggles .on.intensity i {
     color: #8a7800;
     box-shadow: 0 0 6px rgba(138, 120, 0, 0.38);
@@ -3426,6 +3455,18 @@ html.light-ui .analysis-task-toast {
     border-color: rgba(53, 105, 181, 0.2);
     background: rgba(250, 252, 255, 0.96);
     box-shadow: 0 18px 42px rgba(36, 50, 76, 0.16), 0 0 0 1px rgba(255, 255, 255, 0.8) inset;
+}
+
+html.light-ui .analysis-task-dismiss {
+    border-color: rgba(54, 68, 91, 0.18);
+    color: #667085;
+    background: rgba(54, 68, 91, 0.035);
+}
+
+html.light-ui .analysis-task-dismiss:hover {
+    border-color: rgba(53, 105, 181, 0.34);
+    color: #344054;
+    background: rgba(53, 105, 181, 0.08);
 }
 
 html.light-ui .analysis-task-heading span,

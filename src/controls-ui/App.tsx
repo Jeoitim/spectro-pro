@@ -377,6 +377,7 @@ interface SavedSettings {
     intensityVisible: boolean;
     waveformVisible: boolean;
     spectrogramVisible: boolean;
+    cursorTooltipVisible: boolean;
     waveformShare: number;
     waveformThemeName: WaveformThemeName;
     darkWaveformThemeName: WaveformThemeName;
@@ -582,6 +583,9 @@ export default function App({
     const [intensityVisible, setIntensityVisible] = useState(saved.intensityVisible ?? true);
     const [waveformVisible, setWaveformVisible] = useState(saved.waveformVisible ?? true);
     const [spectrogramVisible, setSpectrogramVisible] = useState(saved.spectrogramVisible ?? true);
+    const [cursorTooltipVisible, setCursorTooltipVisible] = useState(
+        saved.cursorTooltipVisible ?? true
+    );
     const [waveformShare, setWaveformShare] = useState(saved.waveformShare ?? 0.32);
     const [uiTheme, setUiTheme] = useState<UiTheme>(saved.uiTheme || 'dark');
     const [darkWaveformThemeName, setDarkWaveformThemeName] = useState<WaveformThemeName>(
@@ -1221,7 +1225,7 @@ export default function App({
     }, []);
 
     useEffect(() => {
-        const closeEditActions = (event: MouseEvent) => {
+        const closeEditActions = (event: PointerEvent) => {
             if (
                 editActionsRef.current !== null &&
                 event.target instanceof Node &&
@@ -1235,10 +1239,10 @@ export default function App({
                 setEditActionsOpen(false);
             }
         };
-        document.addEventListener('mousedown', closeEditActions);
+        document.addEventListener('pointerdown', closeEditActions);
         document.addEventListener('keydown', closeEditActionsWithEscape);
         return () => {
-            document.removeEventListener('mousedown', closeEditActions);
+            document.removeEventListener('pointerdown', closeEditActions);
             document.removeEventListener('keydown', closeEditActionsWithEscape);
         };
     }, []);
@@ -1312,6 +1316,7 @@ export default function App({
             intensityVisible,
             waveformVisible,
             spectrogramVisible,
+            cursorTooltipVisible,
             waveformShare,
             waveformThemeName,
             darkWaveformThemeName,
@@ -1379,6 +1384,7 @@ export default function App({
         intensityVisible,
         waveformVisible,
         spectrogramVisible,
+        cursorTooltipVisible,
         waveformShare,
         waveformThemeName,
         darkWaveformThemeName,
@@ -2091,6 +2097,7 @@ export default function App({
             if (tab === 'spectrogram') {
                 setSensitivity(0.42);
                 setContrast(0.32);
+                setCursorTooltipVisible(true);
                 setMinFrequency(0);
                 setMaxFrequency(5500);
                 setCustomWindowLengthMs(15);
@@ -2320,7 +2327,7 @@ export default function App({
             : undefined;
     useLayoutEffect(() => {
         const tooltip = cursorTooltipRef.current;
-        if (cursor === null || tooltip === null) {
+        if (!cursorTooltipVisible || cursor === null || tooltip === null) {
             return undefined;
         }
         const stage = tooltip.parentElement;
@@ -2362,7 +2369,7 @@ export default function App({
         observer.observe(stage);
         observer.observe(tooltip);
         return () => observer.disconnect();
-    }, [cursor, locale, selection]);
+    }, [cursor, cursorTooltipVisible, locale, selection]);
     const navigateScrollbar = useCallback(
         (clientX: number, track: HTMLDivElement) => {
             if (zoom <= 1 || maximumTimeOffset <= 0) {
@@ -2463,6 +2470,25 @@ export default function App({
         waveformShare,
         waveformVisible,
     ]);
+
+    const analysisTasksComplete =
+        analysisTasks.length > 0 &&
+        analysisTasks.every((task) => task.status === 'complete' || task.status === 'error');
+    const dismissAnalysisTasks = useCallback(() => {
+        if (analysisHideTimerRef.current !== null) {
+            window.clearTimeout(analysisHideTimerRef.current);
+            analysisHideTimerRef.current = null;
+        }
+        if (analysisClearTimerRef.current !== null) {
+            window.clearTimeout(analysisClearTimerRef.current);
+            analysisClearTimerRef.current = null;
+        }
+        setAnalysisTasksVisible(false);
+        analysisClearTimerRef.current = window.setTimeout(() => {
+            analysisClearTimerRef.current = null;
+            setAnalysisTasks([]);
+        }, 260);
+    }, []);
 
     return (
         <div className="app-shell">
@@ -3189,7 +3215,7 @@ export default function App({
                                         <i />
                                         <i />
                                     </div>
-                                    {cursor && (
+                                    {cursor && cursorTooltipVisible && (
                                         <div
                                             ref={cursorTooltipRef}
                                             className="cursor-tooltip"
@@ -3666,6 +3692,21 @@ export default function App({
                                     </select>
                                 </label>
                             </div>
+                            <label className="effect-toggle">
+                                <span>
+                                    <strong>{tr('显示指针信息气泡')}</strong>
+                                    <small>
+                                        {tr('在语谱图上跟随指针显示时间、频率与声学读数')}
+                                    </small>
+                                </span>
+                                <input
+                                    type="checkbox"
+                                    checked={cursorTooltipVisible}
+                                    onChange={(event) =>
+                                        setCursorTooltipVisible(event.target.checked)
+                                    }
+                                />
+                            </label>
                             <label className="setting">
                                 <span>
                                     {tr('显示增益')} <em>{Math.round(sensitivity * 100)}%</em>
@@ -4504,6 +4545,16 @@ export default function App({
                             }
                             /{analysisTasks.length}
                         </em>
+                        {analysisTasksComplete && (
+                            <button
+                                className="analysis-task-dismiss"
+                                onClick={dismissAnalysisTasks}
+                                aria-label={tr('关闭分析提示')}
+                                title={tr('关闭分析提示')}
+                            >
+                                <CloseIcon aria-hidden="true" />
+                            </button>
+                        )}
                     </div>
                     <div className="analysis-total-progress" aria-hidden="true">
                         <i
