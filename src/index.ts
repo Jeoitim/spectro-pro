@@ -2407,6 +2407,7 @@ class SpectroEngine {
             });
             this.spectrogramBuffer.enqueue(result.spectrogram);
             this.renderer.updateSpectrogram(this.spectrogramBuffer);
+            this.updateLiveSpectrogramDataRange();
             const inputStartTimeSeconds =
                 request.endTimeSeconds - request.samples.length / request.sampleRate;
             this.waveformRenderer.appendLivePulseTimes(
@@ -2562,6 +2563,18 @@ class SpectroEngine {
         });
         this.ui.updateTimeOffset(0);
         this.overlayDirty = true;
+    }
+
+    private updateLiveSpectrogramDataRange() {
+        const width = Math.max(1, this.spectrogramBuffer.width);
+        const dataEnd =
+            this.spectrogramBuffer.length > 0
+                ? Math.max(0, (this.spectrogramBuffer.length - 0.5) / width)
+                : 1;
+        this.renderer.updateParameters({
+            spectrogramDataStart: 0,
+            spectrogramDataEnd: dataEnd,
+        });
     }
 
     private clearReturnView() {
