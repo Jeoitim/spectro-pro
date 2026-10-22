@@ -347,8 +347,20 @@ B_i <- B_(i+1) - k_m F_(i+1)
 
 ### 6.4 从 LPC 极点到 F1、F2……
 
-代码把 LPC 系数写成多项式，并用伴随矩阵的特征值求初始根，再对每个根执行最多 12
-轮复数 Newton 修正。只有相对残差不超过 `1e-8` 的根才会被保留。
+Burg LPC 系数由 TypeScript 的 [`praatBurgCoefficients`](../src/analysis.ts) 计算；
+Rust/Wasm 加速的是后续的**多项式求根**，而不是整条 LPC 链路。默认情况下，
+Worker 初始化加速后端，把每帧的多项式系数传入
+[`wasm-acoustic/src/lib.rs`](../wasm-acoustic/src/lib.rs) 中的
+`bounded_polynomial_roots`：它使用 **Aberth–Ehrlich 复数迭代**，仅接受 1–32 阶
+多项式（默认 10 阶），最多迭代 256 次，并检查有限值、根之间的距离、步长收敛与
+归一化多项式残差（不超过 `1e-7`）。若整组根无法可靠收敛，本帧直接返回无可靠根，
+不会无限阻塞 Worker。
+
+Wasm 模块整体不可用时，才使用 JavaScript 兼容求根：通过
+[`ml-matrix` 的 `EigenvalueDecomposition`](https://github.com/mljs/matrix/blob/v5.3.0/src/dc/evd.js)
+求 LPC 伴随矩阵的特征值；**Wasm 已就绪但某帧求根失败，并不会悄悄退回 JS 重算该帧**。
+两条路径获得的候选根都在 [`src/analysis.ts`](../src/analysis.ts) 中接受最多 12 轮
+复数 Newton 修正，最后只保留相对残差不超过 `1e-8` 的根。
 
 对根 `z=r e^{jθ}`，频率和带宽计算为：
 
@@ -369,6 +381,23 @@ Spectro Pro 的测试用官方 Praat 6.6.30 对确定性合成信号生成参考
 ![元音 i、u、ɑ 的语谱图与前两条共振峰](https://upload.wikimedia.org/wikipedia/commons/7/77/Spectrogram_-iua-.png)
 
 *三个元音的 F1、F2 位置明显不同，这正是共振峰能够帮助区分元音的原因。图：Ish ishwar，使用 Praat 生成，来源 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Spectrogram_-iua-.png)，[CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)。*
+
+### 6.5 病态多项式与求根器的执行边界
+
+历史上，Rust/Wasm 曾使用 `nalgebra 0.34` 的
+`Schur::new(companion).complex_eigenvalues()`。其中 `Schur::new()` 调用
+`try_new(..., max_niter=0)`；这里的 `0` 表示**迭代次数不设上限**，而非不迭代。
+某个真实粤语录音产生的病态十阶 LPC 多项式导致此同步调用长时间不能返回。
+JavaScript 的 `ml-matrix 5.3.0` 则采用独立的 `hqr2` 实现，并在迭代计数
+10、30 时采用特殊位移策略；但它**也没有严格的总迭代上限**。因此，当时 JS
+路径能够完成，而旧 Rust 路径卡住，不能归结为“JS 有超时保护”或“Wasm 浮点精度较差”；
+更可能与求解器的位移、数值缩放和收敛过程有关。没有保留并逐步重放那个故障帧的
+系数和迭代轨迹，就不能确定唯一的数值原因。
+
+目前的有界 Aberth–Ehrlich 求根器将无法收敛转换为单帧缺失结果。外部 JavaScript
+计时器**不能中断**正在执行的同步 Wasm 函数；必要时只能终止整个 Worker。
+参见[病态 LPC 多项式的排查开发手记](development-note-formant-wasm-pathological-polynomial.md)、
+[`nalgebra::Schur` API](https://docs.rs/nalgebra/latest/nalgebra/linalg/struct.Schur.html)。
 
 ## 7. 声门脉冲标记
 

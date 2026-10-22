@@ -297,7 +297,25 @@ The implementation is [`praatBurgCoefficients`](../src/analysis.ts). It checks e
 
 ### 6.4 From LPC poles to F1, F2, and beyond
 
-The LPC coefficients form a polynomial. Initial roots come from the eigenvalues of its companion matrix, after which each root receives up to 12 complex Newton-polishing iterations. Only roots with a relative residual no greater than `1e-8` survive.
+TypeScript computes the Burg LPC coefficients in
+[`praatBurgCoefficients`](../src/analysis.ts); Rust/Wasm accelerates the subsequent
+**polynomial root solving**, not the entire LPC pipeline. When the accelerated
+backend is available, the Worker passes the polynomial coefficients to
+`bounded_polynomial_roots` in
+[`wasm-acoustic/src/lib.rs`](../wasm-acoustic/src/lib.rs). This uses **bounded
+Aberth–Ehrlich complex iteration**, accepts degrees 1–32 (10 by default), and
+performs at most 256 iterations. It checks finite values, root separation, step
+convergence, and a normalized polynomial residual of at most `1e-7`. If a
+reliable complete root set cannot be found, that frame yields no reliable roots
+rather than blocking the Worker indefinitely.
+
+Only when the Wasm module itself is unavailable does the JavaScript
+compatibility path compute companion-matrix eigenvalues with
+[`ml-matrix`'s `EigenvalueDecomposition`](https://github.com/mljs/matrix/blob/v5.3.0/src/dc/evd.js).
+**Failure to solve one frame with an available Wasm backend does not silently
+retry that frame in JavaScript.** Both paths send their candidate roots through
+up to 12 complex Newton-polishing iterations in [`src/analysis.ts`](../src/analysis.ts);
+only roots with a final relative residual at most `1e-8` are retained.
 
 For root `z=r e^{jθ}`, frequency and bandwidth are:
 
@@ -313,6 +331,28 @@ The Praat manual describes the same major Burg-formant stages: resampling to twi
 ![Spectrogram of the vowels i, u, and ɑ with the first two formants](https://upload.wikimedia.org/wikipedia/commons/7/77/Spectrogram_-iua-.png)
 
 _The visibly different F1 and F2 locations are why formants help distinguish vowels. Image by Ish ishwar, generated with Praat, from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Spectrogram_-iua-.png), licensed under [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/).\_
+
+### 6.5 Ill-conditioned polynomials and termination guarantees
+
+An earlier Rust/Wasm implementation used `nalgebra 0.34` and
+`Schur::new(companion).complex_eigenvalues()`. Here `Schur::new()` delegates to
+`try_new(..., max_niter=0)`: **zero means unbounded iterations**, not zero
+iterations. An ill-conditioned degree-10 LPC polynomial from a real Cantonese
+recording made this synchronous call fail to return within a useful time.
+The JavaScript `ml-matrix 5.3.0` path uses a different `hqr2` eigensolver,
+with exceptional shift choices at iteration counts 10 and 30, but **it also has
+no strict overall iteration cap**. The differing outcomes therefore do not show
+that JavaScript inherently has a timeout or that Wasm has worse floating-point
+precision. Different shifts, numerical scaling, and convergence behavior are
+plausible contributors; identifying the exact mechanism would require replaying
+the failing frame's coefficients and tracing both iterations.
+
+The current bounded Aberth–Ehrlich solver turns non-convergence into a missing
+result for that frame. A JavaScript timer **cannot interrupt** an ongoing
+synchronous Wasm function; terminating the Worker is the outermost recovery
+option. See the
+[debugging note on pathological LPC polynomials](development-note-formant-wasm-pathological-polynomial.md)
+and the [`nalgebra::Schur` API](https://docs.rs/nalgebra/latest/nalgebra/linalg/struct.Schur.html).
 
 ## 7. Glottal pulse markers
 
