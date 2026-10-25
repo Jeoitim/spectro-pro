@@ -452,24 +452,18 @@ class SpectroEngine {
             return;
         }
         this.acousticWasmState = 'running';
-        this.updateAnalysisTask({
-            id: 'system:wasm',
-            label: '加速引擎',
-            sourceName: 'WebAssembly SIMD',
-            status: 'running',
-            progress: null,
-            detail: '正在准备',
-        });
-        const ready = await prepareAcousticWorkers();
+        const ready = await prepareAcousticWorkers().catch(() => false);
         this.acousticWasmState = 'complete';
-        this.updateAnalysisTask({
-            id: 'system:wasm',
-            label: '加速引擎',
-            sourceName: 'WebAssembly SIMD',
-            status: 'complete',
-            progress: 1,
-            detail: ready ? '已就绪' : '已切换兼容模式',
-        });
+        if (!ready) {
+            this.updateAnalysisTask({
+                id: 'system:wasm',
+                label: '加速引擎',
+                sourceName: 'WebAssembly SIMD',
+                status: 'error',
+                progress: 1,
+                detail: '加速引擎加载失败，已切换兼容模式',
+            });
+        }
     }
 
     updateDisplay(parameters: Partial<RenderParameters>) {

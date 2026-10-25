@@ -3237,12 +3237,12 @@ export default function App({
                                             {selection && (
                                                 <span className="tooltip-selection">
                                                     <span className="selection-duration">
-                                                        {selection.durationSeconds.toFixed(1)} s
+                                                        {selection.durationSeconds.toFixed(3)} s
                                                     </span>
                                                     <span className="selection-range">
                                                         {' '}
-                                                        ({selection.startSeconds.toFixed(1)}–
-                                                        {selection.endSeconds.toFixed(1)} s)
+                                                        ({selection.startSeconds.toFixed(3)}–
+                                                        {selection.endSeconds.toFixed(3)} s)
                                                     </span>
                                                 </span>
                                             )}

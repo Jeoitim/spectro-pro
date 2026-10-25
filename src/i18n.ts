@@ -40,6 +40,8 @@ const ENGLISH: { [key: string]: string } = {
     正在准备: 'Preparing',
     已就绪: 'Ready',
     已切换兼容模式: 'Compatibility mode enabled',
+    '加速引擎加载失败，已切换兼容模式':
+        'Acceleration engine failed to load · Compatibility mode enabled',
     语谱渲染: 'Spectrogram rendering',
     等待语谱: 'Waiting for spectrogram',
     正在渲染: 'Rendering',
